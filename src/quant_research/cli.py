@@ -79,6 +79,12 @@ def main(argv=None):
     universe_resolve=commands.add_parser('universe-resolve',help='Resolve symbol to source-observed Alpaca asset UUID; never historical PIT')
     universe_resolve.add_argument('--symbols',required=True,help='Explicit comma-separated uppercase symbols')
     universe_resolve.add_argument('--asof',help='ISO as-of timestamp with offset')
+    event_audit=commands.add_parser('action-evidence',help='Read-only historical event vintage/receipt/identity audit; never PIT approval')
+    event_audit.add_argument('--asof',help='UTC timestamp with offset; omitted means now')
+    event_audit.add_argument('--symbol',default='',help='Exact uppercase ticker from source event')
+    event_audit.add_argument('--database',choices=['all','g2','maintenance','research'],default='all')
+    event_audit.add_argument('--limit',type=int,default=30)
+    event_audit.add_argument('--offset',type=int,default=0)
     strategy_preflight=commands.add_parser('strategy-preflight',help='Check strict backtest evidence for a frozen version')
     strategy_preflight.add_argument('--strategy-version',required=True)
     maintain=commands.add_parser('maintain-data',help='Maintain classified free real datasets; never trains or trades')
@@ -231,6 +237,12 @@ def main(argv=None):
                 result=observation_changes(Path.cwd(),limit=args.limit)
             else:
                 result=resolve_symbols(Path.cwd(),args.symbols.split(','),asof_utc=args.asof)
+            print(json.dumps(result,ensure_ascii=False))
+            return 0
+        if args.command == 'action-evidence':
+            from .data.action_audit import audit_events
+            result=audit_events(Path.cwd(),asof_utc=args.asof,symbol=args.symbol,
+                                database=args.database,limit=args.limit,offset=args.offset)
             print(json.dumps(result,ensure_ascii=False))
             return 0
         if args.command=='strategy-preflight':
