@@ -325,6 +325,21 @@ def handler(console):
                     return self.send(409,exc.payload())
                 except (ValueError,TypeError):
                     return self.send(400,{'status':'BLOCKED','code':'UNIVERSE_QUERY_INVALID'})
+            if path == '/api/v1/data/actions/audit':
+                from .data.action_audit import audit_events
+                query=parse_qs(urlsplit(self.path).query,keep_blank_values=True)
+                try:
+                    if set(query)-{'asof','symbol','database','limit','offset'} or any(len(v)!=1 for v in query.values()):
+                        raise ValueError('Unapproved event audit parameters')
+                    p={k:v[0] for k,v in query.items()}
+                    result=audit_events(console.root,asof_utc=p.get('asof') or None,
+                         symbol=p.get('symbol',''),database=p.get('database','all'),
+                         limit=int(p.get('limit','30')),offset=int(p.get('offset','0')))
+                    return self.send(200,result)
+                except PolicyError as exc:
+                    return self.send(409,exc.payload())
+                except (ValueError,TypeError):
+                    return self.send(400,{'status':'BLOCKED','code':'ACTION_AUDIT_QUERY_INVALID'})
             if path == '/api/v1/data/assets':
                 from .data.assets import inventory
                 try:
