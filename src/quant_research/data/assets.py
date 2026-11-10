@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import hashlib
+from collections import Counter
 import json
 import os
 from pathlib import Path
@@ -56,7 +57,7 @@ def _validate_payload(raw: bytes):
         raise PolicyError("ASSET_RESPONSE_INVALID", "Alpaca did not return a nonempty asset list")
     if len(payload) > 200000:
         raise PolicyError("ASSET_RESPONSE_INVALID", "Asset count exceeds the safety limit")
-    by_id, by_symbol = {}, {}
+    by_id = {}
     for record in payload:
         if not isinstance(record, dict):
             raise PolicyError("ASSET_SCHEMA_INVALID", "Each asset must be a JSON object")
@@ -73,9 +74,11 @@ def _validate_payload(raw: bytes):
             raise PolicyError("ASSET_STATUS_INVALID", "An asset has an unknown activation status")
         if type(record.get("tradable")) is not bool or not isinstance(record.get("exchange"), str):
             raise PolicyError("ASSET_SCHEMA_INVALID", "Missing tradability or exchange metadata")
-        if asset_id in by_id or sym in by_symbol:
-            raise PolicyError("ASSET_IDENTITY_AMBIGUOUS", "Duplicate asset UUID or ticker in one observed response")
-        by_id[asset_id], by_symbol[sym] = record, asset_id
+        # Tickers can be reused. Preserve separate vendor asset IDs and
+        # expose collisions instead of silently merging different identities.
+        if asset_id in by_id:
+            raise PolicyError("ASSET_IDENTITY_AMBIGUOUS", "Duplicate Alpaca asset UUID in one observed response")
+        by_id[asset_id] = record
     return payload
 
 
@@ -228,6 +231,8 @@ def fetch_assets(*, endpoint="paper", timeout=25):
                                "Accept": "application/json"}, method="GET")
     try:
         with urlopen(request, timeout=timeout) as response:
+            if response.status != 200:
+                raise PolicyError("ASSET_PROVIDER_HTTP_ERROR", "Alpaca asset endpoint returned a non-200 response")
             # Read a bounded response; do not persist credentials, headers, or auth URLs.
             raw = response.read(MAX_BYTES + 1)
             received = datetime.now(timezone.utc).isoformat()
@@ -260,6 +265,7 @@ def inventory(project_root, *, q="", status="all", tradable="all", limit=30, off
                 (tradable == "all" or asset["tradable"] is (tradable == "true")) and
                 (not q or q.casefold() in asset["symbol"].casefold() or q.casefold() in str(asset.get("name") or "").casefold())]
     filtered.sort(key=lambda row: (row["symbol"], row["id"]))
+    symbol_counts = Counter(row["symbol"] for row in data)
     prev = None
     if manifest.get("previous_snapshot_id"):
         _, prev = _read_manifest(folder, manifest["previous_snapshot_id"])
@@ -272,6 +278,7 @@ def inventory(project_root, *, q="", status="all", tradable="all", limit=30, off
         "returned_records": len(data),
         "active": sum(x["status"] == "active" for x in data),
         "active_tradable": sum(x["status"] == "active" and x["tradable"] for x in data),
+        "symbol_collision_count": sum(count > 1 for count in symbol_counts.values()),
         "filtered_count": len(filtered), "offset": offset, "limit": limit,
         "assets": [{"asset_id": a["id"], "symbol": a["symbol"], "name": a.get("name") or "",
                     "exchange": a["exchange"], "status": a["status"], "tradable": a["tradable"]}

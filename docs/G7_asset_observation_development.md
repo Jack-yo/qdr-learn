@@ -4,7 +4,7 @@
 
 - 使用官方 Alpaca **交易资产目录** `GET /v2/assets?asset_class=us_equity`（默认 paper API；live 可明确选择），只发送 GET，绝不下单或创建账户。只从用户本机环境或可选本地 `.env` 读取凭证，不向页面、日志、Git 提交明文密钥。
 - `assets-sync` 将真实 HTTP 响应原文按 SHA256 不可变存入 `data/managed/asset_observations/objects`，将查询参数、API 域名、实际接收时刻、来源哈希、上版 ID 存入不可变 manifest。只有原文和 manifest 都持久化完成才更新 `latest.json`。
-- `assets-status` 与 `/api/v1/data/assets` 会再次校验原文、manifest、UUID、唯一代码和原始字节哈希。支持证券代码/名称检索、活跃/非活跃、可交易过滤、分页；前后两次快照差异只标为「观察到变化」，绝不直接推断已退市、已改名。
+- `assets-status` 与 `/api/v1/data/assets` 会再次校验原文、manifest、UUID、唯一代码和原始字节哈希。支持证券代码/名称检索、活跃/非活跃、可交易过滤、分页；同一代码不同资产 ID 保留各自记录并告警，前后两次快照差异只标为「观察到变化」，绝不直接推断已退市、已改名。
 - v4 `/data` 交互增加真实目录查询、源状态、检索表格与只读同步入口。同步经本地后端任务锁、Web 同源令牌与命令白名单。无数据时显示明确阻断，不补演示证券。
 - 本地灾备允许备份新的资产目录原文与 manifest，并包含 CSS/JS 页面资源，减少恢复时 UI 缺失风险。
 
