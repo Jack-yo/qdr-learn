@@ -58,6 +58,16 @@ def main(argv=None):
     commands.add_parser('ops-backup', help='Copy reviewed operational inputs into a verified local backup')
     ops_restore = commands.add_parser('ops-restore', help='Recover a backup into a new isolated directory')
     ops_restore.add_argument('--backup-id', required=True)
+    assets_sync=commands.add_parser('assets-sync',help='Archive actual read-only Alpaca current US equity/ETF asset metadata, not historical PIT')
+    assets_sync.add_argument('--endpoint',choices=['paper','live'],default='paper')
+    assets_sync.add_argument('--offline',action='store_true',help='Verify existing real snapshot only; never create a new observation')
+    assets_sync.add_argument('--env-file',type=Path,help='Optional local credentials file; do not commit')
+    assets_status=commands.add_parser('assets-status',help='Verify and inspect latest source-hashed current asset directory')
+    assets_status.add_argument('--q',default='')
+    assets_status.add_argument('--status',choices=['all','active','inactive'],default='all')
+    assets_status.add_argument('--tradable',choices=['all','true','false'],default='all')
+    assets_status.add_argument('--limit',type=int,default=30)
+    assets_status.add_argument('--offset',type=int,default=0)
     strategy_preflight=commands.add_parser('strategy-preflight',help='Check strict backtest evidence for a frozen version')
     strategy_preflight.add_argument('--strategy-version',required=True)
     maintain=commands.add_parser('maintain-data',help='Maintain classified free real datasets; never trains or trades')
@@ -154,7 +164,9 @@ def main(argv=None):
         item.add_argument("--symbols",help="Comma-separated explicit real research symbols, including SPY; does not imply a PIT historical universe")
     args = parser.parse_args(argv)
     try:
-        if getattr(args,'env_file',None) and not getattr(args,'offline',False):load_local_credentials(args.env_file)
+        if getattr(args,'env_file',None) and not getattr(args,'offline',False):
+            if args.command != 'assets-sync' or args.env_file.is_file():
+                load_local_credentials(args.env_file)
         if args.command=='factor-lab-create':
             from .research.factor_lab import Registry
             registry=Registry(Path.cwd());version=registry.create_factor(json.loads(args.definition.read_text(encoding='utf-8')))
@@ -190,6 +202,15 @@ def main(argv=None):
         if args.command in ('ops-backup', 'ops-restore'):
             from .workflow.ops_backup import execute
             return execute(args)
+        if args.command in ('assets-sync','assets-status'):
+            from .data.assets import inventory, sync
+            if args.command=='assets-sync':
+                result=sync(Path.cwd(),endpoint=args.endpoint,offline=args.offline)
+            else:
+                result=inventory(Path.cwd(),q=args.q,status=args.status,tradable=args.tradable,
+                                 limit=args.limit,offset=args.offset)
+            print(json.dumps(result,ensure_ascii=False))
+            return 0
         if args.command=='strategy-preflight':
             from .workflow.strategy_preflight import execute
             return execute(args)

@@ -166,6 +166,8 @@ def snapshot(root,source='alpaca',database=None,asof=None,cutoff=None):
 
 
 def action_commands(action,source='yahoo',database=None):
+    if action=='asset-universe':
+        return [['assets-sync','--endpoint','paper','--env-file','.env']]
     if action=='style-report':return [['style-report']]
     if action=='close-snapshot':return [['close-snapshot']]
     if action == 'daily-observation' or (action == 'daily' and source == 'alpaca'):
@@ -237,7 +239,7 @@ class Console:
     def start(self, action):
         if (self.root/'data/catalog/.maintenance.lock').is_file():
             raise PolicyError('DATA_MAINTENANCE_RUNNING','Data maintenance is running; no concurrent workflow allowed')
-        if action not in {"refresh", "market", "factors", "daily", "daily-observation", "acceptance", "market-model", "alpha-model", "maintain-daily", "style-report", "market-research-yahoo", "alpha-research-yahoo", "close-snapshot"}:
+        if action not in {"refresh", "market", "factors", "daily", "daily-observation", "acceptance", "market-model", "alpha-model", "maintain-daily", "style-report", "market-research-yahoo", "alpha-research-yahoo", "close-snapshot", "asset-universe"}:
             raise ValueError("Unknown action")
         if self.lock.locked():return False
         if action in {'market','factors','market-model','alpha-model'}:
@@ -295,6 +297,18 @@ def handler(console):
                 asset = Path(__file__).with_name('assets') / path.rsplit('/',1)[1]
                 content_type = 'text/css; charset=utf-8' if path.endswith('.css') else 'text/javascript; charset=utf-8'
                 return self.send(200, asset.read_bytes(), content_type)
+            if path == '/api/v1/data/assets':
+                from .data.assets import inventory
+                try:
+                    query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+                    if set(query) - {'q','status','tradable','limit','offset'} or any(len(v)!=1 for v in query.values()):
+                        raise ValueError('Unexpected asset query parameter')
+                    values={k:v[0] for k,v in query.items()}
+                    return self.send(200, inventory(console.root, q=values.get('q',''),
+                        status=values.get('status','all'), tradable=values.get('tradable','all'),
+                        limit=int(values.get('limit','30')),offset=int(values.get('offset','0'))))
+                except PolicyError as exc:return self.send(409,exc.payload())
+                except (ValueError,TypeError):return self.send(400,{'status':'BLOCKED','code':'ASSET_QUERY_INVALID'})
             if path == '/api/v1/signals':
                 from .workflow.daily_observation import latest_report
                 query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)

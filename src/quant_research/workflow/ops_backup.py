@@ -30,7 +30,7 @@ REQUIRED = {"pyproject.toml", "uv.lock", "configs/data_maintenance.yaml",
             "data/real_v21.duckdb", "data/catalog/latest.json"}
 TREES = {
     "configs": {".yaml", ".yml", ".json"},
-    "src/quant_research": {".py", ".html"},
+    "src/quant_research": {".py", ".html", ".css", ".js"},
     "scripts": {".ps1", ".sh", ".cmd", ".py"},
     "data/raw/objects": {""},
     "data/raw/receipts": {".json"},
@@ -39,6 +39,7 @@ TREES = {
     "data/raw/yahoo/requests": {".json"},
     "data/catalog/snapshots": {".json", ".csv"},
     "data/managed": {".json"},
+    "data/managed/asset_observations/objects": {""},
 }
 REPORT_ROOTS = (
     "factor_lab", "market_research", "alpha_research", "styles",
@@ -59,6 +60,12 @@ def _allowed(name):
         return False
     if relative.is_relative_to("data/raw/objects"):
         return relative.parent.as_posix() == "data/raw/objects" and bool(re.fullmatch(r"[a-f0-9]{64}", relative.name))
+    if relative.is_relative_to("data/managed/asset_observations"):
+        return (relative.as_posix() == "data/managed/asset_observations/latest.json"
+                or relative.parent.as_posix() == "data/managed/asset_observations/snapshots"
+                and bool(re.fullmatch(r"[a-f0-9]{64}\.json", relative.name))
+                or relative.parent.as_posix() == "data/managed/asset_observations/objects"
+                and bool(re.fullmatch(r"[a-f0-9]{64}", relative.name)))
     if relative.is_relative_to("data/managed"):
         return (len(relative.parts) == 4 and relative.name == "dataset.json"
                 or relative.parent.as_posix() == "data/managed/corporate_actions/snapshots"
