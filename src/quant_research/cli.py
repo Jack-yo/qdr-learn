@@ -68,6 +68,17 @@ def main(argv=None):
     assets_status.add_argument('--tradable',choices=['all','true','false'],default='all')
     assets_status.add_argument('--limit',type=int,default=30)
     assets_status.add_argument('--offset',type=int,default=0)
+    universe_asof=commands.add_parser('universe-asof',help='Inspect actual forward-only asset snapshots as observed by a UTC cutoff')
+    universe_asof.add_argument('--asof',help='ISO timestamp with UTC offset; omitted means now')
+    universe_asof.add_argument('--q',default='',help='Search symbol or issuer label from observed response')
+    universe_asof.add_argument('--state',choices=['all','active','inactive','candidate','ambiguous'],default='candidate')
+    universe_asof.add_argument('--limit',type=int,default=30)
+    universe_asof.add_argument('--offset',type=int,default=0)
+    universe_history=commands.add_parser('universe-history',help='Source-observed asset ID/symbol/status changes, not legal delistings')
+    universe_history.add_argument('--limit',type=int,default=30)
+    universe_resolve=commands.add_parser('universe-resolve',help='Resolve symbol to source-observed Alpaca asset UUID; never historical PIT')
+    universe_resolve.add_argument('--symbols',required=True,help='Explicit comma-separated uppercase symbols')
+    universe_resolve.add_argument('--asof',help='ISO as-of timestamp with offset')
     strategy_preflight=commands.add_parser('strategy-preflight',help='Check strict backtest evidence for a frozen version')
     strategy_preflight.add_argument('--strategy-version',required=True)
     maintain=commands.add_parser('maintain-data',help='Maintain classified free real datasets; never trains or trades')
@@ -209,6 +220,17 @@ def main(argv=None):
             else:
                 result=inventory(Path.cwd(),q=args.q,status=args.status,tradable=args.tradable,
                                  limit=args.limit,offset=args.offset)
+            print(json.dumps(result,ensure_ascii=False))
+            return 0
+        if args.command in ('universe-asof','universe-history','universe-resolve'):
+            from .data.forward_universe import asof_directory, observation_changes, resolve_symbols
+            if args.command == 'universe-asof':
+                result=asof_directory(Path.cwd(),asof_utc=args.asof,q=args.q,state=args.state,
+                                      limit=args.limit,offset=args.offset)
+            elif args.command == 'universe-history':
+                result=observation_changes(Path.cwd(),limit=args.limit)
+            else:
+                result=resolve_symbols(Path.cwd(),args.symbols.split(','),asof_utc=args.asof)
             print(json.dumps(result,ensure_ascii=False))
             return 0
         if args.command=='strategy-preflight':
