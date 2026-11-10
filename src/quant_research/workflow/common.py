@@ -71,7 +71,12 @@ def line_svg(series,title):
 
 
 def report(output,title,manifest,tables,charts=(),note=""):
-    body = '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>'+html.escape(title)+'</title><style>body{font:15px system-ui;margin:32px;max-width:1300px;color:#172033}.notice{padding:18px;background:#fff3dc;border-left:5px solid #d97706}table{display:block;overflow:auto;border-collapse:collapse;font-size:12px}td,th{padding:7px;border:1px solid #ddd}svg{max-width:100%}pre{white-space:pre-wrap}</style><h1>'+html.escape(title)+'</h1><div class="notice"><strong>NOT_READY / '+html.escape(manifest["source"].upper())+'</strong><p>'+html.escape(note or '仅工程或探索性研究；不是已验证盈利或实盘可交易信号。')+'</p></div>'
+    header = ('VERIFIED HISTORICAL RESEARCH · MODELED FILLS'
+              if manifest.get('status')=='MODELED_HISTORICAL_FILLS_NOT_BROKER_ORDERS'
+              and manifest.get('research_grade') is True
+              and manifest.get('historical_decision_eligible') is True
+              else 'NOT_READY')
+    body = '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>'+html.escape(title)+'</title><style>body{font:15px system-ui;margin:32px;max-width:1300px;color:#172033}.notice{padding:18px;background:#fff3dc;border-left:5px solid #d97706}table{display:block;overflow:auto;border-collapse:collapse;font-size:12px}td,th{padding:7px;border:1px solid #ddd}svg{max-width:100%}pre{white-space:pre-wrap}</style><h1>'+html.escape(title)+'</h1><div class="notice"><strong>'+html.escape(header)+' / '+html.escape(manifest["source"].upper())+'</strong><p>'+html.escape(note or '仅工程或探索性研究；不是已验证盈利或实盘可交易信号。')+'</p></div>'
     body += "".join(charts)
     for name,table in tables.items():
         body += '<h2>'+html.escape(name)+'</h2>'+table.to_html(index=False,na_rep="缺失",escape=True)

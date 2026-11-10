@@ -30,4 +30,4 @@ def summarize(curve,trades,initial_cash):
         "gross_profit_nonpositive":gross_profit<=0,"average_capital_utilization":finite(curve.observed_gross_exposure.mean()),
         "average_close_exposure":finite(curve.gross_exposure.mean()),"average_open_exposure":finite(curve.opening_gross_exposure.mean()),
         "capital_utilization_definition":"mean(max(observed_open_exposure,close_exposure)); not exact intraday time-weighted",
-        "final_equity":float(equity.iloc[-1]),"status":"SYNTHETIC_NOT_READY"}
+        "final_equity":float(equity.iloc[-1]),"status":"MODELED_HISTORICAL_FILLS_NOT_BROKER_ORDERS"}

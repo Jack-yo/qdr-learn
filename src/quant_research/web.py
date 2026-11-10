@@ -325,6 +325,44 @@ def handler(console):
                     return self.send(409,exc.payload())
                 except (ValueError,TypeError):
                     return self.send(400,{'status':'BLOCKED','code':'UNIVERSE_QUERY_INVALID'})
+            if path == '/api/v1/data/actions/pages':
+                from .data.action_pages import audit_action_pages
+                q=parse_qs(urlsplit(self.path).query,keep_blank_values=True)
+                try:
+                    if (set(q)-{'symbols','start','end','page_size','max_pages','asof'}
+                            or any(len(v)!=1 for v in q.values())
+                            or not {'symbols','start','end'} <= set(q)):
+                        raise ValueError('Explicit exact archived source query required')
+                    p={k:v[0] for k,v in q.items()}
+                    return self.send(200,audit_action_pages(console.root,
+                        symbols=p['symbols'].split(','),start=p['start'],end=p['end'],
+                        page_size=int(p.get('page_size','1000')),
+                        max_pages=int(p.get('max_pages','100')),asof_utc=p.get('asof') or None))
+                except PolicyError as exc:return self.send(409,exc.payload())
+                except (ValueError,TypeError):return self.send(400,{'status':'BLOCKED','code':'ACTION_PAGE_QUERY_INVALID'})
+            if path == '/api/v1/backtests/verified':
+                from .backtest.verified_results import list_verified_backtests,verified_backtest
+                q=parse_qs(urlsplit(self.path).query,keep_blank_values=True)
+                try:
+                    if set(q)-{'run_id','scenario','limit'} or any(len(v)!=1 for v in q.values()):
+                        raise ValueError('Invalid result filters')
+                    p={k:v[0] for k,v in q.items()}
+                    if p.get('run_id'):
+                        if 'limit' in p:raise ValueError('Only run/scenario on detail')
+                        return self.send(200,verified_backtest(console.root,p['run_id'],p.get('scenario')))
+                    if p.get('scenario'):raise ValueError('Scenario requires run id')
+                    return self.send(200,list_verified_backtests(console.root,limit=int(p.get('limit','15'))))
+                except PolicyError as exc:return self.send(409,exc.payload())
+                except (TypeError,ValueError):return self.send(400,{'status':'BLOCKED','code':'BACKTEST_QUERY_INVALID'})
+            if path.startswith('/api/v1/strategies/') and path.endswith('/four-layers'):
+                from .research.four_layers import evaluate_four_layers
+                try:
+                    if urlsplit(self.path).query:raise ValueError('Unexpected four-layer query')
+                    identifier=path.removeprefix('/api/v1/strategies/').removesuffix('/four-layers')
+                    return self.send(200,evaluate_four_layers(console.root,identifier))
+                except PolicyError as exc:return self.send(409,exc.payload())
+                except (ValueError,KeyError,OSError,sqlite3.Error):
+                    return self.send(409,{'status':'BLOCKED','code':'G9_REAL_RESEARCH_EVIDENCE_INVALID'})
             if path == '/api/v1/data/actions/audit':
                 from .data.action_audit import audit_events
                 query=parse_qs(urlsplit(self.path).query,keep_blank_values=True)

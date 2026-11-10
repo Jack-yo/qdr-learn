@@ -85,6 +85,18 @@ def main(argv=None):
     event_audit.add_argument('--database',choices=['all','g2','maintenance','research'],default='all')
     event_audit.add_argument('--limit',type=int,default=30)
     event_audit.add_argument('--offset',type=int,default=0)
+    page_chain=commands.add_parser('action-pages',help='Verify one complete archived Alpaca corporate-action pagination chain; never PIT approval')
+    page_chain.add_argument('--symbols',required=True,help='Comma-separated explicit uppercase symbols')
+    page_chain.add_argument('--start',required=True,help='Source query start YYYY-MM-DD')
+    page_chain.add_argument('--end',required=True,help='Source query end YYYY-MM-DD')
+    page_chain.add_argument('--page-size',type=int,default=1000)
+    page_chain.add_argument('--max-pages',type=int,default=100)
+    page_chain.add_argument('--asof',help='Source availability cutoff with timezone')
+    layers=commands.add_parser('four-layer-research',help='Real-data retrospective 4-layer research only; never trading advice')
+    layers.add_argument('--strategy-version',required=True)
+    results=commands.add_parser('backtest-results',help='Read only cryptographically verified real backtest archives')
+    results.add_argument('--run-id',help='Existing canonical historical run UUID')
+    results.add_argument('--scenario',help='Optional h1/h3/h5 and 5/10/20/50bps scenario, requires run ID')
     strategy_preflight=commands.add_parser('strategy-preflight',help='Check strict backtest evidence for a frozen version')
     strategy_preflight.add_argument('--strategy-version',required=True)
     maintain=commands.add_parser('maintain-data',help='Maintain classified free real datasets; never trains or trades')
@@ -239,6 +251,25 @@ def main(argv=None):
                 result=resolve_symbols(Path.cwd(),args.symbols.split(','),asof_utc=args.asof)
             print(json.dumps(result,ensure_ascii=False))
             return 0
+        if args.command == 'action-pages':
+            from .data.action_pages import audit_action_pages
+            data=audit_action_pages(Path.cwd(),symbols=args.symbols.split(','),start=args.start,end=args.end,
+                                   page_size=args.page_size,max_pages=args.max_pages,asof_utc=args.asof)
+            print(json.dumps(data,ensure_ascii=False))
+            return 0
+        if args.command == 'four-layer-research':
+            from .research.four_layers import evaluate_four_layers
+            data=evaluate_four_layers(Path.cwd(),args.strategy_version)
+            print(json.dumps(data,ensure_ascii=False,allow_nan=False))
+            return 0
+        if args.command == 'backtest-results':
+            from .backtest.verified_results import list_verified_backtests,verified_backtest
+            if args.scenario and not args.run_id:
+                raise PolicyError('BACKTEST_QUERY_INVALID','Select a run ID before a scenario')
+            data=(verified_backtest(Path.cwd(),args.run_id,args.scenario) if args.run_id
+                  else list_verified_backtests(Path.cwd()))
+            print(json.dumps(data,ensure_ascii=False,allow_nan=False))
+            return 0 if data.get('status')!='BLOCKED' else 4
         if args.command == 'action-evidence':
             from .data.action_audit import audit_events
             result=audit_events(Path.cwd(),asof_utc=args.asof,symbol=args.symbol,

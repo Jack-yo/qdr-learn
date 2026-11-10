@@ -89,6 +89,8 @@ def execute(args):
     metrics = pd.DataFrame([{'scenario':k, **v} for k,v in costs.items()])
     save_frame(metrics, output, 'backtest_metrics')
     manifest.update(status='MODELED_HISTORICAL_FILLS_NOT_BROKER_ORDERS',
+        flags=['SOURCE_VERIFIED_RAW_OHLCV','HISTORICAL_PIT_ADMISSION_PASSED','MODELED_FILLS_NOT_BROKER_ORDERS'],
+        universe_version='VERIFIED_EFFECTIVE_DATED_SOURCE_UNIVERSE',
         historical_decision_eligible=True, model_archive_sha256=hashlib.sha256(
             (Path(args.training_run)/'manifest.json').read_bytes()).hexdigest(),
         model_archive_status=archive['status'], costs_by_scenario=costs,
