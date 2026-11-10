@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>市场分析 · REAL_ONLY</title>
+<style>
+  body { margin: 0; background: #f3f6fa; color: #172439; font: 15px system-ui, sans-serif; }
+  main { max-width: 1140px; margin: auto; padding: 24px; }
+  nav, .controls { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+  a { color: #195795; }
+  h1 { margin-bottom: 6px; }
+  h2 { font-size: 19px; }
+  .card { background: white; border: 1px solid #dbe3ee; border-radius: 8px; padding: 18px; margin: 16px 0; }
+  .note { color: #465875; }
+  .warning { background: #fff4d9; padding: 12px; border-left: 4px solid #bf7b0e; }
+  button, select, input { font: inherit; padding: 7px 10px; }
+  button { cursor: pointer; }
+  button:disabled { cursor: default; }
+  .scroll { overflow: auto; }
+  table { border-collapse: collapse; width: 100%; text-align: left; }
+  td, th { border-bottom: 1px solid #e1e7ef; padding: 8px; white-space: nowrap; }
+  #source, #job { overflow-wrap: anywhere; }
+</style>
+<main>
+  <nav aria-label="研究导航">
+    <a href="/overview">研究总览</a><a href="/market" aria-current="page">市场分析</a>
+    <a href="/styles">风格监控</a><a href="/factors">因子实验室</a>
+    <a href="/strategies">策略工作台</a><a href="/backtests">回测中心</a>
+    <a href="/signals">每日信号</a><a href="/paper">模拟组合</a><a href="/data">数据与设置</a>
+  </nav>
+  <h1>市场分析</h1>
+  <p class="note">REAL_ONLY · SPY 方向与下行风险的季度滚动研究</p>
+  <p class="warning">当前研究采用 Yahoo 拆股调整价格和 ETF 广度代理，结果限于当前数据版本的回溯分析。历史决策准入仍缺发布时间与证券身份证据。</p>
+  <section class="card">
+    <div class="controls">
+      <button id="run">运行 Yahoo 历史验证</button>
+      <label>期限 <select id="horizon"><option>1</option><option>3</option><option>5</option></select> 日</label>
+      <label>历史信号日期 <input id="asof" type="date" max="2024-12-31"></label>
+      <button id="query">查看结果</button>
+    </div>
+    <p class="note">日期留空时显示所选期限最近有完整标签的历史预测。市场状态按行情日期单独显示。</p>
+    <p id="job" role="status"></p>
+    <a href="/api/v1/jobs/current/log" target="_blank" rel="noopener">当前任务日志</a>
+  </section>
+  <p id="blocked-view" class="warning" role="status">读取研究结果…</p>
+  <div id="result" hidden>
+    <section class="card">
+      <h2>来源和时间范围</h2><p id="source"></p><p id="protocol"></p><div id="artifacts" class="controls"></div>
+    </section>
+    <section class="card">
+      <h2>历史状态与预测样本</h2><p id="state"></p><p id="forecast"></p><p id="timestamps" class="note"></p>
+    </section>
+    <section class="card">
+      <h2>整个验证期的模型对照</h2>
+      <p class="note">Brier 与 Log loss 越低越好。Brier 改善为常数基线减模型，区间采用 20 个交易日的配对区块抽样。</p>
+      <div class="scroll"><table><thead><tr><th>目标</th><th>样本数</th><th>模型 Brier</th><th>基线 Brier</th><th>模型 Log loss</th><th>基线 Log loss</th></tr></thead><tbody id="metrics"></tbody></table></div>
+      <p id="increment"></p>
+    </section>
+    <section class="card">
+      <h2>上涨概率可靠性</h2>
+      <div class="scroll"><table><thead><tr><th>概率区间</th><th>样本数</th><th>平均预测概率</th><th>实际上涨比例</th></tr></thead><tbody id="calibration"></tbody></table></div>
+    </section>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const token = '__TOKEN__';
+const percent = value => value == null ? 'N/A' : (100 * value).toFixed(2) + '%';
+const number = value => value == null ? 'N/A' : value.toFixed(6);
+const day = value => value?.slice(0, 10) ?? 'N/A';
+let generation = 0;
+let lastJobStatus;
+
+function tableRow(parent, values) {
+  const tr = document.createElement('tr');
+  for (const value of values) {
+    const cell = document.createElement('td');
+    cell.textContent = value;
+    tr.append(cell);
+  }
+  parent.append(tr);
+}
+
+async function loadStudy() {
+  const request = ++generation;
+  const query = new URLSearchParams({horizon: $('horizon').value});
+  if ($('asof').value) query.set('asof', $('asof').value);
+  try {
+    const response = await fetch('/api/v1/market/research?' + query);
+    const data = await response.json();
+    if (request !== generation) return;
+    if (!response.ok) {
+      $('result').hidden = true;
+      $('blocked-view').hidden = false;
+      $('blocked-view').textContent = data.code + ' · ' +
+        (data.code === 'NO_COMPLETED_MARKET_STUDY' ? '运行 Yahoo 历史验证生成首份报告。' : data.message ?? '请检查查询日期或任务日志。');
+      return;
+    }
+    const m = data.manifest;
+    $('blocked-view').hidden = true;
+    $('result').hidden = false;
+    $('asof').max = m.asof_date_et;
+    $('asof').min = m.experiment.start;
+    $('source').textContent = 'Yahoo / ' + m.adjustment_basis + ' · 截至 ' + m.asof_date_et +
+      ' · 核验 ' + m.source_provenance.verified_rows + ' 条行情 · 快照 ' + m.source_snapshot_sha256;
+    $('protocol').textContent = '初始训练截止 ' + m.experiment.train_end + ' · 季度滚动 · ' +
+      m.experiment.gap_sessions + ' 日间隔 · 知识截止 ' + m.data_cutoff_utc + ' · 运行 ' + m.run_id;
+    $('artifacts').replaceChildren();
+    const names = {'report.html': '完整研究报告', 'market_predictions.csv': '逐日结果 CSV', 'training_folds.csv': '训练窗口 CSV'};
+    for (const [file, path] of Object.entries(data.artifacts)) {
+      const link = document.createElement('a');
+      link.href = '/' + path;
+      link.textContent = names[file];
+      $('artifacts').append(link);
+    }
+    const state = data.states[0], pred = data.predictions[0];
+    $('state').textContent = state ? '状态日期 ' + day(state.date) + ' · ' + state.market_state +
+      ' · 20 日收益 ' + percent(state.market_return_20) + ' · 20 日年化波动 ' + percent(state.market_vol_20)
+      : 'N/A · 该日没有市场状态。';
+    const threshold = percent(m.experiment.downside_threshold);
+    $('forecast').textContent = pred ? '信号日期 ' + day(pred.date) + ' · H' + pred.horizon +
+      ' · 上涨概率 ' + percent(pred.p_up) + ' · 低于 ' + threshold + ' 的概率 ' + percent(pred.p_downside) +
+      ' · 预期价格收益 ' + percent(pred.predicted_return) + ' · 事后标签 ' + percent(pred.actual_return)
+      : 'N/A · 所选日期无可评价预测，可能处于训练段、非交易日或标签窗口尚不完整。';
+    $('timestamps').textContent = pred ? '模型拟合时点 ' + pred.fit_time + ' · 特征实际可用时间 ' +
+      pred.feature_available_at + ' · 标签实际可用时间 ' + pred.label_available_at : '';
+    $('metrics').replaceChildren();
+    for (const [key, label] of [['direction', '上涨'], ['downside', '下行低于 ' + threshold]]) {
+      for (const row of data.summary[key]) {
+        tableRow($('metrics'), [label, row.rows, number(row.brier), number(row.naive_brier),
+          number(row.log_loss), number(row.naive_log_loss)]);
+      }
+    }
+    const score = data.summary.increment[0];
+    $('increment').textContent = score ? '方向 Brier 改善 ' + number(score.mean_brier_improvement) +
+      ' · 95% 区间 [' + number(score.ci95_low) + ', ' + number(score.ci95_high) + '] · ' +
+      score.matched_dates + ' 个配对交易日' : 'N/A · 该期限暂无配对结果。';
+    $('calibration').replaceChildren();
+    for (const bin of data.summary.calibration) {
+      const range = (bin.bin * 20) + '%–' + ((bin.bin + 1) * 20) + '%';
+      tableRow($('calibration'), [range, bin.count, percent(bin.mean_probability), percent(bin.observed_up_rate)]);
+    }
+  } catch (error) {
+    if (request !== generation) return;
+    $('result').hidden = true;
+    $('blocked-view').hidden = false;
+    $('blocked-view').textContent = '读取失败 · ' + error.message;
+  }
+}
+
+async function pollJob() {
+  try {
+    const response = await fetch('/api/v1/jobs/current');
+    const job = await response.json();
+    $('run').disabled = job.status === 'RUNNING';
+    $('job').textContent = job.status === 'IDLE' ? '无运行任务' :
+      [job.action, job.status, job.exit_codes?.join(', ')].filter(Boolean).join(' · ');
+    if (job.action === 'market-research-yahoo' && job.status === 'COMPLETED' && lastJobStatus === 'RUNNING') {
+      await loadStudy();
+    }
+    lastJobStatus = job.status;
+  } catch (error) {
+    $('job').textContent = '无法读取任务状态 · ' + error.message;
+  }
+}
+
+$('run').onclick = async () => {
+  $('run').disabled = true;
+  try {
+    const response = await fetch('/api/run/market-research-yahoo', {
+      method: 'POST', headers: {'X-Console-Token': token}
+    });
+    const job = await response.json();
+    if (!response.ok) throw new Error(job.message ?? job.code ?? job.status);
+    lastJobStatus = job.status;
+    await pollJob();
+  } catch (error) {
+    $('job').textContent = '未启动 · ' + error.message;
+    $('run').disabled = false;
+  }
+};
+$('query').onclick = loadStudy;
+$('horizon').onchange = loadStudy;
+loadStudy();
+pollJob();
+setInterval(pollJob, 3000);
+</script>
+</html>

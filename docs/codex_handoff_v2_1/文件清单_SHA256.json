@@ -1,0 +1,52 @@
+[
+  {
+    "path": "01_统一规范/实施顺序_依赖关系与验收.md",
+    "bytes": 4457,
+    "sha256": "1578940fc3dfd9105539bd21147753ede1f34f7b75d677a4130104d7e5925ffe"
+  },
+  {
+    "path": "01_统一规范/真实数据整改与15项修复.md",
+    "bytes": 27375,
+    "sha256": "6b62709e9e397927be3e63a390968970187cca2e7f100228d20c1cd8442c2f21"
+  },
+  {
+    "path": "02_技术与研究/核心研究开发规范_REAL_ONLY.md",
+    "bytes": 25873,
+    "sha256": "f00379e1fd392802c2ed01dac1e68664fbc1a25ebfd356ffbf3676faea109f90"
+  },
+  {
+    "path": "03_UI与交互/UI交互与使用说明_REAL_ONLY.md",
+    "bytes": 18931,
+    "sha256": "3b63c20cfe9da1279d153f1751f9775ad71006ee495178c4e2e93e737d8bae73"
+  },
+  {
+    "path": "03_UI与交互/真实数据空状态原型.html",
+    "bytes": 9561,
+    "sha256": "1c6a24a34756154cc99e2ec2638e5ad2983c56eef030c2e9cdbc43a32d3814e0"
+  },
+  {
+    "path": "04_原始问题与证据/卡点清单_原始输入.md",
+    "bytes": 11431,
+    "sha256": "4946339dde7edb51d5dc6b942d8c1fe75b384bda94b1f7d591738898df17b7b6"
+  },
+  {
+    "path": "05_验收模板/阶段验收记录模板.md",
+    "bytes": 1189,
+    "sha256": "dcbb27b8a33854db635ed71bc68f50ef45286cb73bf54b858754c1120ae6d686"
+  },
+  {
+    "path": "AGENTS.md",
+    "bytes": 1541,
+    "sha256": "0f9bdcf33066145d306e2a176f4399888caabe9accca2c1636e9cd509596724d"
+  },
+  {
+    "path": "README_先看这里.md",
+    "bytes": 2541,
+    "sha256": "c3085d9e5390808a5ea432917c6ec488289576b1a0063a75f9779abc08b3cd8c"
+  },
+  {
+    "path": "给Codex的启动指令.md",
+    "bytes": 1596,
+    "sha256": "2d4126c921d306647fdec58deea00bb2d68d7b0bd1ad2cac4ac3c37fdd84143b"
+  }
+]

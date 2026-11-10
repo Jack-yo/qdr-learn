@@ -1,0 +1,69 @@
+def demo(args):
+    settings = load_config(args.config)
+    clock = TradingClock(settings.calendar_start, settings.calendar_end, settings.signal_delay_minutes)
+    day = args.asof or settings.fixture_asof
+    signal = clock.signal(day)
+    bars = FixtureProvider(clock, settings.seed).bars(settings.fixture_start, settings.fixture_end)
+    visible = [bar for bar in bars if bar.event_time <= signal and bar.available_at <= signal]
+    if len({b.security_id for b in visible if str(b.date) == day}) != len(SYMBOLS):
+        raise ValueError("Fixture lacks complete as-of session; no output generated")
+    observations = [Observation(
+        security_id=b.security_id, name="close", value=b.close, event_time=b.event_time,
+        available_at=b.available_at, source=b.source, version="fixture-v1",
+    ) for b in visible]
+    require_asof(observations, signal, signal)
+    blocked = False
+    try:
+        require_asof([Observation(
+            security_id="SYNTH-SPY", name="future_close", value=1.0,
+            event_time=clock.window(day, 1).exit_time,
+            available_at=clock.window(day, 1).exit_time,
+            source="SYNTHETIC_FIXTURE", version="fixture-v1",
+        )], signal, signal)
+    except ValueError:
+        blocked = True
+    if not blocked:
+        raise RuntimeError("Leakage guard failed")
+    windows = {str(h): {"entry_time": clock.window(day, h).entry_time.isoformat(),
+                        "exit_time": clock.window(day, h).exit_time.isoformat()}
+               for h in settings.horizons}
+    serialized = [b.model_dump(mode="json") for b in bars]
+    stable = {
+        "stage": "P0", "status": "ENGINEERING_ONLY", "source": "SYNTHETIC_FIXTURE",
+        "flags": ["SYNTHETIC", "DATA_INCOMPLETE", "NOT_READY"],
+        "asof_timestamp_utc": signal.isoformat(), "data_cutoff_utc": signal.isoformat(),
+        "universe_version": settings.universe_version, "model_version": settings.model_version,
+        "config_sha256": fingerprint(settings.model_dump()), "data_sha256": fingerprint(serialized),
+        "fixture_start": settings.fixture_start, "fixture_end": settings.fixture_end,
+        "securities": len(SYMBOLS), "rows": len(bars), "visible_rows": len(visible),
+        "future_leakage_blocked": blocked, "trade_windows": windows,
+        "performance": None,
+    }
+    run_id = str(uuid4())
+    destination = args.output / run_id
+    destination.mkdir(parents=True, exist_ok=False)
+    payload = {**stable, "result_sha256": fingerprint(stable), "run_id": run_id,
+               "created_at_utc": datetime.now(timezone.utc).isoformat(),
+               "python_version": platform.python_version(),
+               "runtime_versions": {p: importlib.metadata.version(p) for p in
+                                    ["quant-research", "exchange-calendars", "numpy", "pandas", "pydantic"]}}
+    (destination / "report.json").write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    (destination / "fixture.json").write_text(canonical(serialized), encoding="utf-8")
+    (destination / "config.json").write_text(canonical(settings.model_dump()), encoding="utf-8")
+    handler = logging.FileHandler(destination / "run.log", encoding="utf-8")
+    formatter = logging.Formatter("%(asctime)sZ %(levelname)s %(message)s")
+    formatter.converter = time.gmtime
+    handler.setFormatter(formatter)
+    logger = logging.getLogger("quant_research")
+    logger.setLevel(logging.INFO)
+    logger.addHandler(handler)
+    try:
+        logger.info("run_id=%s source=SYNTHETIC_FIXTURE rows=%d leakage_blocked=%s", run_id, len(bars), blocked)
+    finally:
+        logger.removeHandler(handler)
+        handler.close()
+    print(json.dumps({"run_id": run_id, "report": str((destination / "report.json").resolve()),
+                      "result_sha256": payload["result_sha256"]}))
+    return payload
+
+

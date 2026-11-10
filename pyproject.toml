@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "quant-research"
+version = "0.1.0"
+description = "Auditable daily US equity research and paper simulation"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "exchange-calendars==4.11.2",
+    "numpy==2.3.4",
+    "pandas==2.3.3",
+    "pydantic==2.12.4",
+    "PyYAML==6.0.3",
+    "tzdata==2025.2",
+    "duckdb==1.4.1",
+    "pyarrow==22.0.0",
+    "msvc-runtime==14.44.35112; sys_platform == 'win32'",
+    "yfinance==0.2.66",
+    "scikit-learn==1.7.2",
+    "pypdf==7.0.0",
+]
+
+[dependency-groups]
+dev = ["pytest==8.4.2"]
+
+[project.scripts]
+quant-research = "quant_research.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/quant_research"]

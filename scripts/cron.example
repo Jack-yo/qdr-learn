@@ -1,0 +1,3 @@
+# Example only. Host schedule below assumes Asia/Shanghai.
+# Install the locked environment, create outputs/, and configure local .env first.
+# 0 6 * * * cd /path/to/quant-research && .venv/bin/python -m quant_research.cli daily-ops --env-file .env >> outputs/scheduler.log 2>&1

@@ -1,0 +1,24 @@
+alpaca:
+  enabled: true # User-authorized data-only access; credentials remain local.
+  status: HISTORICAL_SIP_RAW_VERIFIED_FOR_EXPLICIT_ETF_SCOPE
+  feed_default: sip
+  adjustment: raw
+  symbol_mapping_asof: '-'
+  requests_per_minute_max: 172
+  availability_policy: first_observed
+french:
+  enabled: true
+  status: LIVE_AND_OFFLINE_VERIFIED
+  datasets: [ff5, momentum, reversal]
+  use_policy: ATTRIBUTION_ONLY
+sec:
+  enabled: true
+  status: TWO_COMPANY_INDEX_AND_CANDIDATES_VERIFIED_PIT_BLOCKED
+  requests_per_second_max: 5
+  use_policy: SNAPSHOT_ONLY_NOT_PIT
+yahoo:
+  enabled: true
+  adapter: yfinance
+  status: LATEST_REAL_CACHE_INCOMPLETE_EXPLORATORY_ONLY
+  adjustment_basis: yahoo_split_adjusted
+  use_policy: EXPLORATORY_ONLY_NOT_RAW_EXECUTION_PRICE

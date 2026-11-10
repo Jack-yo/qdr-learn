@@ -1,0 +1,16 @@
+experiment_id: p2-factor-baseline-v1
+start: '2017-01-01'
+train_end: '2022-12-31'
+validation_end: '2024-12-31'
+sealed_test_start: '2025-01-01'
+horizons: [1, 3, 5]
+embargo_sessions: 5
+exclude_symbols: [SPY, HYG, LQD]
+benchmark: SPY
+min_cross_section: 10
+quantiles: 5
+bootstrap_block_sessions: 20
+bootstrap_replicates: 500
+seed: 42
+costs: NOT_IMPLEMENTED_P5
+success_criterion: ENGINEERING_AND_FORMULA_VALIDATION_ONLY

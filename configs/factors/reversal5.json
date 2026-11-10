@@ -1,0 +1,7 @@
+{
+  "name": "短期反转研究",
+  "template": "reversal",
+  "window": 5,
+  "direction": 1,
+  "hypothesis": "研究过去5个交易日的价格反转与后续1/3/5日价格代理收益的相关性，不预设盈利。"
+}

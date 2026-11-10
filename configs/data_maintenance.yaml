@@ -1,0 +1,17 @@
+# Free real sources only. Explicit current ETF observation list, never a historical universe.
+version: 1
+prices:
+  source: alpaca
+  feed: sip
+  start: '2017-01-03'
+  overlap_sessions: 5
+  symbols: [SPY, RSP, IWM, IWD, IWF, MTUM, QUAL, USMV, HYG, LQD, XLK, XLF, XLE, XLV, XLI, XLP, XLY, XLU, XLB, XLRE]
+actions:
+  start: '2016-01-01'
+french:
+  datasets: [ff5, momentum, reversal]
+sec:
+  ciks: ['320193', '789019']
+cadence:
+  daily: [prices, actions]
+  weekly: [french, sec]

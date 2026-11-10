@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>策略研究 · REAL_ONLY</title>
+<style>
+  body { margin: 0; background: #f3f6fa; color: #172439; font: 15px system-ui, sans-serif; }
+  main { max-width: 1100px; margin: auto; padding: 24px; }
+  nav, .controls { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+  a { color: #195795; }
+  section { background: white; border: 1px solid #dbe3ee; border-radius: 8px; padding: 18px; margin: 16px 0; }
+  .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+  label { display: flex; gap: 6px; flex-direction: column; }
+  button, select, input { font: inherit; padding: 7px 10px; min-width: 0; }
+  button { cursor: pointer; }
+  button:disabled { cursor: default; }
+  .note { color: #465875; overflow-wrap: anywhere; }
+  .warn { background: #fff4d9; padding: 12px; border-left: 4px solid #bf7b0e; }
+  table { border-collapse: collapse; width: 100%; text-align: left; }
+  td, th { border-bottom: 1px solid #e1e7ef; padding: 8px; }
+  #detail { overflow-wrap: anywhere; }
+</style>
+<main>
+  <nav aria-label="研究导航">
+    <a href="/overview">研究总览</a><a href="/market">市场分析</a><a href="/styles">风格监控</a>
+    <a href="/factors">因子实验室</a><a href="/strategies">策略工作台</a><a href="/backtests">回测中心</a>
+    <a href="/signals">每日信号</a><a href="/paper">模拟组合</a><a href="/data">数据与设置</a>
+  </nav>
+  <h1 id="title">策略研究</h1>
+  <p class="warn" id="blocked-view">REAL_ONLY · 当前因子结果使用真实 ETF 回溯样本。严格回测需要独立核验历史股票池、证券身份、可用时间与结算。</p>
+  <section id="draft-panel" hidden>
+    <h2>新建策略草稿</h2>
+    <p class="note">单因子按所选因子值降序。市场与风格条件暂未接入。复制策略可保存新版本。</p>
+    <form id="draft">
+      <div class="fields">
+        <label>名称 <input name="name" maxlength="80" required></label>
+        <label>已完成的因子实验 <select name="factor" required></select></label>
+        <label>持有交易日 <select name="horizon"><option>1</option><option selected>3</option><option>5</option></select></label>
+        <label>单标的上限 % <input name="stock" type="number" min="0.01" max="10" step="0.01" value="10" required></label>
+        <label>总仓位上限 % <input name="total" type="number" min="0.01" max="50" step="0.01" value="50" required></label>
+        <label>单行业上限 % <input name="sector" type="number" min="0.01" max="25" step="0.01" value="25" required></label>
+        <label>最低 ADV20 美元 <input name="adv" type="number" min="20000000" value="20000000" required></label>
+        <label>止损 ATR 倍数 <input name="atr" type="number" min="2" max="20" step="0.01" value="2" required></label>
+      </div>
+      <p class="note" id="copy-from"></p>
+      <button type="submit">保存草稿</button>
+      <button type="button" id="clear-parent" hidden>新建独立策略</button>
+    </form>
+  </section>
+  <section>
+    <h2>策略版本</h2>
+    <div class="controls">
+      <label>选择版本 <select id="version"></select></label>
+      <button id="copy" hidden>复制为新版本</button>
+      <button id="validate" hidden>校验配置</button>
+      <button id="freeze" hidden>冻结版本</button>
+      <button id="preflight" hidden>检查严格回测资格</button>
+      <a href="/backtests" id="to-backtest" hidden>进入回测中心</a>
+    </div>
+    <p class="note" id="detail"></p>
+    <p class="note" id="protocol"></p>
+    <p id="status" role="status"></p>
+  </section>
+  <section id="backtest-panel" hidden>
+    <h2>回测准入结果</h2>
+    <p>净收益 N/A · 最大回撤 N/A · 实际成本 N/A · 成交 N/A</p>
+    <p id="qualification" class="note">选择已冻结策略并运行准入检查。</p>
+    <table><thead><tr><th>检查项</th><th>状态</th><th>缺失证据</th></tr></thead><tbody id="checks"></tbody></table>
+    <div class="controls" id="exports"></div>
+  </section>
+  <section id="alpha-panel" hidden>
+    <h2>ETF A–D 对照研究</h2>
+    <p class="note">使用 Yahoo 2017–2024 当前版本价格。对照模型结果独立于本页的单因子策略。</p>
+    <button id="alpha-run">运行 Yahoo ETF 验证</button>
+    <p id="alpha-job" role="status"></p><a id="alpha-report" hidden>查看真实研究报告</a>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const token = '__TOKEN__';
+const isBacktest = location.pathname === '/backtests';
+const fields = $('draft').elements;
+let versions = [], parent = null, working = false;
+
+async function request(path, body) {
+  const options = body === undefined ? {} : {
+    method: 'POST', headers: {'Content-Type': 'application/json', 'X-Console-Token': token},
+    body: JSON.stringify(body)
+  };
+  const response = await fetch(path, options);
+  const data = await response.json();
+  if (!response.ok) throw new Error([data.code, data.message, data.status].filter(Boolean).join(' · '));
+  return data;
+}
+
+function option(select, value, text) {
+  const row = document.createElement('option');
+  row.value = value;
+  row.textContent = text;
+  select.append(row);
+}
+
+function selected() {
+  return versions.find(item => item.id === $('version').value);
+}
+
+function displaySelection() {
+  const item = selected();
+  for (const id of ['validate', 'copy', 'freeze']) $(id).disabled = working || !item;
+  $('freeze').disabled ||= item?.status !== 'DRAFT';
+  $('preflight').disabled = working || item?.status !== 'FROZEN';
+  $('to-backtest').hidden = isBacktest || item?.status !== 'FROZEN';
+  if (item?.status === 'FROZEN') $('to-backtest').href = '/backtests?strategy=' + encodeURIComponent(item.id);
+  $('detail').textContent = item ? 'v' + item.version + ' · ' + item.status + ' · SHA256 ' + item.config_sha256
+    : '暂无可选版本。请从已完成的因子实验创建草稿。';
+  $('protocol').textContent = '';
+  if (!item) return;
+  const config = item.config, p = config.protocol, s = config.strategy;
+  $('detail').textContent += ' · ' + config.factor_dependency.factor_name + ' / H' + s.horizon;
+  $('protocol').textContent = '开发区间 ' + p.start + ' 至 ' + p.validation_end + '，初始训练截至 ' + p.train_end +
+    '，季度滚动留 ' + p.gap_sessions + ' 个交易日间隔。T+1 开盘入场，持有期退出或 ' +
+    s.stop_atr_multiple + ' 倍 ATR 止损。成本假设每侧 ' + p.cost_scenarios_bps_per_side.join('/') +
+    ' bps。2025 起最终测试封存。';
+}
+
+async function load(preferred) {
+  const library = await request('/api/v1/strategies');
+  versions = library.strategies;
+  $('version').replaceChildren();
+  const available = versions.filter(item => !isBacktest || item.status === 'FROZEN');
+  for (const item of available) option($('version'), item.id, item.name + ' · v' + item.version + ' · ' + item.status);
+  if (available.some(item => item.id === preferred)) $('version').value = preferred;
+  const factor = fields.namedItem('factor'), priorFactor = factor.value;
+  factor.replaceChildren();
+  option(factor, '', '选择因子实验');
+  for (const exp of library.factor_experiments) option(factor, exp.id, exp.factor_name + ' v' + exp.factor_version + ' · ' + exp.id);
+  if (library.factor_experiments.some(item => item.id === priorFactor)) factor.value = priorFactor;
+  displaySelection();
+}
+
+async function operation(task) {
+  if (working) return;
+  working = true;
+  displaySelection();
+  $('status').textContent = '处理中…';
+  try {
+    await task();
+  } catch (error) {
+    $('status').textContent = error.message;
+  } finally {
+    working = false;
+    displaySelection();
+  }
+}
+
+function resetPreflight() {
+  $('qualification').textContent = '选择已冻结策略并运行准入检查。';
+  $('checks').replaceChildren();
+  $('exports').replaceChildren();
+}
+
+$('version').onchange = () => {
+  displaySelection();
+  $('status').textContent = '';
+  if (isBacktest) loadPreflight();
+};
+$('draft').onsubmit = event => {
+  event.preventDefault();
+  operation(async () => {
+    const get = name => fields.namedItem(name).value;
+    const draft = {
+      name: get('name'), factor_experiment_id: get('factor'), parent_version_id: parent, horizon: Number(get('horizon')),
+      max_stock_weight: Number(get('stock')) / 100, max_total_weight: Number(get('total')) / 100,
+      max_sector_weight: Number(get('sector')) / 100, minimum_adv20: Number(get('adv')), stop_atr_multiple: Number(get('atr'))
+    };
+    const item = await request('/api/v1/strategies', draft);
+    await load(item.id);
+    $('status').textContent = '草稿已保存 · v' + item.version;
+  });
+};
+$('copy').onclick = () => {
+  const item = selected(), s = item.config.strategy;
+  parent = item.id;
+  const values = {name:s.name, factor:s.factor_experiment_id, horizon:s.horizon, stock:s.max_stock_weight*100,
+    total:s.max_total_weight*100, sector:s.max_sector_weight*100, adv:s.minimum_adv20, atr:s.stop_atr_multiple};
+  for (const [key,value] of Object.entries(values)) fields.namedItem(key).value = value;
+  fields.namedItem('name').readOnly = true;
+  $('copy-from').textContent = '复制自 v' + item.version + ' · ' + parent;
+  $('clear-parent').hidden = false;
+};
+$('clear-parent').onclick = () => {
+  parent = null;
+  $('draft').reset();
+  fields.namedItem('name').readOnly = false;
+  $('copy-from').textContent = '';
+  $('clear-parent').hidden = true;
+};
+$('validate').onclick = () => operation(async () => {
+  const result = await request('/api/v1/strategies/' + selected().id + '/validate', {});
+  $('status').textContent = result.status + ' · 因子依赖已核验，历史交易准入待检查。';
+});
+$('freeze').onclick = () => operation(async () => {
+  const item = await request('/api/v1/strategies/' + selected().id + '/freeze', {});
+  await load(item.id);
+  $('status').textContent = '配置已冻结 · ' + item.frozen_at_utc;
+});
+function renderPreflight(result) {
+  $('status').textContent = result.status;
+  $('qualification').textContent = '已核验 SIP 原价行数 ' + (result.source_dataset?.rows ?? 'N/A') +
+    ' · 检查时间 ' + result.created_at_utc + ' · ' + result.run_id;
+  for (const [name, check] of Object.entries(result.checks)) {
+    const row = document.createElement('tr');
+    for (const value of [name, check.status, check.missing_evidence.join(' / ') || '—']) {
+      const cell = document.createElement('td');
+      cell.textContent = value;
+      row.append(cell);
+    }
+    $('checks').append(row);
+  }
+  for (const [name, path] of [['HTML 准入报告', result.report_path], ['JSON 证据', result.evidence_path]]) {
+    const link = document.createElement('a');
+    link.href = '/' + path;
+    link.textContent = name;
+    $('exports').append(link);
+  }
+}
+async function loadPreflight() {
+  resetPreflight();
+  const id = selected()?.id;
+  if (!id) return;
+  try {
+    const result = await request('/api/v1/strategies/' + id + '/preflight');
+    if (!working && selected()?.id === id) renderPreflight(result);
+  } catch (error) {
+    if (!working && selected()?.id === id && !error.message.startsWith('NO_PREFLIGHT_REPORT')) {
+      $('status').textContent = error.message;
+    }
+  }
+}
+$('preflight').onclick = () => operation(async () => {
+  const id = selected().id;
+  resetPreflight();
+  const result = await request('/api/v1/strategies/' + id + '/preflight', {});
+  if (selected()?.id === id) renderPreflight(result);
+});
+async function alphaStatus() {
+  const job = await request('/api/v1/jobs/current');
+  $('alpha-run').disabled = job.status === 'RUNNING';
+  if (job.action === 'alpha-research-yahoo') $('alpha-job').textContent = job.status;
+  if (job.status === 'RUNNING') return;
+  try {
+    const result = await request('/api/v1/alpha/research');
+    $('alpha-report').href = '/' + result.report_path;
+    $('alpha-report').textContent = '查看真实研究报告 · ' + result.prediction_rows + ' 个预测评价行';
+    $('alpha-report').hidden = false;
+  } catch (error) {
+    $('alpha-report').hidden = true;
+  }
+}
+$('alpha-run').onclick = () => operation(async () => {
+  await request('/api/run/alpha-research-yahoo', {});
+  await alphaStatus();
+  $('status').textContent = 'ETF 研究任务已启动。';
+});
+$('title').textContent = isBacktest ? '回测中心' : '策略工作台';
+for (const id of ['draft-panel', 'copy', 'validate', 'freeze', 'alpha-panel']) $(id).hidden = isBacktest;
+$('backtest-panel').hidden = !isBacktest;
+$('preflight').hidden = !isBacktest;
+load(new URLSearchParams(location.search).get('strategy'))
+  .then(() => { if (isBacktest) return loadPreflight(); })
+  .catch(error => { $('status').textContent = error.message; });
+if (!isBacktest) {
+  const poll = () => alphaStatus().catch(error => { $('alpha-job').textContent = error.message; });
+  poll();
+  setInterval(poll, 5000);
+}
+</script>
+</html>
