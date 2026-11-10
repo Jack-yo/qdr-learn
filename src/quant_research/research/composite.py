@@ -41,8 +41,9 @@ def _rank_frame(frame, identifier):
         raise PolicyError('FACTOR_RESEARCH_SCOPE_INVALID', 'Composite accepts retrospective non-executable features only')
     frame = frame[['date', 'security_id', 'value']].copy()
     frame['value'] = pd.to_numeric(frame.value, errors='coerce').replace([np.inf, -np.inf], np.nan)
-    frame['rank'] = frame.groupby('date').value.rank(method='average', pct=True)
-    return frame[['date', 'security_id', 'rank']].rename(columns={'rank': identifier})
+    # Keep raw factor values until all component nulls are removed. Rankings
+    # must use the SAME surviving cross-section across every component.
+    return frame.rename(columns={'value': identifier})
 
 
 def compute_composite(root, strategy_id):
@@ -70,6 +71,8 @@ def compute_composite(root, strategy_id):
     joined = joined.dropna(subset=identifiers).copy()
     if joined.empty:
         raise PolicyError('NO_COMPLETE_FACTOR_INTERSECTION', 'No securities have all component factor values')
+    for identifier in identifiers:
+        joined[identifier] = joined.groupby('date')[identifier].rank(method='average', pct=True)
     joined['value'] = sum(joined[part] * a['weight'] for part, a in zip(identifiers, allocations))
     joined['date'] = pd.to_datetime(joined['date'])
     protocol = strategy['config']['protocol']
