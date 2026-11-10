@@ -403,6 +403,19 @@ def handler(console):
                     return self.send(409, exc.payload())
                 except (OSError, ValueError):
                     return self.send(409, {'status':'BLOCKED', 'code':'READINESS_LOCAL_EVIDENCE_UNAVAILABLE'})
+            if path == '/api/v1/signals/frozen':
+                from .workflow.frozen_decisions import inspect_frozen_decision
+                query=parse_qs(urlsplit(self.path).query,keep_blank_values=True)
+                if set(query)-{'session'} or any(len(v)!=1 for v in query.values()):
+                    return self.send(400,{'status':'BLOCKED','code':'FROZEN_QUERY_INVALID'})
+                try:
+                    data=inspect_frozen_decision(console.root,session=query.get('session',[None])[0],
+                                                 db=console.database)
+                    return self.send(200,data)
+                except PolicyError as exc:
+                    return self.send(409,exc.payload())
+                except (OSError,ValueError,KeyError):
+                    return self.send(409,{'status':'BLOCKED','code':'FROZEN_LOCAL_EVIDENCE_UNAVAILABLE'})
             if path == '/api/v1/signals':
                 from .workflow.daily_observation import latest_report
                 query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)

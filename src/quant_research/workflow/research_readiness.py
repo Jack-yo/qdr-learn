@@ -127,6 +127,19 @@ def research_readiness(root, *, db=None, asof=None):
         stages['forward_observations'] = _failure(exc,'连续真实前向观察',href='/paper')
 
     try:
+        from quant_research.workflow.frozen_decisions import inspect_frozen_decision
+        frozen=inspect_frozen_decision(root,session=asof,db=database)
+        accepted=frozen['status']=='ATTESTED_FORWARD_DECISION_RESEARCH_ONLY'
+        stages['frozen_decision'] = _entry(
+            'FROZEN_DECISION_HASH_AND_DATA_VERIFIED' if accepted else frozen['code'],
+            '实际冻结的前向候选',state='OBSERVATION_ONLY' if accepted else 'BLOCKED',
+            evidence={'session':frozen.get('session_date_et'),'candidates':frozen.get('candidate_count')},
+            missing=['Frozen decision is research-only, not proof of predictive advantage or executed paper fills'] if accepted
+                else ['No verified model, decision, exact-price snapshot and forward capability'],href='/signals')
+    except (PolicyError,OSError,ValueError) as exc:
+        stages['frozen_decision']=_failure(exc,'实际冻结的前向候选',href='/signals')
+
+    try:
         from quant_research.backtest.verified_results import list_verified_backtests
         result = list_verified_backtests(root)
         runs = result.get('results') or []
@@ -160,7 +173,7 @@ def research_readiness(root, *, db=None, asof=None):
     # Work order reflects business dependencies, not naive PASS counts.
     sequence = ('dataset','historical_model','asset_directory','strategy_versions',
                 'historical_backtest','forward_data','forward_shadow','verified_backtest_runs',
-                'forward_observations','paper_account')
+                'forward_observations','frozen_decision','paper_account')
     next_steps = [
         {'module':name,'reason':stages[name]['code'],
          'description':stages[name]['description'],'view':stages[name]['view']}

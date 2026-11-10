@@ -54,6 +54,9 @@ def main(argv=None):
     ready=commands.add_parser('research-readiness', help='Read-only end-to-end evidence and blockers, never creates orders')
     ready.add_argument('--asof', help='Optional nonfuture ISO calendar date')
     ready.add_argument('--db',type=Path,default=Path('data/real_v21.duckdb'))
+    frozen=commands.add_parser('frozen-candidates',help='Audit source-backed frozen forward candidates, without creating signals')
+    frozen.add_argument('--session',help='Exact nonfuture XNYS session YYYY-MM-DD; default latest attested')
+    frozen.add_argument('--db',type=Path,default=Path('data/real_v21.duckdb'))
     commands.add_parser('paper-status', help='Inspect forward evidence without opening a paper account')
     daily_ops = commands.add_parser('daily-ops', help='Run the reviewed SIP daily sequence inside the actual close window')
     daily_ops.add_argument('--offline', action='store_true')
@@ -204,6 +207,11 @@ def main(argv=None):
             result=research_readiness(Path.cwd(),db=args.db,asof=args.asof)
             print(json.dumps(result,ensure_ascii=False,allow_nan=False))
             return 4 if result['status']=='NOT_READY' else 0
+        if args.command=='frozen-candidates':
+            from .workflow.frozen_decisions import inspect_frozen_decision
+            outcome=inspect_frozen_decision(Path.cwd(),session=args.session,db=args.db)
+            print(json.dumps(outcome,ensure_ascii=False,allow_nan=False))
+            return 4 if outcome['status']=='BLOCKED' else 0
         if args.command=='factor-lab-create':
             from .research.factor_lab import Registry
             registry=Registry(Path.cwd());version=registry.create_factor(json.loads(args.definition.read_text(encoding='utf-8')))
