@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta name="color-scheme" content="light"/>
+  <title>Quant Studio · 真实数据量化研究</title>
+  <link rel="stylesheet" href="/assets/studio.css"/>
+</head>
+<body>
+<div class="app-shell">
+  <aside id="sidebar" class="sidebar" aria-label="主导航">
+    <a class="brand" href="/overview"><span class="brand-logo">Q<span>·</span></span><span><strong>Quant Studio</strong><small>研究与交易决策工作台</small></span></a>
+    <div class="side-scroll">
+      <div class="nav-label">日常工作</div>
+      <a class="nav-item" data-path="/overview" href="/overview"><span class="nav-glyph">▦</span> 工作台总览</a>
+      <a class="nav-item" data-path="/signals" href="/signals"><span class="nav-glyph">◎</span> 每日信号</a>
+      <a class="nav-item" data-path="/paper" href="/paper"><span class="nav-glyph">▥</span> 模拟组合</a>
+      <div class="nav-label">量化研究</div>
+      <a class="nav-item" data-path="/market" href="/market"><span class="nav-glyph">◫</span> 市场分析</a>
+      <a class="nav-item" data-path="/styles" href="/styles"><span class="nav-glyph">≋</span> 风格监控</a>
+      <a class="nav-item" data-path="/factors" href="/factors"><span class="nav-glyph">⊞</span> 因子实验室</a>
+      <a class="nav-item" data-path="/strategies" href="/strategies"><span class="nav-glyph">◇</span> 策略工作台</a>
+      <a class="nav-item" data-path="/backtests" href="/backtests"><span class="nav-glyph">◷</span> 回测中心</a>
+      <div class="nav-label">系统</div>
+      <a class="nav-item" data-path="/data" href="/data"><span class="nav-glyph">⚙</span> 数据与设置</a>
+    </div>
+    <div class="side-bottom"><span class="real-dot"></span><div><b>REAL ONLY</b><small>仅展示真实且可追溯的数据</small></div></div>
+  </aside>
+  <div class="main-shell">
+    <header class="topbar"><button class="menu-trigger" id="menu-trigger" aria-label="打开菜单" aria-expanded="false">☰</button><div class="breadcrumbs" id="breadcrumbs">研究工作台</div><div class="top-right"><span class="environment">本地研究环境</span><span class="top-status" id="top-status">核验中</span><button class="icon-button" id="refresh-current" title="刷新当前页面" aria-label="刷新当前页面">↻</button></div></header>
+    <main class="workspace" id="workspace"><div class="loading-view"><span class="spin"></span><p>正在加载真实数据与研究状态…</p></div></main>
+    <footer class="footer">Quant Studio · 所有预测和回测必须附带来源、日期与适用范围 · 不支持真实券商下单</footer>
+  </div>
+</div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<script>window.CONSOLE_TOKEN="__TOKEN__";</script>
+<script src="/assets/studio.js" defer></script>
+</body>
+</html>
