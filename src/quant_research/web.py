@@ -362,6 +362,17 @@ def handler(console):
                     return self.send(409, exc.payload())
                 except (sqlite3.Error, ValueError, KeyError, OSError):
                     return self.send(409, {'status': 'BLOCKED', 'code': 'STRATEGY_REGISTRY_INVALID'})
+            if path.startswith('/api/v1/strategies/') and path.endswith('/composite'):
+                from .research.composite import compute_composite
+                try:
+                    if urlsplit(self.path).query:
+                        return self.send(400, {'status':'BLOCKED','code':'UNSUPPORTED_COMPOSITE_QUERY'})
+                    identifier = path.removeprefix('/api/v1/strategies/').removesuffix('/composite')
+                    return self.send(200, compute_composite(console.root, identifier))
+                except PolicyError as exc:
+                    return self.send(409, exc.payload())
+                except (ValueError, KeyError, OSError, sqlite3.Error):
+                    return self.send(409, {'status':'BLOCKED','code':'COMPOSITE_RESEARCH_EVIDENCE_INVALID'})
             if path.startswith('/api/v1/strategies/') and path.endswith('/preflight'):
                 from .research.strategy import StrategyRegistry
                 try:
