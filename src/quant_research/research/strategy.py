@@ -17,10 +17,23 @@ from quant_research.workflow.factor_lab import result as factor_result
 STORE = Path("data/managed/strategies/registry.sqlite3")
 
 
+class FactorAllocation(BaseModel):
+    """A positive, explicit research weight; never an executable position weight."""
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    factor_experiment_id: str
+    weight: StrictFloat = Field(gt=0, le=1, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def validate_experiment(self):
+        valid_id(self.factor_experiment_id)
+        return self
+
+
 class StrategySpec(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
     name: str = Field(min_length=1, max_length=80)
-    factor_experiment_id: str
+    factor_experiment_id: str | None = None  # Backwards-compatible single-factor strategies
+    factors: list[FactorAllocation] | None = None
     parent_version_id: str | None = None
     horizon: StrictInt
     max_stock_weight: StrictFloat = Field(gt=0, le=0.10)
@@ -33,7 +46,18 @@ class StrategySpec(BaseModel):
     def check_limits(self):
         if self.horizon not in (1, 3, 5):
             raise ValueError("Unsupported holding horizon")
-        valid_id(self.factor_experiment_id)
+        if (self.factor_experiment_id is None) == (self.factors is None):
+            raise ValueError("Exactly one of factor_experiment_id or factors is required")
+        if self.factor_experiment_id is not None:
+            valid_id(self.factor_experiment_id)
+        if self.factors is not None:
+            if not 2 <= len(self.factors) <= 8:
+                raise ValueError("Multi-factor research requires 2 to 8 factors")
+            identifiers = [item.factor_experiment_id for item in self.factors]
+            if len(identifiers) != len(set(identifiers)):
+                raise ValueError("Duplicate factor experiments are not allowed")
+            if abs(sum(item.weight for item in self.factors) - 1.0) > 1e-8:
+                raise ValueError("Research factor weights must sum to exactly one")
         if self.parent_version_id is not None:
             valid_id(self.parent_version_id)
         if self.max_stock_weight > min(self.max_total_weight, self.max_sector_weight):
@@ -63,6 +87,51 @@ def research_dependency(root, identifier, horizon):
         "report_path": evaluated["report_path"],
         "historical_decision_eligible": False,
     }
+
+
+
+def research_mix(root, factors, horizon):
+    """Bind independent real-data experiments to one *comparable* research snapshot.
+
+    All inputs are RETROSPECTIVE, so validation of this mix never means that a
+    historical trading decision, fill, or paper order is eligible.
+    """
+    from quant_research.workflow.factor_lab import result as load_result
+
+    baseline = None
+    seen_versions = set()
+    allocations = []
+    for factor in factors:
+        identifier = valid_id(factor.factor_experiment_id)
+        dependency = research_dependency(root, identifier, horizon)
+        detail = load_result(root, identifier)["result"]  # verifies all artifact digests
+        version_id = dependency["factor_version_id"]
+        if version_id in seen_versions:
+            raise PolicyError("DUPLICATE_FACTOR_VERSION", "A factor version may appear only once in a mix")
+        seen_versions.add(version_id)
+        signature = {
+            "snapshot_sha256": dependency["snapshot_sha256"],
+            "source": dependency["source"],
+            "adjustment_basis": dependency["adjustment_basis"],
+            "universe_version": detail.get("universe_version"),
+            "symbols_sha256": fingerprint(detail.get("symbols")),
+            "protocol_sha256": fingerprint(detail.get("experiment")),
+        }
+        if baseline is None:
+            baseline = signature
+        elif signature != baseline:
+            raise PolicyError(
+                "INCOMPARABLE_FACTOR_EXPERIMENTS",
+                "Multi-factor research requires identical actual data snapshot, symbols and evaluation protocol",
+                sorted(k for k in baseline if baseline[k] != signature[k]),
+            )
+        allocations.append({"factor_experiment_id": identifier,
+                            "weight": factor.weight, "dependency": dependency})
+    return {"allocations": allocations, "research_scope": baseline,
+            "combination": "WEIGHTED_DAILY_CROSS_SECTIONAL_PERCENTILE_RANK",
+            "missing_policy": "ALL_COMPONENTS_REQUIRED",
+            "historical_decision_eligible": False,
+            "research_grade": False}
 
 
 class StrategyRegistry:
@@ -123,14 +192,21 @@ class StrategyRegistry:
             "minimum_adv20", "stop_atr_multiple",
         })
         protocol = SystemConfig.model_validate({**base.model_dump(), **limits})
-        dependency = research_dependency(self.root, valid_id(spec.factor_experiment_id), spec.horizon)
+        if spec.factors is not None:
+            mix = research_mix(self.root, spec.factors, spec.horizon)
+            dependency = None
+            ranking_rule = mix["combination"]
+        else:
+            mix = None
+            dependency = research_dependency(self.root, valid_id(spec.factor_experiment_id), spec.horizon)
+            ranking_rule = "DESCENDING_SELECTED_FACTOR_VALUE"
         configuration = {
-            "strategy": spec.model_dump(), "factor_dependency": dependency,
-            "protocol": protocol.model_dump(mode="json"),
-            "universe": "EXPLICIT_ETF_RESEARCH_SCOPE_ONLY",
+            "strategy": spec.model_dump(exclude_none=True), "factor_dependency": dependency,
+            "factor_mix": mix, "protocol": protocol.model_dump(mode="json"),
+            "universe": "EXPLICIT_CURRENT_ETF_RESEARCH_SCOPE_NOT_PIT",
             "entry_rule": "NEXT_SESSION_OPEN", "exit_rule": "HORIZON_CLOSE_OR_ATR_STOP",
-            "ranking_rule": "DESCENDING_SELECTED_FACTOR_VALUE",
-            "historical_decision_eligible": False,
+            "ranking_rule": ranking_rule,
+            "research_only": True, "historical_decision_eligible": False,
         }
         identifier = str(uuid4())
         with self._connect(write=True) as db:
@@ -155,11 +231,17 @@ class StrategyRegistry:
         config = item["config"]
         spec = StrategySpec.model_validate(config["strategy"])
         SystemConfig.model_validate(config["protocol"])
-        current = research_dependency(self.root, valid_id(spec.factor_experiment_id), spec.horizon)
-        if current != config["factor_dependency"]:
-            raise PolicyError("STRATEGY_DEPENDENCY_CHANGED", "Factor research evidence no longer matches the saved configuration")
+        if spec.factors is not None:
+            current = research_mix(self.root, spec.factors, spec.horizon)
+            if current != config.get("factor_mix"):
+                raise PolicyError("STRATEGY_DEPENDENCY_CHANGED", "Multi-factor research evidence changed")
+        else:
+            current = research_dependency(self.root, valid_id(spec.factor_experiment_id), spec.horizon)
+            if current != config["factor_dependency"]:
+                raise PolicyError("STRATEGY_DEPENDENCY_CHANGED", "Factor research evidence no longer matches the saved configuration")
         return {"strategy": item, "status": "CONFIG_VALID",
-                "research_dependency": "RETROSPECTIVE_ONLY", "execution_ready": False}
+                "research_dependency": "RETROSPECTIVE_ONLY", "execution_ready": False,
+                "composite_research_available": spec.factors is not None}
 
     def freeze(self, identifier):
         item = self.validate(identifier)["strategy"]
