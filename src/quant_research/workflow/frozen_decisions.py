@@ -144,6 +144,9 @@ def inspect_frozen_decision(root, *, session=None, db='data/real_v21.duckdb'):
         return {**empty, 'code': 'NO_REAL_DATA'}
     try:
         from quant_research.data.store import duckdb
+    except ImportError:
+        _fail('FROZEN_DATABASE_RUNTIME_UNAVAILABLE', 'Local DuckDB runtime is required to inspect real attestations')
+    try:
         with duckdb.connect(str(target), read_only=True) as database:
             if session:
                 row = database.execute('''SELECT session,decision_sha256,artifact_path,model_id,
@@ -158,7 +161,7 @@ def inspect_frozen_decision(root, *, session=None, db='data/real_v21.duckdb'):
             day, digest, path, model_id, source_sha, at, state = row
             model = database.execute('''SELECT model_sha256,artifact_path,fit_at,
                 source_dataset_sha256,status FROM model_attestations WHERE model_id=?''', [model_id]).fetchone()
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, duckdb.Error):
         _fail('FROZEN_STORE_UNAVAILABLE', 'Read-only decision attestation store is unavailable')
     day = str(day)
     _session(day)

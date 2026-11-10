@@ -57,6 +57,8 @@ def main(argv=None):
     frozen=commands.add_parser('frozen-candidates',help='Audit source-backed frozen forward candidates, without creating signals')
     frozen.add_argument('--session',help='Exact nonfuture XNYS session YYYY-MM-DD; default latest attested')
     frozen.add_argument('--db',type=Path,default=Path('data/real_v21.duckdb'))
+    timeline=commands.add_parser('paper-timeline',help='Read-only sequence and cash audit for the real paper ledger')
+    timeline.add_argument('--limit',type=int,default=20)
     commands.add_parser('paper-status', help='Inspect forward evidence without opening a paper account')
     daily_ops = commands.add_parser('daily-ops', help='Run the reviewed SIP daily sequence inside the actual close window')
     daily_ops.add_argument('--offline', action='store_true')
@@ -237,6 +239,11 @@ def main(argv=None):
         if args.command == 'daily-observation':
             from .workflow.daily_observation import execute
             return execute(args)
+        if args.command == 'paper-timeline':
+            from .workflow.paper_timeline import paper_timeline
+            audit=paper_timeline(Path.cwd(),limit=args.limit)
+            print(json.dumps(audit,ensure_ascii=False,allow_nan=False))
+            return 4 if audit['status']=='BLOCKED' else 0
         if args.command == 'paper-status':
             from .workflow.forward_observations import inventory
             print(json.dumps(inventory(Path.cwd())))

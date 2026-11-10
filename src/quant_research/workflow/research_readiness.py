@@ -170,10 +170,22 @@ def research_readiness(root, *, db=None, asof=None):
     except (PolicyError,OSError,ValueError) as exc:
         stages['paper_account'] = _failure(exc,'本地模拟现金/持仓对账',href='/paper')
 
+    try:
+        from quant_research.workflow.paper_timeline import paper_timeline
+        ledger=paper_timeline(root,limit=1)
+        accepted=ledger['status']=='INTERNALLY_RECONCILED_PAPER_ESTIMATE'
+        stages['paper_timeline']=_entry('PAPER_TIMELINE_CASH_RECONCILED' if accepted else ledger['code'],
+            '逐日模拟账户现金与交易日序列',state='OBSERVATION_ONLY' if accepted else 'BLOCKED',
+            evidence={'recorded_sessions':ledger.get('recorded_sessions')},
+            missing=['Internal ledger consistency does not certify market source or broker executions'] if accepted
+            else ['No accepted continuous real decision/price-linked ledger'],href='/paper')
+    except (PolicyError,OSError,ValueError) as exc:
+        stages['paper_timeline']=_failure(exc,'逐日模拟账户现金与交易日序列',href='/paper')
+
     # Work order reflects business dependencies, not naive PASS counts.
     sequence = ('dataset','historical_model','asset_directory','strategy_versions',
                 'historical_backtest','forward_data','forward_shadow','verified_backtest_runs',
-                'forward_observations','frozen_decision','paper_account')
+                'forward_observations','frozen_decision','paper_account','paper_timeline')
     next_steps = [
         {'module':name,'reason':stages[name]['code'],
          'description':stages[name]['description'],'view':stages[name]['view']}

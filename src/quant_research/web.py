@@ -434,6 +434,18 @@ def handler(console):
                     return self.send(409, exc.payload())
                 except (ValueError, KeyError, OSError):
                     return self.send(409, {'status': 'BLOCKED', 'code': 'DAILY_OBSERVATION_INVALID'})
+            if path == '/api/v1/paper/timeline':
+                from .workflow.paper_timeline import paper_timeline
+                query=parse_qs(urlsplit(self.path).query,keep_blank_values=True)
+                if set(query)-{'limit'} or any(len(v)!=1 for v in query.values()):
+                    return self.send(400,{'status':'BLOCKED','code':'PAPER_TIMELINE_QUERY_INVALID'})
+                try:
+                    limit=int(query.get('limit',['20'])[0])
+                    return self.send(200,paper_timeline(console.root,limit=limit))
+                except (ValueError,TypeError):
+                    return self.send(400,{'status':'BLOCKED','code':'PAPER_TIMELINE_QUERY_INVALID'})
+                except PolicyError as exc:
+                    return self.send(409,exc.payload())
             if path == '/api/v1/paper':
                 from .workflow.forward_observations import inventory
                 return self.send(200, inventory(console.root))
