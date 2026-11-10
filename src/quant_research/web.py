@@ -297,6 +297,34 @@ def handler(console):
                 asset = Path(__file__).with_name('assets') / path.rsplit('/',1)[1]
                 content_type = 'text/css; charset=utf-8' if path.endswith('.css') else 'text/javascript; charset=utf-8'
                 return self.send(200, asset.read_bytes(), content_type)
+            if path in {'/api/v1/data/universe/asof', '/api/v1/data/universe/history',
+                        '/api/v1/data/universe/resolve'}:
+                from .data.forward_universe import asof_directory, observation_changes, resolve_symbols
+                query=parse_qs(urlsplit(self.path).query,keep_blank_values=True)
+                try:
+                    if any(len(v)!=1 for v in query.values()):
+                        raise ValueError('Repeated universe query parameters')
+                    params={key:values[0] for key,values in query.items()}
+                    if path.endswith('/asof'):
+                        if set(params)-{'asof','q','state','limit','offset'}:
+                            raise ValueError('Unexpected asof parameter')
+                        result=asof_directory(console.root,asof_utc=params.get('asof') or None,
+                            q=params.get('q',''),state=params.get('state','candidate'),
+                            limit=int(params.get('limit','30')),offset=int(params.get('offset','0')))
+                    elif path.endswith('/history'):
+                        if set(params)-{'limit'}:
+                            raise ValueError('Unexpected history parameter')
+                        result=observation_changes(console.root,limit=int(params.get('limit','30')))
+                    else:
+                        if set(params)-{'symbols','asof'} or not params.get('symbols'):
+                            raise ValueError('Symbols required')
+                        result=resolve_symbols(console.root,params['symbols'].split(','),
+                                               asof_utc=params.get('asof') or None)
+                    return self.send(200,result)
+                except PolicyError as exc:
+                    return self.send(409,exc.payload())
+                except (ValueError,TypeError):
+                    return self.send(400,{'status':'BLOCKED','code':'UNIVERSE_QUERY_INVALID'})
             if path == '/api/v1/data/assets':
                 from .data.assets import inventory
                 try:
