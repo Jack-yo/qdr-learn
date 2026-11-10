@@ -74,6 +74,8 @@ def execute(args):
     root = Path.cwd()
     predictions, archive = _frozen_predictions(root, args.training_run, bundle.metadata['snapshot_sha256'])
     clock = TradingClock()
+    from quant_research.validation.frozen_predictions import validate_frozen_predictions
+    prediction_audit = validate_frozen_predictions(predictions, prices, clock, config)
     events = _corporate_calendar(args.db, prices, clock)
     output, manifest = new_run(args, config, 'P5', prices)
     costs = {}
@@ -93,7 +95,7 @@ def execute(args):
         universe_version='VERIFIED_EFFECTIVE_DATED_SOURCE_UNIVERSE',
         historical_decision_eligible=True, model_archive_sha256=hashlib.sha256(
             (Path(args.training_run)/'manifest.json').read_bytes()).hexdigest(),
-        model_archive_status=archive['status'], costs_by_scenario=costs,
+        model_archive_status=archive['status'], frozen_prediction_row_audit=prediction_audit, costs_by_scenario=costs,
         data_snapshot_sha256=bundle.metadata['snapshot_sha256'],
         real_orders_enabled=False, research_grade=True)
     report(output, 'P5 合格真实历史数据回测', manifest,

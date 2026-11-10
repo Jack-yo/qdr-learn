@@ -51,6 +51,9 @@ def main(argv=None):
     close_snapshot.add_argument('--asof',help='XNYS session; defaults to the latest ready session')
     observation = commands.add_parser('daily-observation', help='Report verified frozen SIP observations')
     observation.add_argument('--asof', help='Read an exact archived session; defaults to the latest ready session')
+    ready=commands.add_parser('research-readiness', help='Read-only end-to-end evidence and blockers, never creates orders')
+    ready.add_argument('--asof', help='Optional nonfuture ISO calendar date')
+    ready.add_argument('--db',type=Path,default=Path('data/real_v21.duckdb'))
     commands.add_parser('paper-status', help='Inspect forward evidence without opening a paper account')
     daily_ops = commands.add_parser('daily-ops', help='Run the reviewed SIP daily sequence inside the actual close window')
     daily_ops.add_argument('--offline', action='store_true')
@@ -196,6 +199,11 @@ def main(argv=None):
         if getattr(args,'env_file',None) and not getattr(args,'offline',False):
             if args.command != 'assets-sync' or args.env_file.is_file():
                 load_local_credentials(args.env_file)
+        if args.command=='research-readiness':
+            from .workflow.research_readiness import research_readiness
+            result=research_readiness(Path.cwd(),db=args.db,asof=args.asof)
+            print(json.dumps(result,ensure_ascii=False,allow_nan=False))
+            return 4 if result['status']=='NOT_READY' else 0
         if args.command=='factor-lab-create':
             from .research.factor_lab import Registry
             registry=Registry(Path.cwd());version=registry.create_factor(json.loads(args.definition.read_text(encoding='utf-8')))

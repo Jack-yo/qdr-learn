@@ -390,6 +390,19 @@ def handler(console):
                         limit=int(values.get('limit','30')),offset=int(values.get('offset','0'))))
                 except PolicyError as exc:return self.send(409,exc.payload())
                 except (ValueError,TypeError):return self.send(400,{'status':'BLOCKED','code':'ASSET_QUERY_INVALID'})
+            if path == '/api/v1/research/readiness':
+                from .workflow.research_readiness import research_readiness
+                query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+                if set(query) - {'asof'} or any(len(v) != 1 for v in query.values()):
+                    return self.send(400, {'status':'BLOCKED', 'code':'READINESS_QUERY_INVALID'})
+                try:
+                    result = research_readiness(console.root, db=console.database,
+                                                asof=query.get('asof',[None])[0])
+                    return self.send(200, result)
+                except PolicyError as exc:
+                    return self.send(409, exc.payload())
+                except (OSError, ValueError):
+                    return self.send(409, {'status':'BLOCKED', 'code':'READINESS_LOCAL_EVIDENCE_UNAVAILABLE'})
             if path == '/api/v1/signals':
                 from .workflow.daily_observation import latest_report
                 query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
