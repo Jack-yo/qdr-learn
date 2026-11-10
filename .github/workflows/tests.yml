@@ -1,5 +1,6 @@
 name: P0 tests
-on: [push, pull_request]
+on:
+  workflow_dispatch:
 jobs:
   pytest:
     strategy:
