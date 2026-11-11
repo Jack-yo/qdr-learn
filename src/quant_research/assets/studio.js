@@ -166,6 +166,37 @@ async function backtests(){
  render(head('严格历史回测与来源验证','这里只展示通过真实来源、历史时点、冻结预测和完整哈希审核的建模成交回测。模拟成交不是券商回执。',`<a class="btn" href="/strategies">管理冻结策略 →</a>`)+
   `<div class="layout-2"><div class="stack">${panel('资格检查',`<div class="toolbar">${field('backtest-strategy','已冻结的策略版本','<select id="backtest-strategy"></select>')}${btn('backtest-preflight','核对数据及模型资格','btn-primary')}</div><div id="backtest-result"></div>`,'未经 PIT、历史公司行为及真实原价验收，不能运行严格回测。')}${panel('已验收的历史回测记录',`<div id="verified-backtest-list">${empty('正在读取真实回测档案','')}</div>`,'必须有真实完成的 P5 运行和文件哈希，才能展示收益、成本、净值。')}</div>
   <div class="stack">${panel('已验证运行结果',`<div class="toolbar">${field('verified-run','回测运行','<select id="verified-run"></select>')}${field('verified-scenario','持有期和双边成本情景','<select id="verified-scenario"></select>')}${btn('verified-view','查看核验结果')}</div><div id="verified-backtest-result">${empty('尚未选择合格回测运行','没有历史来源证据时不会显示示意净值或盈利。')}</div>`,'下表只使用保存的真实来源和建模成交输出；成本情景来自冻结回测配置。')}</div></div>`);
+ // V4 prediction research is distinct from tradable historical backtests.
+ $('#workspace').insertAdjacentHTML('beforeend',
+   '<div class="stack" style="margin-top:17px">'+
+   panel('V4 样本外预测实验',`<div id="v4-oos-list">${empty('正在读取研究档案','只展示真实保存的研究产物。')}</div><div id="v4-oos-detail" style="margin-top:15px"></div>`,
+     'A/B/C/D 同样本预测误差与分块置信区间；研究结果不等于回测成交或策略盈利。')+'</div>');
+ safe(async()=>{
+   const response=await request('/api/v1/v4/research/runs');
+   const records=response.runs||[];
+   $('#v4-oos-list').innerHTML=records.length
+     ?table(['研究版本','状态','数据快照','查看'],records.map(x=>[
+       esc(x.run_id),esc(x.status),esc(shr(x.input_snapshot_sha256||'',12)),
+       `<button class="btn" type="button" data-v4-run="${esc(x.run_id)}">查看研究指标</button>`]))
+     :empty('尚无 V4 样本外实验档案','需要通过严格输入协议运行模型研究并保存实际产物；系统不会预置模拟胜率。');
+   document.querySelectorAll('[data-v4-run]').forEach(button=>button.onclick=()=>safe(async()=>{
+     const data=await request('/api/v1/v4/research/runs/'+encodeURIComponent(button.dataset.v4Run));
+     const metrics=data.metrics||[],increment=data.increment_vs_alpha_only||[];
+     const metricTable=metrics.length?table(['模型','期限','样本数','上涨 Brier','基准 Brier','总收益 MSE'],
+       metrics.map(x=>[esc(x.variant),esc(x.horizon)+'日',num(x.rows),fmt(x.brier_up,4),
+       fmt(x.baseline_brier_up,4),fmt(x.gross_mse,6)])):
+       empty('暂无有效样本外评分','对应预测尚未产生可验证结果。');
+     const incTable=increment.length?table(['期限','研究结论','Brier 增量','95% 区间','收益 MSE 增量'],
+       increment.map(x=>[esc(x.horizon)+'日',esc(x.status),fmt(x.brier_gain,6),
+       esc(x.brier_gain_ci95?x.brier_gain_ci95.map(v=>fmt(v,6)).join(' ~ '):'—'),
+       fmt(x.gross_mse_gain,8)])):
+       empty('暂无同样本增量检验','若可用样本不足，应保持未判定状态。');
+     $('#v4-oos-detail').innerHTML=panel('研究版本 '+esc(button.dataset.v4Run),
+       metricTable+'<h4 class="section-title">市场/风格对 Alpha 的条件预测增量</h4>'+
+       incTable+'<p class="text-muted">区间未校正多重试验；哈希仅证明本地文件完整，不证明数据 PIT 或收益优势。</p>'+
+       jsonNote(data.manifest));
+   }));
+ });
  let list=[], runs=[];
  try{const d=await request('/api/v1/strategies');list=(d.strategies||[]).filter(x=>x.status==='FROZEN');$('#backtest-strategy').innerHTML=list.map(x=>`<option value="${esc(x.id)}">${esc(x.name)} · v${x.version}</option>`).join('');$('#backtest-preflight').disabled=!list.length;$('#backtest-result').innerHTML=list.length?empty('选择版本后核对真实数据门槛','这一步不会自行生成回测成绩。'):empty('请先冻结研究策略','在策略工作台保存并冻结版本。','/strategies','创建策略')}catch(e){showBlock('#backtest-result',e,'策略登记不可用')}
  $('#backtest-preflight').onclick=()=>safe(async()=>{const id=$('#backtest-strategy').value;if(!id)return;const out=$('#backtest-result');loading(out);try{const d=await request(`/api/v1/strategies/${encodeURIComponent(id)}/preflight`,{});out.innerHTML=`${note('严格回测资格：'+d.status,d.status==='BACKTEST_BLOCKED'?'缺少真实历史决策或结算证据时禁止执行回测。':'请检查逐项来源资格。',d.status==='BACKTEST_BLOCKED'?'warning':'')}${d.checks?table(['检查项目','状态','缺项'],evidenceRow(d.checks)):''}${d.report_path?linkTo('/'+d.report_path,'打开审核报告'):''}${jsonNote(d)}`}catch(e){showBlock(out,e,'回测尚未具备资格')}});
