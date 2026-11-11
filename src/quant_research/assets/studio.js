@@ -61,7 +61,18 @@ async function showResearchReadiness(){
  }catch(e){showBlock(target,e,'端到端验收状态无法读取')}
 }
 async function overview(){
- render(head('今天的量化研究，从这里开始','一站式完成行情验证、因子研究、策略检验和每日观察。只展示实际取得并通过来源校验的数据。',`<a class="btn btn-primary" href="/factors">进入因子实验室 →</a>`,'WELCOME BACK · RESEARCH WORKSPACE')+`<div id="overview-content"></div><div id="readiness-summary" style="margin-top:18px"></div>`);
+ render(head('总览 · 每日量化研究','市场状态、经典风格、个股 Alpha 与持仓风险统一汇总；只有真实验证通过的预测才能形成计划。',`<a class="btn btn-primary" href="/strategies">研究多因子候选 →</a>`,'QUANT STUDIO · FOUR LAYER RESEARCH')+`<div id="v4-daily-overview"></div><div id="overview-content"></div><div id="readiness-summary" style="margin-top:18px"></div>`);
+ safe(async()=>{
+   const response=await request('/api/v1/v4/daily');
+   const latest=(response.runs||[])[0];const out=$('#v4-daily-overview');if(!out)return;
+   if(!latest){out.innerHTML=panel('最新四层研究记录',empty('暂无已经归档的 V4 日终研究','当日研究必须由真实已观测的数据驱动；没有记录时不显示任何示意预测概率。'),'');return;}
+   const names={data:'真实数据',market:'① 市场状态',styles:'② 经典因子',alpha:'③ 个股 Alpha',risk:'④ 持仓风险',freeze:'交易计划冻结'};
+   const rows=(latest.stages||[]).map(x=>[esc(names[x.stage]||x.stage),esc(x.status),esc(x.code||'—')]);
+   out.innerHTML=panel('最新研究日 · '+esc(latest.session_date_et),
+      `<p class="text-muted">${esc(latest.status)} · 实际运行时间 ${esc(dateText(latest.created_at_utc))}。不满足模型或数据资格时不生成交易计划。</p>`+
+      table(['研究层级','结果','具体原因'],rows)+
+      '<p class="text-muted">四层可以独立研究，只有具备证据的模型才进入跨层交易决策。研究归档不表示实盘收益。</p>');
+ });
  try{const d=await request('/api/status');const prices=d.prices||[],caps=d.capabilities||{},pass=Object.values(caps).filter(v=>v.status==='PASS').length;$('#top-status').textContent=prices.length?'真实数据已接入':'等待真实数据';$('#top-status').className='top-status '+(prices.length?'ok':'bad');
  const has=prices.length>0;
  $('#overview-content').innerHTML=`
