@@ -112,10 +112,14 @@ pages.lab=async()=>{
 pages.screen=async()=>{
  const all=await Promise.all([
     settle('/api/v1/strategies'),settle('/api/v1/v4/research/runs'),
-    settle('/api/v1/backtests/verified'),settle('/api/v1/v4/forecasts')]);
- const [saved,runs,backtests,forecasts]=all.map(x=>x.ok?x.data:null);
+    settle('/api/v1/backtests/verified'),settle('/api/v1/v4/forecasts'),
+    settle('/api/v1/v4/plans')]);
+ const [saved,runs,backtests,forecasts,planArchive]=all.map(x=>x.ok?x.data:null);
  const strategies=saved?.strategies||[],experiments=saved?.factor_experiments||[];
  const studies=runs?.runs||[],frozen=(forecasts?.records||[]).filter(x=>x.status==='VERIFIED_LOCAL_FORWARD_RESEARCH_ONLY');
+ const planRecords=(planArchive?.records||[]).filter(x=>x.status!=='CORRUPT_RESEARCH_PLAN');
+ const planRow=planRecords[0]||null;
+ const planDetail=planRow?((await settle('/api/v1/v4/plans/'+encodeURIComponent(planRow.session_date_et)+'/'+encodeURIComponent(planRow.identity))).data||null):null;
  const verified=Array.isArray(backtests?.results)?backtests.results:Array.isArray(backtests?.runs)?backtests.runs:[];
  const stratrows=strategies.slice(0,12).map(x=>[
     e(x.name)+' · v'+e(x.version),e(x.config?.strategy?.horizon||'—')+'日',
@@ -159,6 +163,10 @@ pages.screen=async()=>{
       card('严格回测与前向冻结记录',
         row('已验证历史回测',verified.length?n(verified.length,0):'—')+
         row('当日真实冻结的 Alpha 研究',frozen.length?n(frozen.length,0):'—')+
+        row('最新风险研究计划',planRow?n(planRow.research_plan_count,0):'—')+
+        (planDetail?.plans?.length?table(['H3 研究候选','成本后期望','参考持仓权重'],
+          planDetail.plans.slice(0,5).map(x=>[e(x.security_id),signed(x.estimated_net_edge),pct(x.indicative_weight)])):
+          empty('目前无已冻结的研究交易计划','缺少已校准预测、同日真实证券元数据或对账账户时，系统不制造买入建议。'))+
         (verified.length?table(['运行版本','来源资格'],verified.slice(0,8).map(x=>[
            short(x.run_id||x.id),e(x.status||'已登记')])):empty('暂无严格回测业绩',
            '缺少历史 PIT/公司行为/原价成交资格时，不显示净值、收益和回撤曲线。'))+
