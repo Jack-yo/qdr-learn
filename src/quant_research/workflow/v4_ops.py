@@ -153,6 +153,12 @@ def run_v4_pipeline_day(root: Path, session_date: str, *,
     diary=run_observed_v4_daily(root,session_date,
                                  symbols=admitted['source_symbols'])
     source=diary.get('source_snapshot_sha256')
+    if not source:
+        return {'status':'DAILY_SOURCE_NOT_VERIFIED',
+                'code':'DAILY_DIARY_HAS_NO_VERIFIABLE_SOURCE_DIGEST',
+                'session_date_et':session_date,'research_plan':plan,
+                'daily_diary_status':diary.get('status'),
+                'real_orders_enabled':False,'paper_ledger_advanced':False}
     if plan.get('source_snapshot_sha256') and plan['source_snapshot_sha256']!=admitted['source_snapshot_sha256']:
         return {'status':'SOURCE_SNAPSHOT_MISMATCH','code':'POST_ADMISSION_PLAN_SOURCE_CHANGED',
                 'session_date_et':session_date,'research_plan':plan,
@@ -168,6 +174,12 @@ def run_v4_pipeline_day(root: Path, session_date: str, *,
                 'code':'FORECAST_SOURCE_DIFFERS_FROM_DAILY_WAREHOUSE',
                 'session_date_et':session_date,
                 'research_plan':plan,'daily_diary_status':diary.get('status'),
+                'real_orders_enabled':False,'paper_ledger_advanced':False}
+    if not plan.get('source_snapshot_sha256'):
+        return {'status':'PLAN_SOURCE_NOT_VERIFIED',
+                'code':'RESEARCH_PLAN_HAS_NO_SOURCE_DIGEST',
+                'session_date_et':session_date,'research_plan':plan,
+                'daily_diary_status':diary.get('status'),
                 'real_orders_enabled':False,'paper_ledger_advanced':False}
     plan_ok=plan.get('status') in ('RESEARCH_PLAN_FROZEN_NO_ORDER',
                                    'RESEARCH_PLAN_ALREADY_FROZEN')
