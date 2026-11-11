@@ -57,7 +57,9 @@ def compute_features(context, clock, factors=None, mode="strict", exclude_symbol
         if factor.dependency == "cross_section":
             cross_complete = context.close.notna().rolling(
                 factor.lookback + 1, min_periods=factor.lookback + 1).sum().eq(factor.lookback + 1).all(axis=1)
-            complete = complete.mul(cross_complete, axis=0)
+            availability_complete = context.availability.notna().rolling(
+                factor.lookback + 1, min_periods=factor.lookback + 1).sum().eq(factor.lookback + 1).all(axis=1)
+            complete = complete.mul(cross_complete & availability_complete, axis=0)
         if factor.dependency == "market":
             complete = complete.mul(context.close[context.benchmark_id].notna().rolling(factor.lookback+1,min_periods=factor.lookback+1).sum().eq(factor.lookback+1),axis=0)
         if factor.dependency == "sector" and context.sector_proxy is not None:
