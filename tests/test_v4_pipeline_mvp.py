@@ -65,3 +65,31 @@ def test_preflight_failure_never_calls_model_or_creates_frozen_plan(monkeypatch,
     assert result['code']=='BUNDLE_DIFFERS_FROM_LIVE_WAREHOUSE_SNAPSHOT'
     assert not (tmp_path/'outputs/v4_forecasts').exists()
     assert not (tmp_path/'outputs/v4_research_plans').exists()
+
+
+
+def test_missing_daily_source_receipt_is_not_a_success(monkeypatch,tmp_path):
+    _allow_matched_source(monkeypatch)
+    module=__import__('quant_research.workflow.v4_review_cli',fromlist=['run_v4_review_day'])
+    monkeypatch.setattr(module,'run_v4_review_day',
+        lambda *args,**kw:{'status':'RESEARCH_PLAN_FROZEN_NO_ORDER',
+                           'source_snapshot_sha256':'a'*64})
+    monkeypatch.setattr(v4_ops,'run_observed_v4_daily',
+        lambda *args,**kw:{'status':'BLOCKED','code':'NO_SOURCE_ATTESTED_DAILY_SNAPSHOT'})
+    result=v4_ops.run_v4_pipeline_day(tmp_path,'2026-11-10',bundle_id='dated-source')
+    assert result['status']=='DAILY_SOURCE_NOT_VERIFIED'
+    assert result['code']=='DAILY_DIARY_HAS_NO_VERIFIABLE_SOURCE_DIGEST'
+    assert result['real_orders_enabled'] is False
+
+
+def test_missing_plan_source_receipt_is_not_a_success(monkeypatch,tmp_path):
+    _allow_matched_source(monkeypatch)
+    module=__import__('quant_research.workflow.v4_review_cli',fromlist=['run_v4_review_day'])
+    monkeypatch.setattr(module,'run_v4_review_day',
+        lambda *args,**kw:{'status':'RESEARCH_PLAN_FROZEN_NO_ORDER'})
+    monkeypatch.setattr(v4_ops,'run_observed_v4_daily',
+        lambda *args,**kw:{'status':'RESEARCH_UPDATED_NO_TRADE',
+                           'source_snapshot_sha256':'a'*64})
+    result=v4_ops.run_v4_pipeline_day(tmp_path,'2026-11-10',bundle_id='dated-source')
+    assert result['status']=='PLAN_SOURCE_NOT_VERIFIED'
+    assert result['real_orders_enabled'] is False
