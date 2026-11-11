@@ -95,3 +95,54 @@ def assess_portfolio(positions: pd.DataFrame, daily_returns: pd.DataFrame,
             'daily_expected_shortfall95':cvar95,
             'sector_weights':{str(k):float(v) for k,v in sector_weights.items()},
             'alerts':alerts,'source_attested':False}
+
+
+
+def assess_paper_concentration(account: dict, policy: RiskPolicy = RiskPolicy()) -> dict:
+    """Compute concentration using actual reconciled ledger positions and marks.
+
+    Historical VaR/ES are explicitly unavailable until a dated, eligible
+    security-return history is supplied. Never infer unknown sector labels.
+    """
+    if account.get('status') != 'INTERNALLY_RECONCILED_PAPER_ESTIMATE':
+        return {'status':'BLOCKED','code':account.get('code','PAPER_ACCOUNT_UNVERIFIED'),
+                'alerts':[],'real_orders_enabled':False}
+    positions = account.get('position_details')
+    marks = account.get('last_prices')
+    equity = account.get('equity')
+    if not isinstance(positions,dict) or not isinstance(marks,dict) or not isinstance(equity,(int,float)) or not np.isfinite(equity) or equity<=0:
+        return {'status':'BLOCKED','code':'PAPER_RISK_INPUT_UNVERIFIED','alerts':[],'real_orders_enabled':False}
+    exposures={}
+    sector_weights={}
+    missing_sector=[]
+    for sid,p in positions.items():
+        mark=marks.get(sid)
+        q=p.get('quantity') if isinstance(p,dict) else None
+        if not isinstance(mark,(int,float)) or not isinstance(q,(int,float)) or not np.isfinite(mark) or not np.isfinite(q) or mark<=0 or q<=0:
+            return {'status':'BLOCKED','code':'PAPER_MARK_MISSING','alerts':[],
+                    'real_orders_enabled':False,'missing_security_id':sid}
+        w=float(mark*q/equity)
+        exposures[sid]=w
+        sector=p.get('sector')
+        if not isinstance(sector,str) or sector.upper() in ('UNKNOWN','', 'N/A'):
+            missing_sector.append(sid)
+        else:
+            sector_weights[sector]=sector_weights.get(sector,0.)+w
+    alerts=[]
+    for sid,w in exposures.items():
+        if w>policy.max_stock_weight+1e-9:
+            alerts.append({'code':'STOCK_LIMIT','subject':sid,'actual':w,'limit':policy.max_stock_weight})
+    for sector,w in sector_weights.items():
+        if w>policy.max_sector_weight+1e-9:
+            alerts.append({'code':'SECTOR_LIMIT','subject':sector,'actual':w,'limit':policy.max_sector_weight})
+    gross=float(sum(exposures.values()))
+    if gross>policy.max_gross_weight+1e-9:
+        alerts.append({'code':'GROSS_LIMIT','subject':'portfolio','actual':gross,'limit':policy.max_gross_weight})
+    if missing_sector:
+        alerts.append({'code':'SECTOR_CLASSIFICATION_UNAVAILABLE','subject':'unclassified',
+                       'affected_securities':missing_sector})
+    return {'status':'CONCENTRATION_MEASURED','last_session':account.get('last_session'),
+            'gross_weight':gross,'position_weights':exposures,'sector_weights':sector_weights,
+            'alerts':alerts,'daily_var95':None,'daily_expected_shortfall95':None,
+            'historical_return_risk_status':'NOT_EVALUATED_WITH_VERIFIED_INPUTS',
+            'real_orders_enabled':False,'research_only':True}
