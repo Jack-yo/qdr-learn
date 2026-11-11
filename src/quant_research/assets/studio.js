@@ -61,7 +61,7 @@ async function showResearchReadiness(){
  }catch(e){showBlock(target,e,'端到端验收状态无法读取')}
 }
 async function overview(){
- render(head('总览 · 每日量化研究','市场状态、经典风格、个股 Alpha 与持仓风险统一汇总；只有真实验证通过的预测才能形成计划。',`<a class="btn btn-primary" href="/strategies">研究多因子候选 →</a>`,'QUANT STUDIO · FOUR LAYER RESEARCH')+`<div id="v4-daily-overview"></div><div id="overview-content"></div><div id="readiness-summary" style="margin-top:18px"></div>`);
+ render(head('总览 · 每日量化研究','市场状态、经典风格、个股 Alpha 与持仓风险统一汇总；只有真实验证通过的预测才能形成计划。',`<a class="btn btn-primary" href="/strategies">研究多因子候选 →</a>`,'QUANT STUDIO · FOUR LAYER RESEARCH')+`<div id="v4-forward-overview"></div><div id="v4-daily-overview"></div><div id="overview-content"></div><div id="readiness-summary" style="margin-top:18px"></div>`);
  safe(async()=>{
    const response=await request('/api/v1/v4/daily');
    const latest=(response.runs||[])[0];const out=$('#v4-daily-overview');if(!out)return;
@@ -72,6 +72,31 @@ async function overview(){
       `<p class="text-muted">${esc(latest.status)} · 实际运行时间 ${esc(dateText(latest.created_at_utc))}。不满足模型或数据资格时不生成交易计划。</p>`+
       table(['研究层级','结果','具体原因'],rows)+
       '<p class="text-muted">四层可以独立研究，只有具备证据的模型才进入跨层交易决策。研究归档不表示实盘收益。</p>');
+ });
+ safe(async()=>{
+   const index=await request('/api/v1/v4/forecasts');
+   const item=(index.records||[])[0];const el=$('#v4-forward-overview');
+   if(!el)return;
+   if(!item || item.status!=='VERIFIED_LOCAL_FORWARD_RESEARCH_ONLY'){
+     el.innerHTML=panel('未来 1 / 3 / 5 日个股预测研究',
+       empty('暂无冻结的 V4 前向预测','需要在实际收盘后，使用合法已知数据训练并冻结预测；不展示示意收益或胜率。'));
+     return;
+   }
+   const d=await request('/api/v1/v4/forecasts/'+
+      encodeURIComponent(item.session_date_et)+'/'+encodeURIComponent(item.identity));
+   const ranked=(d.forecasts||[]).filter(x=>x.model_variant==='D'&&x.horizon===3)
+     .filter(x=>x.expected_gross_trade_return!=null)
+     .sort((a,b)=>b.expected_gross_trade_return-a.expected_gross_trade_return).slice(0,8);
+   const rows=ranked.map(x=>[
+      esc(x.security_id),pct(x.expected_gross_trade_return),pct(x.expected_excess_return),
+      x.probability_status_up==='CALIBRATED_CHRONOLOGICAL_HOLDOUT'?pct(x.p_up):'未校准',
+      esc(shr(x.model_version,13))
+   ]);
+   el.innerHTML=panel('冻结的前向预测研究 · '+esc(item.session_date_et),
+      '<p class="text-muted">使用截至该日收盘时已知的历史训练样本。以下是预测研究结果，不代表可交易候选或经证实的收益优势。</p>'+
+      (rows.length?table(['证券','H3 预测总收益','H3 预测超额收益','上涨概率','模型版本'],rows):
+        empty('该版本没有完整的三日预测','缺少合格特征、训练或校准样本。'))+
+      '<p class="text-muted">预测值尚未获得独立来源资格、成本后优势和连续前向验证；不能视为买入建议。</p>');
  });
  try{const d=await request('/api/status');const prices=d.prices||[],caps=d.capabilities||{},pass=Object.values(caps).filter(v=>v.status==='PASS').length;$('#top-status').textContent=prices.length?'真实数据已接入':'等待真实数据';$('#top-status').className='top-status '+(prices.length?'ok':'bad');
  const has=prices.length>0;
