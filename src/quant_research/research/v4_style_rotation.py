@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from quant_research.features.context import rolling_available
 from sklearn.linear_model import Ridge
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
@@ -35,10 +36,11 @@ def style_observations(prices: pd.DataFrame, availability: pd.DataFrame,
         rel5=ratio.div(ratio.shift(5))-1
         rel20=ratio.div(ratio.shift(20))-1
         previous5=ratio.shift(5).div(ratio.shift(10))-1
-        pair_available=availability[[long_symbol,short_symbol]].max(axis=1)
-        lookback_available=pair_available.rolling(21,min_periods=21).max()
-        complete=prices[[long_symbol,short_symbol]].notna().rolling(
+        lookback_available=rolling_available(availability[[long_symbol,short_symbol]],21).max(axis=1)
+        complete=(prices[[long_symbol,short_symbol]].notna().rolling(
             21,min_periods=21).sum().eq(21).all(axis=1)
+            & availability[[long_symbol,short_symbol]].notna().rolling(
+            21,min_periods=21).sum().eq(21).all(axis=1))
         values=pd.DataFrame({
             'date':prices.index, 'style_id':style,
             'relative_return_5d':rel5.to_numpy(),
