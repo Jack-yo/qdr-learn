@@ -11,6 +11,12 @@ def _allow_matched_source(monkeypatch):
                            'source_snapshot_sha256':'a'*64,
                            'source_symbols':['AAA','SPY'],
                            'real_orders_enabled':False})
+    monkeypatch.setattr(v4_ops,'research_readiness',
+        lambda root,asof,*,symbols:{'stages':{'dataset':{
+            'status':'OBSERVATION_ONLY','evidence':{
+                'asof_date_et':asof,'symbols':symbols,
+                'latest_session_complete':True,
+                'source_snapshot_sha256':'a'*64}}}})
 
 
 def test_pipeline_records_research_plan_and_actual_daily_observation(monkeypatch,tmp_path):
@@ -122,3 +128,25 @@ def test_post_preflight_plan_source_change_never_writes_daily_archive(monkeypatc
     result=v4_ops.run_v4_pipeline_day(tmp_path,'2026-11-10',bundle_id='bundle')
     assert result['status']=='SOURCE_SNAPSHOT_MISMATCH'
     assert result['code']=='POST_ADMISSION_PLAN_SOURCE_CHANGED'
+
+
+def test_post_fit_source_change_never_writes_immutable_daily(monkeypatch,tmp_path):
+    _allow_matched_source(monkeypatch)
+    monkeypatch.setattr(v4_ops,'research_readiness',
+        lambda root,asof,*,symbols:{'stages':{'dataset':{
+            'status':'OBSERVATION_ONLY','evidence':{
+                'asof_date_et':asof,'symbols':symbols,
+                'latest_session_complete':True,
+                'source_snapshot_sha256':'b'*64}}}})
+    module=__import__('quant_research.workflow.v4_review_cli',fromlist=['run_v4_review_day'])
+    monkeypatch.setattr(module,'run_v4_review_day',
+        lambda *args,**kw:{'status':'RESEARCH_PLAN_FROZEN_NO_ORDER',
+                           'source_snapshot_sha256':'a'*64})
+    def forbidden(*args,**kwargs):
+        raise AssertionError('Immutable daily archive attempted with stale source')
+    monkeypatch.setattr(v4_ops,'run_observed_v4_daily',forbidden)
+    result=v4_ops.run_v4_pipeline_day(tmp_path,'2026-11-10',
+                                       bundle_id='source-mutated')
+    assert result['status']=='SOURCE_SNAPSHOT_MISMATCH'
+    assert result['code']=='POST_MODEL_WAREHOUSE_SOURCE_CHANGED_BEFORE_DAILY_FREEZE'
+    assert not result['paper_ledger_advanced']
