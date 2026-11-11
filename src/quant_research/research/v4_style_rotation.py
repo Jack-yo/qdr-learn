@@ -135,3 +135,31 @@ def style_lead_oos(observations: pd.DataFrame, labels: pd.DataFrame,
             part['decision_eligible']=False
             rows.append(part)
     return pd.concat(rows,ignore_index=True) if rows else pd.DataFrame()
+
+
+
+def score_style_lead(predictions: pd.DataFrame, *, min_sessions: int = 60) -> pd.DataFrame:
+    """Report strictly OOS performance against an expanding-window mean baseline."""
+    required={'date','style_id','horizon','forward_relative_return',
+              'predicted_relative_return','naive_relative_return'}
+    if required-set(predictions):
+        raise ValueError('Missing style leading-return prediction evidence')
+    if predictions.duplicated(['date','style_id','horizon']).any():
+        raise ValueError('Duplicate style forecasts')
+    rows=[]
+    for (style,horizon), group in predictions.groupby(['style_id','horizon']):
+        group=group.dropna(subset=['forward_relative_return','predicted_relative_return','naive_relative_return'])
+        if group.empty:
+            continue
+        mse=float(((group.predicted_relative_return-group.forward_relative_return)**2).mean())
+        baseline=float(((group.naive_relative_return-group.forward_relative_return)**2).mean())
+        rows.append({'style_id':style,'horizon':int(horizon),
+                     'sessions':group.date.nunique(),'rows':len(group),
+                     'oos_mse':mse,'naive_mse':baseline,
+                     'mse_gain':baseline-mse,
+                     'directional_accuracy':float((
+                          group.predicted_relative_return.gt(0)==group.forward_relative_return.gt(0)).mean()),
+                     'status':'RESEARCH_ONLY' if group.date.nunique()>=min_sessions
+                              else 'INSUFFICIENT_OOS_SESSIONS',
+                     'execution_eligible':False})
+    return pd.DataFrame(rows)
