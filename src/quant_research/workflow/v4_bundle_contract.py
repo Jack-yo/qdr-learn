@@ -6,14 +6,13 @@ T-day signal; model training remains separately gated by source provenance.
 """
 from __future__ import annotations
 
-import math
 import re
 
 import numpy as np
 import pandas as pd
 
 
-_SHA = re.compile(r"[0-9a-f]{64}\\Z")
+_SHA = re.compile(r"[0-9a-f]{64}\Z")
 
 
 def _session_dates(series, field):
