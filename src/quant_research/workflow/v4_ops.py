@@ -46,16 +46,36 @@ def observed_v4_adapters(root: Path, readiness: dict):
             return {'status':'BLOCKED','code':type(exc).__name__}
 
     def alpha(day,history):
+        from quant_research.research.v4_forecast_archive import latest_forward_research
         from quant_research.research.v4_artifacts import list_research_runs
+        expected=(stage.get('dataset') or {}).get('evidence',{}).get('source_snapshot_sha256')
+        frozen=latest_forward_research(root,limit=20)
+        matching=[x for x in frozen if x.get('session_date_et')==day
+                  and x.get('source_snapshot_sha256')==expected
+                  and x.get('status')=='VERIFIED_LOCAL_FORWARD_RESEARCH_ONLY']
+        if matching:
+            return {'status':'RESEARCH_ONLY','code':'PROSPECTIVE_ALPHA_RESEARCH_FROZEN',
+                    'detail':{'session_date_et':day,'forecast_identity':matching[0]['identity'],
+                              'forecast_rows':matching[0]['forecast_rows'],
+                              'paper_admission':False}}
         rows=list_research_runs(root,limit=20)
         actual=[r for r in rows if r.get('status')=='VERIFIED_LOCAL_RESEARCH_ARTIFACT_ONLY']
         if not actual:
-            return {'status':'BLOCKED','code':'NO_V4_OOS_RESEARCH_ARCHIVE'}
-        return {'status':'RESEARCH_ONLY','code':'OOS_ARCHIVE_NOT_EXECUTION_APPROVED',
+            return {'status':'BLOCKED','code':'NO_DATED_V4_ALPHA_PREDICTION'}
+        return {'status':'RESEARCH_ONLY','code':'OOS_RESEARCH_ONLY_NO_CURRENT_FORECAST',
                 'detail':{'available_research_runs':len(actual),
                           'latest_run_id':actual[0]['run_id']}}
 
     def risk(day,history):
+        from quant_research.workflow.v4_candidate_bridge import latest_indicative_reviews
+        reviewed=latest_indicative_reviews(root,limit=20)
+        latest=[x for x in reviewed['records'] if x.get('session_date_et')==day
+                and x.get('status')!='CORRUPT_RESEARCH_PLAN']
+        if latest:
+            return {'status':'RESEARCH_ONLY','code':'INDICATIVE_RISK_PLANS_NO_PAPER_EXECUTION',
+                    'detail':{'session_date_et':day,'research_plan_count':latest[0]['research_plan_count'],
+                              'plan_identity':latest[0]['identity'],
+                              'real_orders_enabled':False}}
         from quant_research.backtest.paper import account_summary
         from quant_research.models.settings import load_settings
         from quant_research.risk.portfolio import RiskPolicy,assess_paper_concentration
