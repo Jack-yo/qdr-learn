@@ -434,6 +434,31 @@ def handler(console):
                     return self.send(409, exc.payload())
                 except (ValueError, KeyError, OSError):
                     return self.send(409, {'status': 'BLOCKED', 'code': 'DAILY_OBSERVATION_INVALID'})
+            if path == '/api/v1/v4/forecasts' or path.startswith('/api/v1/v4/forecasts/'):
+                from .research.v4_forecast_archive import (
+                    latest_forward_research, read_research_forecast)
+                if urlsplit(self.path).query:
+                    return self.send(400,{'status':'BLOCKED','code':'UNEXPECTED_FORECAST_QUERY'})
+                try:
+                    if path == '/api/v1/v4/forecasts':
+                        return self.send(200,{'status':'FORWARD_RESEARCH_ARCHIVE_ONLY',
+                            'records':latest_forward_research(console.root,limit=5),
+                            'real_orders_enabled':False})
+                    parts=path.removeprefix('/api/v1/v4/forecasts/').split('/')
+                    if len(parts)!=2:
+                        raise ValueError('Forecast route needs date and identity')
+                    item=read_research_forecast(console.root,parts[0],parts[1],include_rows=True)
+                    if item['manifest']['forecast_rows']>20000:
+                        raise ValueError('Forecast exceeds browser display quota')
+                    for name in ('forecasts','model_cards'):
+                        item[name]=json.loads(item[name].head(200).to_json(
+                            orient='records',date_format='iso'))
+                    return self.send(200,item)
+                except FileNotFoundError:
+                    return self.send(404,{'status':'BLOCKED','code':'FORECAST_ARCHIVE_NOT_FOUND'})
+                except (ValueError,OSError,KeyError,TypeError):
+                    return self.send(409,{'status':'BLOCKED',
+                        'code':'FORECAST_ARCHIVE_INVALID_OR_UNVERIFIED'})
             if path == '/api/v1/v4/daily':
                 from .workflow.v4_daily import latest_v4_daily
                 if urlsplit(self.path).query:
