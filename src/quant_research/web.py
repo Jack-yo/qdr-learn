@@ -439,6 +439,22 @@ def handler(console):
                     return self.send(409, exc.payload())
                 except (ValueError, KeyError, OSError):
                     return self.send(409, {'status': 'BLOCKED', 'code': 'DAILY_OBSERVATION_INVALID'})
+            if path == '/api/v1/v4/outcomes' or path.startswith('/api/v1/v4/outcomes/'):
+                from .workflow.v4_plan_outcomes import (
+                    latest_research_outcomes, read_research_outcomes)
+                if urlsplit(self.path).query:
+                    return self.send(400,{'status':'BLOCKED','code':'INVALID_OUTCOME_QUERY'})
+                try:
+                    if path == '/api/v1/v4/outcomes':
+                        return self.send(200,latest_research_outcomes(console.root,limit=15))
+                    parts=path.removeprefix('/api/v1/v4/outcomes/').split('/')
+                    if len(parts)!=2:
+                        raise ValueError('Invalid outcome reference')
+                    return self.send(200,read_research_outcomes(console.root,parts[0],parts[1]))
+                except FileNotFoundError:
+                    return self.send(404,{'status':'BLOCKED','code':'RESEARCH_OUTCOME_NOT_FOUND'})
+                except (OSError,ValueError,KeyError,TypeError):
+                    return self.send(409,{'status':'BLOCKED','code':'RESEARCH_OUTCOME_UNVERIFIED'})
             if path == '/api/v1/v4/plans' or path.startswith('/api/v1/v4/plans/'):
                 from .workflow.v4_candidate_bridge import (
                     latest_indicative_reviews, read_indicative_review)
