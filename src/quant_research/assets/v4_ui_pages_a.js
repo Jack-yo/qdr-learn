@@ -13,8 +13,8 @@ pages.overview=async()=>{
  const all=await Promise.all([
   settle('/api/status'),settle('/api/v1/v4/daily'),settle('/api/v1/v4/forecasts'),
   settle('/api/v1/styles?mode=observation'),settle('/api/v1/paper/risk'),settle('/api/v1/research/readiness'),
-  settle('/api/v1/v4/plans')]);
- const [system,diary,forecasts,style,risk,readiness,planIndex]=all.map(result);
+  settle('/api/v1/v4/plans'),settle('/api/v1/v4/forward-scorecard')]);
+ const [system,diary,forecasts,style,risk,readiness,planIndex,scorecard]=all.map(result);
  const planInfo=(planIndex?.records||[])[0];
  const latestPlan=planInfo&&planInfo.status!=='CORRUPT_RESEARCH_PLAN'?
    result(await settle('/api/v1/v4/plans/'+encodeURIComponent(planInfo.session_date_et)+'/'+encodeURIComponent(planInfo.identity))):null;
@@ -67,6 +67,23 @@ pages.overview=async()=>{
          note('VaR 和预期尾部损失只有存在真实合格历史收益时才展示。'):
          empty('尚无有效的风险账本','缺少已内部核对的持仓及估值，不生成虚构风险结果。'),'L4 · 风险审阅')+
      '</div>'+
+     '<div style="margin-bottom:15px">'+card('前向 H3 概率预测质量 · 严格时间外对照',
+       scorecard?.comparable_sessions?
+         row('已完成 H3 结果的研究日',n(scorecard.sessions_with_outcomes,0))+
+         row('有效因果基准比较日',n(scorecard.comparable_sessions,0))+
+         row('上涨概率 Brier / 模型',n(scorecard.model_mean_brier,4))+
+         row('上涨概率 Brier / 当时可知的历史基线',n(scorecard.causal_baseline_mean_brier,4))+
+         row('模型－基线 Brier（负值更好）',
+             n(scorecard.paired_daily_brier_delta,4))+
+         row('五交易日区块 Bootstrap 95% 区间',
+             scorecard.paired_block_bootstrap_95ci?
+             e(scorecard.paired_block_bootstrap_95ci.map(v=>Number(v).toFixed(4)).join(' ～ ')):'—')+
+         note(scorecard.status==='FORWARD_RESEARCH_SAMPLE_SUFFICIENT_FOR_DIAGNOSTICS_ONLY'?
+           '这只是前向研究概率质量检验：市场数据来源尚未独立审计，也不等于成交后策略有净优势。':
+           '前向比较样本未达到预设最低门槛，不报告统计区间或模型已获验收。'):
+         empty('尚无足够的真实前向研究结果',
+               '必须有交易日前冻结的预测，以及后续完成的原价 H3 全期限结果；不能用止损后的收益替代原始概率标签。'),
+       '非模拟成交 · 不展示虚构绩效')+'</div>'+
      grid(2,[
        card('每日四层运行记录',latest?row('日终研究状态',statusBadge(latest.status))+
          table(['层级','状态','原因'],stageRows):empty('尚无真实日终运行记录','日终模型和数据源尚未形成可核验的统一归档。'),'已归档研究日志'),
