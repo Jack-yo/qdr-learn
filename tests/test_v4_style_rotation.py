@@ -37,10 +37,10 @@ def test_style_lead_predictions_stay_nonexecuting_and_pit_restricted():
     sessions,prices,availability=_fixture()
     features=style_observations(prices,availability)
     records=[]
+    clock=TradingClock()
     for day_i, day in enumerate(sessions):
         for style in ('small','value'):
             for h in (1,3,5):
-                clock=TradingClock()
                 window=clock.window(day,h)
                 signal=pd.Timestamp(window.signal_time)
                 records.append({'date':day,'style_id':style,'horizon':h,
@@ -49,7 +49,7 @@ def test_style_lead_predictions_stay_nonexecuting_and_pit_restricted():
                     'label_available_at':pd.Timestamp(window.exit_time)+pd.Timedelta(minutes=20),
                     'label_kind':'VERIFIED_RAW_RELATIVE_RETURN'})
     labels=pd.DataFrame(records)
-    out=style_lead_oos(features,labels,sessions,sessions[-20:],TradingClock(),min_training_sessions=35)
+    out=style_lead_oos(features,labels,sessions,sessions[-20:],clock,min_training_sessions=35)
     assert not out.empty
     assert not out.decision_eligible.any()
     assert set(out.style_id)=={'small','value'}
