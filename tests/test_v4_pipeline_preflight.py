@@ -29,7 +29,7 @@ def _inputs():
     return ({
         'factors':pd.DataFrame([{'date':DAY,'available_at':'2026-11-10T21:10:00Z'}]),
         'labels':pd.DataFrame([
-            {'date':DAY,'horizon':h,'label_kind':'FUTURE_UNOBSERVED',
+            {'date':DAY,'security_id':'AAA','horizon':h,'label_kind':'FUTURE_UNOBSERVED',
              'gross_return':float('nan'),'excess_return':float('nan'),
              'entry_time':'2026-11-11T14:30:00Z',
              'exit_time':str(pd.Timestamp('2026-11-13T21:00:00Z')+pd.Timedelta(days=h))}
@@ -134,4 +134,24 @@ def test_source_basket_must_be_verified_before_research():
     source,manifest=_inputs()
     source['candidate_meta'].loc[0,'symbol']='OTHER'
     with pytest.raises(ValueError,match='CANDIDATE_NOT_IN_VERIFIED_SOURCE_BASKET'):
+        _check(frames=source)
+
+
+
+def test_duplicate_or_mismatched_horizon_universe_is_rejected():
+    source,_=_inputs()
+    source['labels']=pd.concat([source['labels'],source['labels'].iloc[[0]]],
+                               ignore_index=True)
+    with pytest.raises(ValueError,match='DUPLICATE_CURRENT_SECURITY_HORIZON_LABEL'):
+        _check(frames=source)
+    source,_=_inputs()
+    source['labels'].loc[0,'security_id']='BBB'
+    with pytest.raises(ValueError,match='HORIZON_SECURITY_UNIVERSE_MISMATCH'):
+        _check(frames=source)
+
+
+def test_candidate_must_have_matching_current_label_identity():
+    source,_=_inputs()
+    source['candidate_meta'].loc[0,'security_id']='UNRELATED'
+    with pytest.raises(ValueError,match='CANDIDATE_MISSING_FROM_CURRENT_HORIZON_LABELS'):
         _check(frames=source)
