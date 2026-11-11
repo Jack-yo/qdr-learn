@@ -96,6 +96,8 @@ def indicative_plans(projections: pd.DataFrame, existing_holdings: pd.DataFrame,
     weights = pd.to_numeric(existing_holdings.weight, errors='coerce')
     if weights.isna().any() or (weights < 0).any() or (~weights.map(isfinite)).any():
         raise ValueError('Invalid existing NAV exposures')
+    if existing_holdings.sector.isna().any() or existing_holdings.sector.astype(str).str.upper().isin(('UNKNOWN','UNVERIFIED','N/A','')).any():
+        raise ValueError('Existing portfolio sector exposure is unverifiable')
     held = {str(row.security_id):float(row.weight) for row in existing_holdings.itertuples(index=False)}
     sector_exposure = {}
     for row in existing_holdings.itertuples(index=False):
