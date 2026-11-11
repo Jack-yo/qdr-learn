@@ -60,6 +60,10 @@ def test_missing_adapter_and_tampered_archive(tmp_path):
     path.write_text(json.dumps(payload),encoding='utf-8')
     with pytest.raises(PolicyError,match='modified'):
         read_v4_daily(tmp_path,_day(),result['identity'])
+    # A repeated scheduled run must not trust the tampered old manifest.
+    with pytest.raises(PolicyError,match='modified'):
+        run_v4_daily(tmp_path,_day(),source_snapshot_sha256='e'*64,
+                     protocol_sha256='f'*64,adapters={})
 
 
 def test_nonexchange_date_rejected(tmp_path):
