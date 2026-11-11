@@ -61,7 +61,7 @@ def style_observations(prices: pd.DataFrame, availability: pd.DataFrame,
 
 
 def style_lead_oos(observations: pd.DataFrame, labels: pd.DataFrame,
-                   exchange_sessions, evaluation_dates, *,
+                   exchange_sessions, evaluation_dates, trading_clock, *,
                    min_training_sessions: int = 252, gap_sessions: int = 5) -> pd.DataFrame:
     """Per-style quarterly Ridge OOS study of next-open to future-close spread.
 
@@ -69,7 +69,7 @@ def style_lead_oos(observations: pd.DataFrame, labels: pd.DataFrame,
     ETF returns. Nothing is marked decision-eligible by this calculation.
     """
     required={'date','style_id','horizon','forward_relative_return',
-              'label_available_at','label_kind','signal_time'}
+              'label_available_at','label_kind','signal_time','entry_time','exit_time'}
     if required-set(labels):
         raise ValueError('Future style spread labels need dated identity and availability')
     if not 30<=min_training_sessions<=2000 or gap_sessions<5:
@@ -86,10 +86,19 @@ def style_lead_oos(observations: pd.DataFrame, labels: pd.DataFrame,
     if joined.empty:
         return pd.DataFrame()
     joined['date']=pd.to_datetime(joined.date)
-    for column in ('label_available_at','signal_time','available_at'):
+    for column in ('label_available_at','signal_time','available_at','entry_time','exit_time'):
         joined[column]=pd.to_datetime(joined[column],utc=True)
     if joined.available_at.gt(joined.signal_time).any():
         raise ValueError('Style observations arrived after the signal')
+    if joined.loc[joined.forward_relative_return.notna(),'label_available_at'].lt(
+            joined.loc[joined.forward_relative_return.notna(),'exit_time']).any():
+        raise ValueError('Style label was supposedly available before exit')
+    for (day,horizon), part in joined.groupby(['date','horizon']):
+        window=trading_clock.window(day,int(horizon))
+        if not (part.signal_time.eq(pd.Timestamp(window.signal_time)).all()
+                and part.entry_time.eq(pd.Timestamp(window.entry_time)).all()
+                and part.exit_time.eq(pd.Timestamp(window.exit_time)).all()):
+            raise ValueError('Style label timing violates T close to T+H exit')
     sessions=pd.DatetimeIndex(exchange_sessions)
     requested=pd.DatetimeIndex(evaluation_dates)
     if (sessions.has_duplicates or not sessions.is_monotonic_increasing or
