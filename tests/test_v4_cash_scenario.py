@@ -44,15 +44,35 @@ def test_overlapping_cash_exposure_cannot_exceed_available_cash(monkeypatch,tmp_
         book.replay_research_cash_book(tmp_path,[a,b],initial_cash=10000)
 
 
-def test_same_day_exit_releases_cash_before_next_entry(monkeypatch,tmp_path):
+def test_same_day_close_exit_cannot_fund_open_entry(monkeypatch,tmp_path):
     a=('2025-01-02','f'*16)
     b=('2025-01-06','e'*16)
     p1,o1=_record(*a,'AAA','2025-01-03','2025-01-07',.8)
     p2,o2=_record(*b,'BBB','2025-01-07','2025-01-09',.8)
     _patch(monkeypatch,{a:p1,b:p2},{a:o1,b:o2})
+    with pytest.raises(ValueError,match='OVERCOMMITTED_ON_ENTRY'):
+        book.replay_research_cash_book(tmp_path,[a,b],initial_cash=10000)
+
+
+def test_previous_session_exit_funds_later_open(monkeypatch,tmp_path):
+    a=('2025-01-02','f'*16)
+    b=('2025-01-07','e'*16)
+    p1,o1=_record(*a,'AAA','2025-01-03','2025-01-07',.8)
+    p2,o2=_record(*b,'BBB','2025-01-08','2025-01-09',.8)
+    _patch(monkeypatch,{a:p1,b:p2},{a:o1,b:o2})
     result=book.replay_research_cash_book(tmp_path,[a,b],initial_cash=10000)
     assert result['final_cash']>10000
-    assert len(result['transactions'])==4
+    assert [(t['session'],t['event']) for t in result['transactions']]==[
+        ('2025-01-03','MODELED_ENTRY'),('2025-01-07','MODELED_EXIT'),
+        ('2025-01-08','MODELED_ENTRY'),('2025-01-09','MODELED_EXIT')]
+
+
+def test_same_session_entry_occurs_before_close_exit(monkeypatch,tmp_path):
+    key=('2025-01-02','f'*16)
+    p,o=_record(*key,'AAA','2025-01-03','2025-01-03',.8)
+    _patch(monkeypatch,{key:p},{key:o})
+    result=book.replay_research_cash_book(tmp_path,[key],initial_cash=10000)
+    assert [t['event'] for t in result['transactions']]==['MODELED_ENTRY','MODELED_EXIT']
 
 
 def test_missing_security_outcome_and_duplicate_plan_refuse(monkeypatch,tmp_path):
