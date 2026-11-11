@@ -29,6 +29,7 @@ class CompiledExpression:
     formula: str
     lookback: int
     _tree: ast.Expression
+    cross_sectional: bool = False
 
     def compute(self, context) -> pd.DataFrame:
         """Compute on aligned price panels; leave the inputs unchanged."""
@@ -145,4 +146,6 @@ def compile_expression(formula: str) -> CompiledExpression:
     lookback, depends = review(tree.body)
     if not depends:
         raise ValueError('A factor must depend on market data')
-    return CompiledExpression(formula.strip(), lookback, tree)
+    cross_sectional = any(isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                            and node.func.id in ('rank', 'zscore') for node in ast.walk(tree))
+    return CompiledExpression(formula.strip(), lookback, tree, cross_sectional)
