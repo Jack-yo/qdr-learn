@@ -2,9 +2,18 @@
 from pathlib import Path
 
 from quant_research.workflow import v4_ops
+from quant_research.workflow import v4_pipeline_preflight
+
+
+def _allow_matched_source(monkeypatch):
+    monkeypatch.setattr(v4_pipeline_preflight,'preflight_v4_day',
+        lambda *args,**kw:{'status':'PREFLIGHT_SOURCE_AND_TIME_MATCH_RESEARCH_ONLY',
+                           'source_snapshot_sha256':'a'*64,
+                           'real_orders_enabled':False})
 
 
 def test_pipeline_records_research_plan_and_actual_daily_observation(monkeypatch,tmp_path):
+    _allow_matched_source(monkeypatch)
     monkeypatch.setattr(
         __import__('quant_research.workflow.v4_review_cli',fromlist=['run_v4_review_day']),
         'run_v4_review_day',
@@ -24,6 +33,7 @@ def test_pipeline_records_research_plan_and_actual_daily_observation(monkeypatch
 
 
 def test_cross_snapshot_mismatch_cannot_create_daily_admission(monkeypatch,tmp_path):
+    _allow_matched_source(monkeypatch)
     monkeypatch.setattr(
         __import__('quant_research.workflow.v4_review_cli',fromlist=['run_v4_review_day']),
         'run_v4_review_day',
@@ -36,5 +46,21 @@ def test_cross_snapshot_mismatch_cannot_create_daily_admission(monkeypatch,tmp_p
                            'paper_ledger_advanced':False})
     result=v4_ops.run_v4_pipeline_day(tmp_path,'2026-11-10',bundle_id='dated-source')
     assert result['status']=='SOURCE_SNAPSHOT_MISMATCH'
-    assert result['code']=='FORECAST_SOURCE_DIFFERS_FROM_DAILY_WAREHOUSE'
+    assert result['code']=='POST_ADMISSION_WAREHOUSE_SOURCE_CHANGED'
     assert not result['real_orders_enabled']
+
+
+
+def test_preflight_failure_never_calls_model_or_creates_frozen_plan(monkeypatch,tmp_path):
+    def deny(*args,**kwargs):
+        raise ValueError('BUNDLE_DIFFERS_FROM_LIVE_WAREHOUSE_SNAPSHOT')
+    monkeypatch.setattr(v4_pipeline_preflight,'preflight_v4_day',deny)
+    module=__import__('quant_research.workflow.v4_review_cli',fromlist=['run_v4_review_day'])
+    def forbidden(*args,**kwargs):
+        raise AssertionError('Model or immutable plan was reached before admission')
+    monkeypatch.setattr(module,'run_v4_review_day',forbidden)
+    result=v4_ops.run_v4_pipeline_day(tmp_path,'2026-11-10',bundle_id='inconsistent')
+    assert result['status']=='PREFLIGHT_BLOCKED_NO_ARCHIVE_WRITE'
+    assert result['code']=='BUNDLE_DIFFERS_FROM_LIVE_WAREHOUSE_SNAPSHOT'
+    assert not (tmp_path/'outputs/v4_forecasts').exists()
+    assert not (tmp_path/'outputs/v4_research_plans').exists()
