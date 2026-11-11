@@ -17,7 +17,7 @@ from quant_research.clock import TradingClock
 from quant_research.models.v4_forward import forecast_asof
 from quant_research.models.v4_oos import OOSProtocol
 from quant_research.models.v4_panel import prepare_v4_alpha_panel
-from quant_research.research.v4_forecast_archive import freeze_research_forecast
+from quant_research.research.v4_forecast_archive import freeze_research_forecast, read_research_forecast
 from quant_research.workflow.v4_study_cli import _checked_inputs
 
 
@@ -33,6 +33,21 @@ def run_managed_forward(root: Path, *, bundle_id: str, asof_session: str) -> dic
     clock=TradingClock()
     day=clock.session(asof_session)
     clock.signal(day)  # Cannot generate a pre-close "after-close" prediction.
+    config_sha=sha256(config_path.read_bytes()).hexdigest()
+    archive_id=sha256((str(day)+manifest['source_snapshot_sha256']+config_sha).encode()).hexdigest()[:16]
+    try:
+        existing=read_research_forecast(root,str(day.date()),archive_id,include_rows=False)
+    except FileNotFoundError:
+        existing=None
+    if existing:
+        return {'status':('FORWARD_RESEARCH_ALREADY_FROZEN'
+                         if existing['manifest']['prospective_before_next_open']
+                         else 'RETROSPECTIVE_ASOF_ALREADY_ARCHIVED'),
+                'prospective_before_next_open':existing['manifest']['prospective_before_next_open'],
+                'session_date_et':str(day.date()),'identity':archive_id,
+                'forecast_rows':existing['manifest']['forecast_rows'],
+                'source_snapshot_sha256':manifest['source_snapshot_sha256'],
+                'execution_eligible':False,'real_orders_enabled':False}
     features,scope=prepare_v4_alpha_panel(
         inputs['factors'],inputs['labels'],inputs['market_style'],clock,
         expected_factor_names=factor_names)
@@ -51,7 +66,7 @@ def run_managed_forward(root: Path, *, bundle_id: str, asof_session: str) -> dic
         return {'status':report['status'],'session_date_et':asof_session,
                 'execution_eligible':False,'real_orders_enabled':False}
     frozen=freeze_research_forecast(root,report,
-                                   protocol_sha256=sha256(config_path.read_bytes()).hexdigest())
+                                   protocol_sha256=config_sha)
     return {'status':('FORWARD_RESEARCH_FROZEN_ONLY'
                        if frozen['manifest']['prospective_before_next_open']
                        else 'RETROSPECTIVE_ASOF_RECONSTRUCTION_ONLY'),
