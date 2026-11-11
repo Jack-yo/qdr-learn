@@ -171,6 +171,7 @@ def make_indicative_review(root, *, session_date: str, forecast_identity: str,
                    'source_forecast_manifest_sha256':archived['manifest_sha256'],
                    'source_snapshot_sha256':source,
                    'source_account_session':account.get('last_session',session_date),
+                   'account_budget':float(equity) if account.get('status')=='EXPLICIT_EMPTY_RESEARCH_BUDGET' else None,
                    'account_evidence':('EXPLICIT_EMPTY_RESEARCH_BUDGET_NOT_A_PAPER_ACCOUNT'
                                        if account.get('status')=='EXPLICIT_EMPTY_RESEARCH_BUDGET'
                                        else 'INTERNALLY_RECONCILED_PAPER_ONLY'),
