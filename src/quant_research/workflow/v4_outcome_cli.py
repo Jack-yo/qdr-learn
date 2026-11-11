@@ -76,9 +76,16 @@ def main(argv=None):
     parser.add_argument('--root',type=Path,default=Path.cwd())
     parser.add_argument('--session-date',required=True)
     parser.add_argument('--plan-id',required=True)
+    parser.add_argument('--warehouse',action='store_true',
+                        help='Build future raw-bar paths from verified local SIP and no-action receipts')
     args=parser.parse_args(argv)
-    result=run_managed_outcome_review(
-        args.root,session_date=args.session_date,plan_identity=args.plan_id)
+    if args.warehouse:
+        from quant_research.workflow.v4_warehouse_outcomes import run_warehouse_outcome_review
+        result=run_warehouse_outcome_review(
+            args.root,session_date=args.session_date,plan_identity=args.plan_id)
+    else:
+        result=run_managed_outcome_review(
+            args.root,session_date=args.session_date,plan_identity=args.plan_id)
     print(json.dumps(result,ensure_ascii=False,indent=2,allow_nan=False))
     return 0 if result['status'] in ('OBSERVED_RESEARCH_OUTCOMES_FROZEN_NO_ORDERS',
                                      'OBSERVED_RESEARCH_OUTCOMES_ALREADY_FROZEN') else 4
