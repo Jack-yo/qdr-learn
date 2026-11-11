@@ -290,10 +290,15 @@ def handler(console):
         def do_GET(self):
             if not self.allowed(): return self.send(403, {"error":"Invalid host"})
             path = unquote(urlsplit(self.path).path)
-            if path in {"/","/overview","/market","/styles","/factors","/strategies","/backtests","/signals","/paper","/data"}:
+            if path in {"/","/studio"}:
+                html = Path(__file__).with_name("v4_shell.html").read_text(encoding="utf-8").replace("__TOKEN__", console.token)
+                return self.send(200, html.encode("utf-8"), "text/html; charset=utf-8")
+            if path in {"/overview","/market","/styles","/factors","/strategies","/backtests","/signals","/paper","/data"}:
                 html = Path(__file__).with_name('app_shell.html').read_text(encoding='utf-8').replace('__TOKEN__', console.token)
                 return self.send(200, html.encode('utf-8'), 'text/html; charset=utf-8')
-            if path in {'/assets/studio.css','/assets/studio.js'}:
+            if path in {'/assets/studio.css','/assets/studio.js',
+                        '/assets/v4_ui_core.js','/assets/v4_ui_pages_a.js',
+                        '/assets/v4_ui_pages_b.js','/assets/v4_ui_pages_c.js'}:
                 asset = Path(__file__).with_name('assets') / path.rsplit('/',1)[1]
                 content_type = 'text/css; charset=utf-8' if path.endswith('.css') else 'text/javascript; charset=utf-8'
                 return self.send(200, asset.read_bytes(), content_type)
