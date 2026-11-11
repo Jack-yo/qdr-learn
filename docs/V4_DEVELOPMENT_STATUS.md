@@ -171,3 +171,40 @@ node --check src/quant_research/assets/studio.js
 ```
 
 此文档可作为后续开发和 code review 的持续验收清单；对未完成项必须保留明确的外部数据/验证依赖，不能标为完成。
+
+
+## 第五轮：冻结一致性、无前视资金回放、自动结果审查及前向评分（2026-11-11）
+
+本轮已经提交至 `main`，仅为**功能代码与测试用例**，仍不是完整的真实数据/浏览器运行验收。
+
+1. `workflow/v4_cash_scenario.py`：当天开盘入场不再提前借用当天收盘退出资金（严格避免账本前视）；当日开仓只能在已知现金内进行，退出后的场景现金供以后交易日使用。对应现金情景测试已更新。
+2. `workflow/v4_bundle_contract.py`：检查同一 T 日、同来源股票/因子/未来标签完整性，当前所有目标股票必须完整具有声明的因子、H1/H3/H5 未观测收益标签、合法行业/价格/ATR/ADV、早于信号截点的数据时间戳；不能使用 NaN、回溯伪可用因子或悄然丢弃候选。日终源预检与独立前向研究 CLI 已接入。
+3. `research/v4_forecast_archive.py`：V2 归档哈希新增所有输入 Parquet **文件字节摘要**、因子名、原始证券篮子，避免同一 raw snapshot 下不同特征/标签复用预测 ID。读取端反查摘要和身份；兼容旧 V1 **只读**归档。拟合后、冻结前再次检查研究输入文件字节及模型协议，变化则禁止写入。
+4. `workflow/v4_ops.py`：新增 `--preflight-only`（不冻结研究输出）；模型训练后、每日不可变日志写入前再次比对独立仓库原始 SHA、证券篮子与当日证券覆盖。不能把二次变化的来源冻结为原始数据。
+5. `workflow/v4_warehouse_outcomes.py`、`workflow/v4_outcome_cli.py`：可选 `--warehouse` 自动从已经源回执验证的**本地原价 Alpaca SIP**仓库生成 H3 实际未来价格路径；严格拒绝漏日、重复证券、不同源、拆股调整口径、超出观察截止时间和没有**逐证券逐交易日有效无公司行为原始回执**的结果。无可核验公司行为则阻断，不自动用最新调整价替换。仍属于“OHLC 模拟止损/退出”，不是券商成交。
+6. `workflow/v4_settlement_sweep.py`：批量找到已经到达 H3 到期日的冻结研究计划。默认 `只读预览`；显式 `--freeze-outcomes` 才逐笔尝试经过源审计的价格路径研究结算，可分页；缺证据不会写入结果。
+7. `workflow/v4_plan_outcomes.py`、`workflow/v4_forward_scorecard.py`：明确区分“完整 H3 预测标的的 T+1 开盘 → T+H 收盘原始收益”与“触发止损后的模拟收益”。前向评分只用**原始 H3 全期限收益**评价预测收益 MSE、上涨概率 Brier；基线只看**预测当时已经到期**的其他 H3 结果；达最低可比较交易日数后才报告时间序列区块 Bootstrap 95% 区间。样本不足时明确返回 `INSUFFICIENT_PROSPECTIVE_RESEARCH_SESSIONS`。Web 新增只读 `/api/v1/v4/forward-scorecard`，V4 研究总览显示实际证据或空态。以上评分**不能证明交易优势、成交价格或盈利**。
+
+### 本地调试与验收顺序
+
+```powershell
+uv sync --locked
+uv run --locked pytest -q
+uv run --locked python -m quant_research.workflow.v4_data_diagnostics --db data/real_v21.duckdb --asof YYYY-MM-DD --symbols "SPY,IWM,IWD,IWF,MTUM,QUAL"
+uv run --locked python -m quant_research.workflow.v4_ops --root . --date YYYY-MM-DD --bundle-id <BUNDLE_ID> --preflight-only
+uv run --locked python -m quant_research.workflow.v4_ops --root . --date YYYY-MM-DD --bundle-id <BUNDLE_ID> --research-budget 100000
+uv run --locked python -m quant_research.workflow.v4_settlement_sweep --root .
+uv run --locked python -m quant_research.workflow.v4_settlement_sweep --root . --freeze-outcomes
+uv run --locked python -m quant_research.workflow.v4_forward_scorecard --root .
+```
+
+上述命令是执行方式说明，不是已运行日志。以当前日期对历史 T 日运行时会被真实前向时间窗限制；不应该通过修改时钟绕过。
+
+### 尚待完成的产品/实证能力（P0）
+
+- **自动构建合格 V4 训练/预测包**：目前源时点预检与观察包仍需要 `data/managed/v4_inputs` 的正式 Parquet 及身份证据，尚未将主 DuckDB 中的价格、历史真实总收益标签、真实行业证券池全部转化为独立验收的训练输入。
+- **PIT/权益来源**：真实市场历史普通股（含退市/改名）、有效期行业映射、完整公司行为及分红结算、历史可用时间/源回执；缺失不得用当前活跃名单回填。
+- **完整模拟交易账本**：有成本、滑点、入场、持仓、每日估值、分红拆股、退出和风控的前瞻可追踪流水；当前 V4 现金模块是从事后结果计算的**研究场景**，不能称为真正逐日执行的 Paper 账户。
+- **真实策略验证与运营**：具备 PIT 数据的滚动 OOS/成本后回测、合格的独立市场/风格前向模型、连续前向样本与统计检验，以及 HTTP/UI、DuckDB/Parquet、全量测试和实际交互的集成验收。
+
+**本轮测试声明**：新增测试用例已提交，但本轮所在编程环境无法获取完整仓库与 DuckDB/Parquet 运行依赖，未在最新主分支运行全量 `pytest`、浏览器 E2E 或真实 Alpaca SIP 数据链；任何“全系统成熟/已产生稳定正收益”表述均不成立。
