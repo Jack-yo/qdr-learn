@@ -439,6 +439,22 @@ def handler(console):
                     return self.send(409, exc.payload())
                 except (ValueError, KeyError, OSError):
                     return self.send(409, {'status': 'BLOCKED', 'code': 'DAILY_OBSERVATION_INVALID'})
+            if path == '/api/v1/v4/plans' or path.startswith('/api/v1/v4/plans/'):
+                from .workflow.v4_candidate_bridge import (
+                    latest_indicative_reviews, read_indicative_review)
+                if urlsplit(self.path).query:
+                    return self.send(400,{'status':'BLOCKED','code':'INVALID_RESEARCH_PLAN_QUERY'})
+                try:
+                    if path == '/api/v1/v4/plans':
+                        return self.send(200,latest_indicative_reviews(console.root,limit=15))
+                    parts=path.removeprefix('/api/v1/v4/plans/').split('/')
+                    if len(parts)!=2:
+                        raise ValueError('Invalid plan key')
+                    return self.send(200,read_indicative_review(console.root,parts[0],parts[1]))
+                except FileNotFoundError:
+                    return self.send(404,{'status':'BLOCKED','code':'RESEARCH_PLAN_NOT_FOUND'})
+                except (ValueError,KeyError,OSError,TypeError):
+                    return self.send(409,{'status':'BLOCKED','code':'RESEARCH_PLAN_UNVERIFIED'})
             if path == '/api/v1/v4/forecasts' or path.startswith('/api/v1/v4/forecasts/'):
                 from .research.v4_forecast_archive import (
                     latest_forward_research, read_research_forecast)
