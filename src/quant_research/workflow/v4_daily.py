@@ -54,9 +54,9 @@ def run_v4_daily(root, session_date: str, *, source_snapshot_sha256: str,
         return existing
     stages=[]
     for stage in _STAGES:
-        if stage=='freeze' and any(x['status']=='RESEARCH_ONLY' for x in stages):
+        if stage=='freeze' and any(x['status']!='PASS' for x in stages):
             stages.append({'stage':'freeze','status':'BLOCKED',
-                           'code':'RESEARCH_ONLY_NOT_ADMITTED_FOR_EXECUTION'})
+                           'code':'UPSTREAM_RESEARCH_NOT_ADMITTED_FOR_EXECUTION'})
             break
         fn=adapters.get(stage)
         if fn is None:
@@ -74,8 +74,12 @@ def run_v4_daily(root, session_date: str, *, source_snapshot_sha256: str,
         except (Exception,) as exc:
             entry={'stage':stage,'status':'BLOCKED','code':type(exc).__name__}
         stages.append(entry)
-        if entry['status'] in ('BLOCKED','NO_TRADE'):
+        if stage=='data' and entry['status']=='BLOCKED':
             break
+        if stage in ('risk','freeze') and entry['status'] in ('BLOCKED','NO_TRADE'):
+            break
+        # Independent market/style/Alpha research can still run if another
+        # model fails; only the final decision freeze depends on all layers.
     completed=len(stages)==len(_STAGES) and all(x['status']=='PASS' for x in stages)
     # Successful orchestration does not prove the stage's underlying model
     # or market-data evidence. Proof admission is a separate code boundary.
