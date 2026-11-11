@@ -58,15 +58,10 @@ def replay_research_cash_book(root, keys: list[tuple[str,str]], *,
     holdings={}
     transactions=[]
     for session in sorted(events):
-        # Exit before same-day entries, freeing settled scenario capital.
-        for key,h in sorted(list(holdings.items())):
-            if h['exit_session']==session:
-                proceeds=h['notional']*(h['exit_price']/h['entry_price']-h['cost'])
-                cash+=proceeds
-                transactions.append({'session':session.isoformat(),'event':'MODELED_EXIT',
-                                     'position_id':key,'cash_delta':proceeds,
-                                     'reason':'OBSERVED_FUTURE_PATH_SCENARIO'})
-                del holdings[key]
+        # Entries are assumed at the session OPEN; planned exits are at the
+        # session CLOSE (or an unverified intraday stop). Their proceeds are
+        # unavailable to earlier opening orders on the same date. This also
+        # conservatively avoids spending unsettled/unknown stop proceeds.
         entering=sorted((event for event in events[session] if event[0]=='enter'),
                         key=lambda x:x[1])
         requested=sum(float(x[2])*initial_cash for x in entering)
@@ -81,6 +76,18 @@ def replay_research_cash_book(root, keys: list[tuple[str,str]], *,
             transactions.append({'session':session.isoformat(),'event':'MODELED_ENTRY',
                                  'position_id':key,'cash_delta':-notional,
                                  'reason':'FROZEN_RESEARCH_WEIGHT_ONLY'})
+        # Credit modeled closing proceeds only AFTER all opening orders have
+        # been cash-admitted, including an entry whose exit is the same day.
+        for key,h in sorted(list(holdings.items())):
+            if h['exit_session']==session:
+                proceeds=h['notional']*(h['exit_price']/h['entry_price']-h['cost'])
+                if proceeds < 0:
+                    raise ValueError('RESEARCH_CASH_NEGATIVE_LONG_SALE_PROCEEDS')
+                cash+=proceeds
+                transactions.append({'session':session.isoformat(),'event':'MODELED_EXIT',
+                                     'position_id':key,'cash_delta':proceeds,
+                                     'reason':'OBSERVED_FUTURE_PATH_SCENARIO'})
+                del holdings[key]
     if holdings:
         raise ValueError("RESEARCH_CASH_BOOK_HAS_UNSETTLED_POSITIONS")
     result={'status':'MODELED_RESEARCH_CASH_SCENARIO_ONLY',
