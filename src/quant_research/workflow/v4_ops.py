@@ -105,7 +105,8 @@ def main(argv=None):
     args=parser.parse_args(argv)
     result=run_observed_v4_daily(args.root,args.date)
     print(json.dumps(result,ensure_ascii=False,indent=2,allow_nan=False))
-    return 0 if result['status']=='STAGES_COMPLETE_ADMISSION_PENDING' else 4
+    return 0 if result['status'] in ('RESEARCH_UPDATED_NO_TRADE',
+                                      'STAGES_COMPLETE_ADMISSION_PENDING') else 4
 
 
 if __name__=='__main__':
