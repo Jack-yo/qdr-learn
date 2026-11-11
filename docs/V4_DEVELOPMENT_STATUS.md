@@ -41,6 +41,31 @@
 
 研究数据若尚未提供，相关页面显示无历史归档，不会出现任何演示盈亏与模型预测值。
 
+## 第三轮：正式研究入口与前向预测冻结
+
+已增加可以在合格的本地数据包到位后直接运行的两类 CLI：
+
+- **历史样本外实验**：\`python -m quant_research.workflow.v4_study_cli --root . --bundle-id <DATA_BUNDLE_ID> --run-id <EXPERIMENT_ID> --evaluation-start 2024-01-02 --evaluation-end 2024-12-31\`
+- **T 日前向预测与冻结**：\`python -m quant_research.workflow.v4_forward_cli --root . --bundle-id <DATA_BUNDLE_ID> --asof YYYY-MM-DD\`
+
+在真正生成预测之前，输入包必须位于 \`data/managed/v4_inputs/<DATA_BUNDLE_ID>/\` 并具有：
+
+1. \`factors.parquet\`：\`date,security_id,feature_name,value,available_at,decision_eligible\`，全部需是实际时点可用的因子；
+2. \`labels.parquet\`：\`date,security_id,horizon,entry_time,exit_time,available_at,gross_return,excess_return,label_kind\`。历史实际标签必须为 \`VERIFIED_RAW_TRADE_TOTAL_RETURN\`；当日尚不可知的未来标签必须明确为空且类型 \`FUTURE_UNOBSERVED\`；严禁以 Yahoo 当前版本代理行情替代；
+3. \`market_style.parquet\`：\`date,state_available_at,market_*,style_*\`，需带有真实可用时点和数值特征；
+4. \`manifest.json\`：研究包类型 \`V4_STRICT_LABEL_STUDY_INPUT\`、逐文件 SHA256、数据快照 SHA256、\`factor_names\`。
+
+该规范只是**输入契约和文件完整性检验**，**不代表真实供应商 PIT 历史、事件结算和原价成交资格已经被独立验收**。在真实数据不可用时不提供任何模型预测值。
+
+这次新增的具体能力：
+- \`models/v4_forward.py\`：T 日未观测收益严格为空，历史数据遵守滚动训练窗口与5-session embargo，模型训练与概率校准按时序隔离，针对未来 H1/H3/H5 分别给出研究预测和版本证据。
+- \`research/v4_forecast_archive.py\`：冻结未来预测时，不允许保存任何实际未来收益、成交 ID，采用不可覆盖的独立目录、SHA256 校验，拒绝把研究预测升级为交易结果。
+- \`GET /api/v1/v4/forecasts\`、\`GET /api/v1/v4/forecasts/YYYY-MM-DD/<identity>\`：只读查看已归档前向研究预测；总览已接入 H3 候选研究视图，未归档时显示真实空态。
+- \`workflow/v4_ops.py\`：只读当日研究阶段记录，可持续观察独立四层结果，但默认**不自动调用完整训练和合格模拟成交**，需要接入真正已经独立验收的数据与模型。
+- 新增测试：\`tests/test_v4_forward.py\`、\`tests/test_v4_forecast_archive.py\`，仅数值和防伪造契约测试，**本轮没有运行完整 pytest**。
+
+**开发完成与实际策略有效是不同的两个验收对象。** 现有 V4 模型、CLI 和存档使工程链路具备独立运行入口，但未有外部合格数据、未完成全量运行与评估，不能宣称系统已经能稳定预测或有正收益。
+
 ## 测试证据
 
 - 已为自定义因子、市场/Alpha OOS、时间戳标签、统计增量、历史股票池、风格、候选计划、风险、实验归档和日终编排增加独立单元测试文件。**本轮未能在完整最新 main 环境执行这些新增测试或全部 pytest，因此不可宣称通过。**
