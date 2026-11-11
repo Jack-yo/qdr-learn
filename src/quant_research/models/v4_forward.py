@@ -61,7 +61,9 @@ def forecast_asof(panel: pd.DataFrame, feature_sets: dict[str,list[str]],
         return {'status':'INSUFFICIENT_HISTORY','forecasts':pd.DataFrame(),
                 'model_cards':pd.DataFrame(),'execution_eligible':False,
                 'real_orders_enabled':False}
-    historical=values.loc[(values.date<=last_fit_session)
+    eligible_train_days=sessions[max(0,loc-protocol.gap_sessions-protocol.training_window_sessions):
+                                 loc-protocol.gap_sessions]
+    historical=values.loc[values.date.isin(eligible_train_days)
                           & values.gross_return.notna()
                           & values.excess_return.notna()
                           & values.label_available_at.le(cutoff)
