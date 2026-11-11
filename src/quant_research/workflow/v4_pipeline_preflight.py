@@ -74,6 +74,13 @@ def preflight_v4_day(root: Path, session_date: str, bundle_id: str,
     upcoming=labels.loc[days.eq(day)].copy()
     if upcoming.empty or set(upcoming.horizon)!={1,3,5}:
         raise ValueError("MISSING_ALL_CURRENT_HORIZON_LABELS")
+    if "security_id" not in upcoming or upcoming[["security_id","horizon"]].isna().any().any():
+        raise ValueError("CURRENT_LABEL_SECURITY_IDENTITY_MISSING")
+    if upcoming.duplicated(["security_id","horizon"]).any():
+        raise ValueError("DUPLICATE_CURRENT_SECURITY_HORIZON_LABEL")
+    horizon_sets=[set(group.security_id) for _,group in upcoming.groupby("horizon")]
+    if not horizon_sets or any(group!=horizon_sets[0] for group in horizon_sets[1:]):
+        raise ValueError("HORIZON_SECURITY_UNIVERSE_MISMATCH")
     if (upcoming.gross_return.notna().any()
             or upcoming.excess_return.notna().any()
             or not upcoming.label_kind.eq("FUTURE_UNOBSERVED").all()):
@@ -94,6 +101,8 @@ def preflight_v4_day(root: Path, session_date: str, bundle_id: str,
         raise ValueError("CANDIDATE_METADATA_DUPLICATE_IDENTITY")
     if not set(metadata.symbol).issubset(set(source_symbols)):
         raise ValueError("CANDIDATE_NOT_IN_VERIFIED_SOURCE_BASKET")
+    if not set(metadata.security_id).issubset(horizon_sets[0]):
+        raise ValueError("CANDIDATE_MISSING_FROM_CURRENT_HORIZON_LABELS")
     if (not pd.to_datetime(metadata.date).eq(day).all()
             or not metadata.source_snapshot_sha256.eq(snapshot).all()
             or not pd.to_datetime(metadata.available_at,utc=True).le(signal).all()):
