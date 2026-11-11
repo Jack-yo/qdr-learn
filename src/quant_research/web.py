@@ -439,6 +439,22 @@ def handler(console):
                     return self.send(409, exc.payload())
                 except (ValueError, KeyError, OSError):
                     return self.send(409, {'status': 'BLOCKED', 'code': 'DAILY_OBSERVATION_INVALID'})
+            if path == '/api/v1/v4/forward-scorecard':
+                from .workflow.v4_forward_scorecard import score_prospective_research
+                query=parse_qs(urlsplit(self.path).query,keep_blank_values=True)
+                if set(query)-{'minimum_sessions','baseline_sessions'} or any(
+                        len(v)!=1 for v in query.values()):
+                    return self.send(400,{'status':'BLOCKED','code':'INVALID_FORWARD_SCORECARD_QUERY'})
+                try:
+                    minimum=int(query.get('minimum_sessions',['60'])[0])
+                    lookback=int(query.get('baseline_sessions',['20'])[0])
+                    return self.send(200,score_prospective_research(
+                        console.root,minimum_sessions=minimum,
+                        baseline_sessions=lookback))
+                except (ValueError,TypeError):
+                    return self.send(400,{'status':'BLOCKED','code':'INVALID_FORWARD_SCORECARD_QUERY'})
+                except (OSError,KeyError):
+                    return self.send(409,{'status':'BLOCKED','code':'FORWARD_SCORECARD_EVIDENCE_UNAVAILABLE'})
             if path == '/api/v1/v4/outcomes' or path.startswith('/api/v1/v4/outcomes/'):
                 from .workflow.v4_plan_outcomes import (
                     latest_research_outcomes, read_research_outcomes)
