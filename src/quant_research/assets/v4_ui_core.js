@@ -1,0 +1,95 @@
+/* QDR V4: production presentation of the approved six-page high-fidelity UI.
+   No example prices, probability or trading P&L are rendered. */
+(() => {
+'use strict';
+const root=document.getElementById('content');
+const state={page:'overview',marketHorizon:3,styleFactor:null,factorVersion:null,screenHorizon:3,runId:null,epoch:0};
+const pages={};
+const $=(s)=>document.querySelector(s);
+const e=(v)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
+const isnum=(v)=>v!==null&&v!==undefined&&v!==''&&Number.isFinite(Number(v));
+const n=(v,d=2)=>isnum(v)?Number(v).toLocaleString('zh-CN',{minimumFractionDigits:d,maximumFractionDigits:d}):'—';
+const pct=(v,d=2)=>isnum(v)?n(Number(v)*100,d)+'%':'—';
+const signed=(v,d=2)=>isnum(v)?(Number(v)>0?'+':'')+pct(v,d):'—';
+const date=(v)=>v?e(String(v).slice(0,10)):'—';
+const short=(v,len=14)=>v?e(String(v).slice(0,len)):'—';
+const badge=(v,t='blue')=>'<span class="badge '+t+'">'+e(v)+'</span>';
+const button=(id,text,kind='')=>'<button type="button" id="'+e(id)+'" class="btn '+e(kind)+'">'+e(text)+'</button>';
+const link=(to,text)=>'<a href="'+e(to)+'" class="v4-link">'+e(text)+'</a>';
+const heading=(name,description,actions='')=>'<div class="heading"><div><h1 class="title">'+e(name)+'</h1><div class="subtitle">'+e(description)+'</div></div><div class="h-actions">'+actions+'</div></div>';
+const card=(name,content,meta='')=>'<section class="card pad"><div class="ctitle">'+e(name)+'<span>'+e(meta)+'</span></div>'+content+'</section>';
+const kpi=(label,value,hint,color='')=>'<div class="kpi"><div class="klabel">'+e(label)+'</div><div class="kval mono '+color+'">'+value+'</div><div class="knote">'+e(hint)+'</div></div>';
+const empty=(title,body)=>'<div class="v4-empty"><b>'+e(title)+'</b>'+e(body)+'</div>';
+const note=(text)=>'<div class="v4-muted-note">'+e(text)+'</div>';
+const row=(label,value)=>'<div class="v4-stat-pair"><span class="muted">'+e(label)+'</span><b>'+value+'</b></div>';
+const table=(cols,data)=> data&&data.length?'<div class="v4-table-scroll"><table class="table"><thead><tr>'+cols.map(x=>'<th>'+e(x)+'</th>').join('')+'</tr></thead><tbody>'+data.map((r,i)=>'<tr'+(i===0?' class="selected"':'')+'>'+r.map(c=>'<td>'+c+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>':empty('暂无符合条件的数据','当前没有已验证的研究记录，不显示示意数据。');
+const fail=(error)=>empty('无法读取真实研究结果',String(error?.message||error?.code||'数据或来源资格尚未满足，请前往数据中心检查。'));
+const value=(d,k)=>Object.prototype.hasOwnProperty.call(d||{},k)?d[k]:null;
+const api=async (path,body)=>{
+ const opts=body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':window.CONSOLE_TOKEN},body:JSON.stringify(body)};
+ let r;try{r=await fetch(path,opts)}catch(_){throw Error('无法连接本地研究服务')}
+ let j;try{j=await r.json()}catch(_){throw Error('服务未返回有效 JSON')}
+ if(!r.ok)throw Error(j.code||j.message||'HTTP '+r.status);
+ return j;
+};
+const settle=async(url)=>{try{return {ok:true,data:await api(url)}}catch(error){return {ok:false,error}}};
+const grid=(cols,body)=>'<div class="grid cols'+cols+'">'+body+'</div>';
+const toolbar=(body)=>'<div class="v4-toolbar">'+body+'</div>';
+const field=(label,id,type='text',value='',extra='')=>'<div class="v4-field"><label for="'+e(id)+'">'+e(label)+'</label><input type="'+e(type)+'" id="'+e(id)+'" value="'+e(value)+'" '+extra+' /></div>';
+const select=(label,id,opts,val)=>'<div class="v4-field"><label for="'+e(id)+'">'+e(label)+'</label><select id="'+e(id)+'">'+opts.map(x=>'<option value="'+e(x[0])+'"'+(String(x[0])===String(val)?' selected':'')+'>'+e(x[1])+'</option>').join('')+'</select></div>';
+const svgLine=(arr,color='#63d4be',height=170)=>{
+ const values=arr.map(Number).filter(Number.isFinite);
+ if(values.length<2)return empty('暂无可绘制的趋势','至少需要两个具有真实数值的历史观察点。');
+ const low=Math.min(...values),high=Math.max(...values),gap=Math.max(1e-8,high-low);
+ const W=740,H=height,pad=20;
+ const pts=values.map((v,i)=>[(pad+(W-pad*2)*i/(values.length-1)).toFixed(1),(H-pad-(H-pad*2)*(v-low)/gap).toFixed(1)]);
+ const path=pts.map((v,i)=>(i===0?'M':'L')+v.join(' ')).join(' ');
+ const grads=[0,.25,.5,.75,1].map(t=>'<line x1="'+pad+'" y1="'+(pad+(H-pad*2)*t).toFixed(1)+'" x2="'+(W-pad)+'" y2="'+(pad+(H-pad*2)*t).toFixed(1)+'" stroke="#30445f" stroke-dasharray="3 7"/>').join('');
+ return '<svg class="v4-spark" style="height:'+height+'px" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" role="img" aria-label="真实观察序列趋势">'+grads+'<path d="'+path+'" fill="none" stroke="'+color+'" stroke-width="2.8" stroke-linejoin="round"/><circle cx="'+pts[pts.length-1][0]+'" cy="'+pts[pts.length-1][1]+'" r="4" fill="'+color+'"/></svg>';
+};
+const progress=(name,fraction,show='')=>'<div class="barrow"><div class="name">'+e(name)+'</div><div class="progress"><div style="width:'+Math.max(0,Math.min(100,Number(fraction)||0))+'%"></div></div><div class="pct">'+(show||'—')+'</div></div>';
+const setContent=(html)=>root.innerHTML=html;
+const toast=(txt)=>{
+ const el=$('#v4-toast');if(!el)return;
+ el.style.pointerEvents='none';el.innerHTML='<div class="v4-message">'+e(txt)+'</div>';clearTimeout(toast.id);toast.id=setTimeout(()=>el.innerHTML='',5500);
+};
+async function updateStatus(){
+ const [sys,daily]=await Promise.all([settle('/api/status'),settle('/api/v1/v4/daily')]);
+ const data=sys.ok?sys.data:{};
+ const d=data.dataset||{};
+ const latest=(daily.ok?daily.data.runs||[]:[])[0]||null;
+ $('#v4-trading-date').textContent=d.asof_date_et||latest?.session_date_et||'—';
+ $('#v4-source-status').textContent=(data.prices||[]).length?'已接入真实观察':'待验证';
+ $('#v4-model-status').textContent=latest?.status||'尚无日终归档';
+}
+async function show(page){
+ const key=pages[page]?page:'overview';state.page=key;const epoch=++state.epoch;
+ document.querySelectorAll('[data-page]').forEach(x=>{
+   x.classList.toggle('active',x.dataset.page===key||(x.id==='nav-alpha'&&['lab','screen'].includes(key)));
+   x.setAttribute('aria-current',x.dataset.page===key?'page':'false');
+ });
+ root.innerHTML='<div style="padding:20px;color:#94a9c4">正在读取真实研究数据…</div>';
+ try{const result=await pages[key]();if(epoch!==state.epoch)return;
+  setContent(result.html);
+  if(typeof result.mount==='function')result.mount();
+  document.title='QDR Quant Studio · '+e(result.title||key);
+ }catch(error){if(epoch===state.epoch)setContent(heading('研究数据暂不可用','该模块未获得合格数据')+fail(error));}
+}
+function go(page){
+ const key=pages[page]?page:'overview';
+ if(location.hash.slice(1)!==key)location.hash=key;
+ else show(key);
+}
+function boot(){
+ document.querySelectorAll('[data-page]').forEach(x=>{
+  x.tabIndex=0;x.setAttribute('role','link');
+  x.addEventListener('click',()=>go(x.dataset.page));
+  x.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();go(x.dataset.page)}});
+ });
+ window.addEventListener('hashchange',()=>show(location.hash.slice(1)));
+ $('#v4-refresh')?.addEventListener('click',()=>{updateStatus();show(state.page)});
+ updateStatus();show(location.hash.slice(1)||'overview');
+}
+window.V4={pages,state,$,e,n,pct,signed,date,short,badge,button,link,heading,card,kpi,empty,note,row,table,fail,value,api,settle,grid,toolbar,field,select,svgLine,progress,setContent,toast,show,go};
+document.addEventListener('DOMContentLoaded',boot);
+})();
