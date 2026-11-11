@@ -41,3 +41,18 @@ def test_no_positions_is_not_fabricated_risk():
     _,r=_inputs()
     result=assess_portfolio(pd.DataFrame(columns=['security_id','weight','sector','beta']),r,r.index[-1])
     assert result['status']=='EMPTY_PORTFOLIO' and result['alerts']==[]
+
+
+
+def test_concentration_uses_real_paper_marks_and_blocks_missing_evidence():
+    from quant_research.risk.portfolio import assess_paper_concentration
+    account={'status':'INTERNALLY_RECONCILED_PAPER_ESTIMATE','equity':1000,
+             'last_session':'2025-01-20','last_prices':{'S1':20},
+             'position_details':{'S1':{'quantity':10,'sector':'UNKNOWN'}}}
+    output=assess_paper_concentration(account)
+    assert output['status']=='CONCENTRATION_MEASURED'
+    assert output['position_weights']['S1']==pytest.approx(.2)
+    assert {'STOCK_LIMIT','SECTOR_CLASSIFICATION_UNAVAILABLE'} <= {x['code'] for x in output['alerts']}
+    assert output['daily_var95'] is None
+    del account['last_prices']
+    assert assess_paper_concentration(account)['status']=='BLOCKED'
