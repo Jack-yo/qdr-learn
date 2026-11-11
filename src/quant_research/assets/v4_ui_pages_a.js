@@ -12,8 +12,12 @@ function whenData(condition,val){return condition?val:'—'}
 pages.overview=async()=>{
  const all=await Promise.all([
   settle('/api/status'),settle('/api/v1/v4/daily'),settle('/api/v1/v4/forecasts'),
-  settle('/api/v1/styles?mode=observation'),settle('/api/v1/paper/risk'),settle('/api/v1/research/readiness')]);
- const [system,diary,forecasts,style,risk,readiness]=all.map(result);
+  settle('/api/v1/styles?mode=observation'),settle('/api/v1/paper/risk'),settle('/api/v1/research/readiness'),
+  settle('/api/v1/v4/plans')]);
+ const [system,diary,forecasts,style,risk,readiness,planIndex]=all.map(result);
+ const planInfo=(planIndex?.records||[])[0];
+ const latestPlan=planInfo&&planInfo.status!=='CORRUPT_RESEARCH_PLAN'?
+   result(await settle('/api/v1/v4/plans/'+encodeURIComponent(planInfo.session_date_et)+'/'+encodeURIComponent(planInfo.identity))):null;
  const latest=(diary?.runs||[])[0]||null;
  const styleData=(style?.latest||[]).filter(x=>x.factor_name!=='RF'&&x.sum_5d!==null);
  const styleStrong=[...styleData].filter(x=>Number(x.sum_5d)>0).sort((a,b)=>Number(b.sum_5d)-Number(a.sum_5d)).slice(0,3);
@@ -44,11 +48,18 @@ pages.overview=async()=>{
          '<div style="margin-top:10px">'+link('/studio#style','查看经典因子趋势')+'</div>','L2 · 实际因子观察')+
      '</div>'+
      '<div class="grid cols2" style="margin-bottom:15px">'+
-       card('Alpha 研究与候选',recent?row('最近归档交易日',e(recent.session_date_et))+
+       card('Alpha 研究与候选',latestPlan?
+         row('研究计划归档日',e(planInfo.session_date_et))+
+         row('已通过风险过滤',n(latestPlan.plans?.length||0,0))+
+         (latestPlan.plans?.length?table(['研究候选','预期净优势','权益权重'],
+           latestPlan.plans.slice(0,4).map(x=>[e(x.symbol||x.security_id),signed(x.estimated_net_edge),pct(x.indicative_weight)])):
+           empty('当日无候选通过过滤','研究规则允许明确输出不交易。'))+
+         note('这是考虑成本的非执行研究计划，未通过历史 PIT 和真实前向收益验收。'):
+         recent?row('最近归档交易日',e(recent.session_date_et))+
          row('归档研究预测行数',n(recent.forecast_rows,0))+
          row('研究资格',statusBadge(recent.status))+
-         note('尚不能把归档行数直接当成选股数量或买入建议。'):
-         empty('尚无前向研究记录','完成符合来源和时间要求的模型研究后，此处展示真实候选摘要。'), 'L3 · 条件收益研究')+
+         note('预测归档尚未形成完整的风险过滤研究计划。'):
+         empty('尚无前向研究记录','完成真实数据研究后，此处展示已归档预测或明确的不交易结论。'), 'L3 · 条件收益研究')+
        card('组合持仓 · 预警',hasPaper?
          row('组合权益仓位',pct(risk.gross_weight))+
          row('集中度预警',n(risk.alerts?.length||0,0))+
