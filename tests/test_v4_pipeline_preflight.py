@@ -123,3 +123,15 @@ def test_mismatched_or_incomplete_stock_cohort_blocks(monkeypatch):
     frames['candidate_meta'].loc[0,'symbol']='UNSEEN_STOCK'
     with pytest.raises(ValueError,match='CANDIDATE_NOT_IN_VERIFIED_SOURCE_BASKET'):
         _check(frames=frames)
+
+
+
+def test_source_basket_must_be_verified_before_research():
+    source,manifest=_inputs()
+    manifest['source_symbols']=['OTHER']
+    with pytest.raises(ValueError,match='SOURCE_BASKET_MISMATCH'):
+        _check(manifest=manifest)
+    source,manifest=_inputs()
+    source['candidate_meta'].loc[0,'symbol']='OTHER'
+    with pytest.raises(ValueError,match='CANDIDATE_NOT_IN_VERIFIED_SOURCE_BASKET'):
+        _check(frames=source)
