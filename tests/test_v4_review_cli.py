@@ -71,3 +71,29 @@ def test_missing_source_matched_candidate_receipt_is_visible(monkeypatch,tmp_pat
                                        asof_session='2026-11-10')
     assert result['status']=='RESEARCH_PLAN_BLOCKED'
     assert result['code']=='SOURCE_HASHED_CANDIDATE_METADATA_MISSING'
+
+
+
+def test_explicit_research_budget_never_reads_a_real_paper_account(monkeypatch,tmp_path):
+    _setup(monkeypatch)
+    def forbidden(*args,**kwargs):
+        pytest.fail('Explicit research budget must not inspect paper account or settings')
+    monkeypatch.setattr(workflow,'account_summary',forbidden)
+    monkeypatch.setattr(workflow,'load_settings',forbidden)
+    seen=[]
+    def review(root,**kwargs):
+        seen.append(kwargs['account'])
+        return {'status':'NO_RESEARCH_CANDIDATES','plans':[],'evaluated':[],
+                'content_sha256':'c'*64,'execution_eligible':False,
+                'real_orders_enabled':False}
+    monkeypatch.setattr(workflow,'make_indicative_review',review)
+    monkeypatch.setattr(workflow,'freeze_indicative_review',
+                        lambda *args,**kwargs:kwargs['review'])
+    result=workflow.run_v4_review_day(tmp_path,bundle_id='observed-bundle',
+                                      asof_session='2026-11-10',
+                                      research_budget=100000)
+    assert result['status']=='RESEARCH_PLAN_FROZEN_NO_ORDER'
+    assert result['research_plan_count']==0
+    assert seen[0]['status']=='EXPLICIT_EMPTY_RESEARCH_BUDGET'
+    assert seen[0]['has_actual_positions'] is False
+    assert seen[0]['budget']==100000.
