@@ -250,6 +250,8 @@ def latest_indicative_reviews(root, *, limit=10) -> dict:
                                  'rejected_count':sum(not x.get('accepted',False)
                                                       for x in review['evaluated']),
                                  'source_forecast_identity':review['source_forecast_identity'],
+                                 'source_snapshot_sha256':review['source_snapshot_sha256'],
+                                 'account_evidence':review.get('account_evidence'),
                                  'real_orders_enabled':False})
                 except (ValueError,KeyError,OSError,TypeError):
                     rows.append({'session_date_et':folder.name,'identity':child.name,
