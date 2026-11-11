@@ -449,6 +449,19 @@ def handler(console):
             if path == '/api/v1/paper':
                 from .workflow.forward_observations import inventory
                 return self.send(200, inventory(console.root))
+            if path == '/api/v1/paper/risk':
+                from .backtest.paper import account_summary
+                from .models.settings import load_settings
+                from .risk.portfolio import assess_paper_concentration, RiskPolicy
+                try:
+                    config = load_settings(console.root/'configs/experiments/baseline.yaml')
+                    account = account_summary(console.root/'data/paper.sqlite3',config)
+                    policy = RiskPolicy(max_stock_weight=config.max_stock_weight,
+                                        max_sector_weight=config.max_sector_weight,
+                                        max_gross_weight=config.max_total_weight)
+                    return self.send(200, assess_paper_concentration(account,policy))
+                except (OSError,ValueError,KeyError):
+                    return self.send(409, {'status':'BLOCKED','code':'PAPER_RISK_CONFIG_INVALID'})
             if path == '/api/v1/paper/account':
                 from .backtest.paper import account_summary
                 from .models.settings import load_settings
