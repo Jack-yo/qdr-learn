@@ -131,8 +131,9 @@ def run_oos(panel: pd.DataFrame, feature_sets: dict[str, list[str]],
     protocol_hash = sha256(json.dumps(protocol.__dict__, sort_keys=True).encode()).hexdigest()
     outputs, folds = [], []
     indices = {date: i for i, date in enumerate(sessions)}
-    for quarter, days in pd.Series(sorted(set(requested))).groupby(lambda i: pd.Timestamp(sorted(set(requested))[i]).to_period('Q')):
-        fold_days = pd.DatetimeIndex(days.to_list())
+    requested_days = pd.DatetimeIndex(sorted(set(requested)))
+    for quarter in requested_days.to_period('Q').unique():
+        fold_days = requested_days[requested_days.to_period('Q') == quarter]
         first = fold_days.min()
         loc = indices[first]
         # A five-session embargo precedes every independent forecast fold.
@@ -140,9 +141,6 @@ def run_oos(panel: pd.DataFrame, feature_sets: dict[str, list[str]],
         if last_train_index < 0:
             continue
         allowed = sessions[max(0,last_train_index-protocol.training_window_sessions+1):last_train_index+1]
-        candidates = rows.loc[rows.date.isin(allowed)
-                              & rows.gross_return.notna()
-                              & rows.label_available_at.le(rows.signal_time.map(lambda _: rows.loc[rows.date.eq(first),'signal_time'].min() if rows.date.eq(first).any() else pd.NaT))].copy()
         # The signal and label are never allowed to cross the test-fold fit time.
         fold_test = rows.loc[rows.date.isin(fold_days)].copy()
         if fold_test.empty:
@@ -162,17 +160,17 @@ def run_oos(panel: pd.DataFrame, feature_sets: dict[str, list[str]],
         early = candidates.loc[candidates.date.le(last_model_date)] if last_model_date is not None else candidates.iloc[:0]
         first_cal_time = calibration.signal_time.min() if not calibration.empty else pd.NaT
         early = early.loc[early.label_available_at.le(first_cal_time) & early.exit_time.lt(first_cal_time)]
-        if early.date.nunique() < protocol.min_training_sessions - protocol.calibration_sessions - protocol.gap_sessions:
+        if early.date.nunique() < protocol.min_training_sessions:
             continue
         for horizon in (1, 3, 5):
             past = candidates.loc[candidates.horizon.eq(horizon)]
             early_h = early.loc[early.horizon.eq(horizon)]
             cal_h = calibration.loc[calibration.horizon.eq(horizon)]
             test_h = fold_test.loc[fold_test.horizon.eq(horizon)]
-            if past.empty or early_h.empty or test_h.empty:
+            if past.empty or early_h.date.nunique() < protocol.min_training_sessions or test_h.empty:
                 continue
             for variant, cols in feature_sets.items():
-                test_x = test_h[cols].to_numpy(dtype=float)
+                test_x = test_h[cols]
                 reg_gross = _regressor(past[cols], past.gross_return, test_x, protocol.ridge_alpha)
                 reg_excess = _regressor(past[cols], past.excess_return, test_x, protocol.ridge_alpha)
                 pu, up_status = _calibrated_probability(
