@@ -150,6 +150,24 @@ def run_v4_pipeline_day(root: Path, session_date: str, *,
               'code':type(exc).__name__,
               'session_date_et':session_date,
               'real_orders_enabled':False}
+    # Never freeze a successful-looking daily diary if the forecast/plan
+    # failed, changed source, or omitted its source receipt.
+    if plan.get('status') not in ('RESEARCH_PLAN_FROZEN_NO_ORDER',
+                                 'RESEARCH_PLAN_ALREADY_FROZEN'):
+        return {'status':'RESEARCH_PLAN_BLOCKED_BEFORE_DAILY_FREEZE',
+                'code':plan.get('code') or plan.get('status') or 'PLAN_NOT_ACCEPTED',
+                'session_date_et':session_date,'research_plan':plan,
+                'real_orders_enabled':False,'paper_ledger_advanced':False}
+    if not plan.get('source_snapshot_sha256'):
+        return {'status':'PLAN_SOURCE_NOT_VERIFIED',
+                'code':'RESEARCH_PLAN_HAS_NO_SOURCE_DIGEST',
+                'session_date_et':session_date,'research_plan':plan,
+                'real_orders_enabled':False,'paper_ledger_advanced':False}
+    if plan['source_snapshot_sha256']!=admitted['source_snapshot_sha256']:
+        return {'status':'SOURCE_SNAPSHOT_MISMATCH',
+                'code':'POST_ADMISSION_PLAN_SOURCE_CHANGED',
+                'session_date_et':session_date,'research_plan':plan,
+                'real_orders_enabled':False,'paper_ledger_advanced':False}
     diary=run_observed_v4_daily(root,session_date,
                                  symbols=admitted['source_symbols'])
     source=diary.get('source_snapshot_sha256')
