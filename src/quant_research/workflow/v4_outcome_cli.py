@@ -79,13 +79,19 @@ def main(argv=None):
     parser.add_argument('--warehouse',action='store_true',
                         help='Build future raw-bar paths from verified local SIP and no-action receipts')
     args=parser.parse_args(argv)
-    if args.warehouse:
-        from quant_research.workflow.v4_warehouse_outcomes import run_warehouse_outcome_review
-        result=run_warehouse_outcome_review(
-            args.root,session_date=args.session_date,plan_identity=args.plan_id)
-    else:
-        result=run_managed_outcome_review(
-            args.root,session_date=args.session_date,plan_identity=args.plan_id)
+    try:
+        if args.warehouse:
+            from quant_research.workflow.v4_warehouse_outcomes import run_warehouse_outcome_review
+            result=run_warehouse_outcome_review(
+                args.root,session_date=args.session_date,plan_identity=args.plan_id)
+        else:
+            result=run_managed_outcome_review(
+                args.root,session_date=args.session_date,plan_identity=args.plan_id)
+    except (OSError,ValueError,TypeError,KeyError) as exc:
+        result={'status':'OUTCOME_REVIEW_BLOCKED_NO_ARCHIVE_WRITE',
+                'code':getattr(exc,'code',None) or str(exc)[:160] or type(exc).__name__,
+                'session_date_et':args.session_date,'plan_identity':args.plan_id,
+                'real_orders_enabled':False,'paper_ledger_advanced':False}
     print(json.dumps(result,ensure_ascii=False,indent=2,allow_nan=False))
     return 0 if result['status'] in ('OBSERVED_RESEARCH_OUTCOMES_FROZEN_NO_ORDERS',
                                      'OBSERVED_RESEARCH_OUTCOMES_ALREADY_FROZEN') else 4
