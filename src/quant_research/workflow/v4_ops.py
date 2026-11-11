@@ -177,8 +177,7 @@ def main(argv=None):
     print(json.dumps(result,ensure_ascii=False,indent=2,allow_nan=False))
     return 0 if result['status'] in ('RESEARCH_UPDATED_NO_TRADE',
                                       'STAGES_COMPLETE_ADMISSION_PENDING',
-                                      'RESEARCH_PLAN_AND_DIARY_SAVED',
-                                      'RESEARCH_PLAN_SAVED_DAILY_DATA_UNVERIFIED') else 4
+                                      'RESEARCH_PLAN_AND_DIARY_SAVED') else 4
 
 
 if __name__=='__main__':
