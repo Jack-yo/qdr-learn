@@ -52,7 +52,10 @@ def run_managed_forward(root: Path, *, bundle_id: str, asof_session: str) -> dic
                 'execution_eligible':False,'real_orders_enabled':False}
     frozen=freeze_research_forecast(root,report,
                                    protocol_sha256=sha256(config_path.read_bytes()).hexdigest())
-    return {'status':'FORWARD_RESEARCH_FROZEN_ONLY',
+    return {'status':('FORWARD_RESEARCH_FROZEN_ONLY'
+                       if frozen['manifest']['prospective_before_next_open']
+                       else 'RETROSPECTIVE_ASOF_RECONSTRUCTION_ONLY'),
+            'prospective_before_next_open':frozen['manifest']['prospective_before_next_open'],
             'session_date_et':asof_session,
             'identity':frozen['manifest']['identity'],
             'forecast_rows':frozen['manifest']['forecast_rows'],
