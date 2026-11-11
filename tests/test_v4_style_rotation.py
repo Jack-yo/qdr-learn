@@ -4,10 +4,11 @@ import pandas as pd
 import pytest
 
 from quant_research.research.v4_style_rotation import style_observations,style_lead_oos
+from quant_research.clock import TradingClock
 
 
 def _fixture():
-    sessions=pd.bdate_range('2024-01-02',periods=170)
+    sessions=TradingClock().calendar.sessions_in_range('2024-01-02','2025-12-31')[:170]
     ix=np.arange(len(sessions),dtype=float)
     values=pd.DataFrame({'IWM':100+ix*.12+np.sin(ix*.23),
                          'SPY':120+ix*.10+np.sin(ix*.17),
@@ -39,16 +40,19 @@ def test_style_lead_predictions_stay_nonexecuting_and_pit_restricted():
     for day_i, day in enumerate(sessions):
         for style in ('small','value'):
             for h in (1,3,5):
-                signal=pd.Timestamp(day).tz_localize('UTC')+pd.Timedelta(hours=22)
+                clock=TradingClock()
+                window=clock.window(day,h)
+                signal=pd.Timestamp(window.signal_time)
                 records.append({'date':day,'style_id':style,'horizon':h,
-                    'signal_time':signal,'forward_relative_return':[.008,-.006,.012][day_i%3],
-                    'label_available_at':signal+pd.Timedelta(days=h+2),
+                    'signal_time':signal,'entry_time':window.entry_time,'exit_time':window.exit_time,
+                    'forward_relative_return':[.008,-.006,.012][day_i%3],
+                    'label_available_at':pd.Timestamp(window.exit_time)+pd.Timedelta(minutes=20),
                     'label_kind':'VERIFIED_RAW_RELATIVE_RETURN'})
     labels=pd.DataFrame(records)
-    out=style_lead_oos(features,labels,sessions,sessions[-20:],min_training_sessions=35)
+    out=style_lead_oos(features,labels,sessions,sessions[-20:],TradingClock(),min_training_sessions=35)
     assert not out.empty
     assert not out.decision_eligible.any()
     assert set(out.style_id)=={'small','value'}
     labels['label_kind']='EXPLORATORY_ETF_PRICE_PROXY'
     with pytest.raises(ValueError,match='proxy'):
-        style_lead_oos(features,labels,sessions,sessions[-20:],min_training_sessions=35)
+        style_lead_oos(features,labels,sessions,sessions[-20:],TradingClock(),min_training_sessions=35)
