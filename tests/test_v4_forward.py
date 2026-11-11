@@ -22,6 +22,7 @@ def _sample():
                 result.append({'date':day,'security_id':sid,'horizon':horizon,
                                'signal_time':pd.Timestamp(window.signal_time),
                                'feature_available_at':pd.Timestamp(window.signal_time)-pd.Timedelta(minutes=5),
+                               'entry_time':pd.Timestamp(window.entry_time),
                                'exit_time':pd.Timestamp(window.exit_time),
                                'label_available_at':pd.NaT if frozen else pd.Timestamp(window.exit_time)+pd.Timedelta(minutes=20),
                                'gross_return':np.nan if frozen else ret,
