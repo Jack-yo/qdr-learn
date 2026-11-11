@@ -14,11 +14,14 @@
 
 当前已增加从真实标签研究包到日终研究计划的代码衔接，但**仍然需要输入真实、来源可追溯的本地数据**。它不会自动从供应商构建全部 PIT 个股样本，也不会自动买卖。
 
-合格数据包位于 `data/managed/v4_inputs/<BUNDLE_ID>/`，包含 `manifest.json`、`factors.parquet`、`labels.parquet`、`market_style.parquet`，以及研究候选计划所需的 `candidate_meta.parquet`；每份文件在 manifest 中都必须具备 SHA256。
+合格数据包位于 `data/managed/v4_inputs/<BUNDLE_ID>/`，包含 `manifest.json`、`factors.parquet`、`labels.parquet`、`market_style.parquet`，以及研究候选计划所需的 `candidate_meta.parquet`；每份文件在 manifest 中都必须具备 SHA256。**最新 V4 日终预检还要求 manifest 的 `source_symbols` 与当天真实仓库中核验的证券池完全一致，并拒绝在 T+1 开盘后补造当日预测。**
 
 ```powershell
+# 首先只读检查真实本地数据缺口（不会修改数据库）
+uv run --locked python -m quant_research.workflow.v4_data_diagnostics --db data/real_v21.duckdb --asof YYYY-MM-DD --symbols "SPY,IWM,IWD,IWF,MTUM,QUAL"
+
 # T 收盘后、T+1 开盘前运行：研究预算 100000 是明确选择的空仓研究场景，不是实际账户
-uv run --locked python -m quant_research.workflow.v4_ops --root . --date 2026-11-11 --bundle-id YOUR_REAL_BUNDLE --research-budget 100000
+uv run --locked python -m quant_research.workflow.v4_ops --root . --date YYYY-MM-DD --bundle-id YOUR_REAL_BUNDLE --research-budget 100000
 
 # 已冻结的候选完成 H3 观察期、未来原价数据具备时再回放路径
 uv run --locked python -m quant_research.workflow.v4_outcome_cli --root . --session-date 2026-11-11 --plan-id YOUR_ARCHIVED_PLAN_ID
