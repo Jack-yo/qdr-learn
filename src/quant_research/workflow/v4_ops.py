@@ -129,7 +129,18 @@ def run_v4_pipeline_day(root: Path, session_date: str, *,
     raw source snapshot digest matches.
     """
     from quant_research.workflow.v4_review_cli import run_v4_review_day
+    from quant_research.workflow.v4_pipeline_preflight import preflight_v4_day
+    from quant_research.policy import PolicyError
     root=Path(root).resolve()
+    # Validate the exchange window and independently observed warehouse source
+    # BEFORE run_managed_forward can create an immutable model archive.
+    try:
+        admitted=preflight_v4_day(root,session_date,bundle_id)
+    except (PolicyError,OSError,ValueError,KeyError,TypeError) as exc:
+        return {'status':'PREFLIGHT_BLOCKED_NO_ARCHIVE_WRITE',
+                'code':getattr(exc,'code',None) or str(exc)[:160] or type(exc).__name__,
+                'session_date_et':session_date,
+                'real_orders_enabled':False,'paper_ledger_advanced':False}
     try:
         plan=run_v4_review_day(root,bundle_id=bundle_id,asof_session=session_date,
                                research_budget=research_budget)
@@ -140,6 +151,16 @@ def run_v4_pipeline_day(root: Path, session_date: str, *,
               'real_orders_enabled':False}
     diary=run_observed_v4_daily(root,session_date)
     source=diary.get('source_snapshot_sha256')
+    if plan.get('source_snapshot_sha256') and plan['source_snapshot_sha256']!=admitted['source_snapshot_sha256']:
+        return {'status':'SOURCE_SNAPSHOT_MISMATCH','code':'POST_ADMISSION_PLAN_SOURCE_CHANGED',
+                'session_date_et':session_date,'research_plan':plan,
+                'daily_diary_status':diary.get('status'),
+                'real_orders_enabled':False,'paper_ledger_advanced':False}
+    if source and source!=admitted['source_snapshot_sha256']:
+        return {'status':'SOURCE_SNAPSHOT_MISMATCH','code':'POST_ADMISSION_WAREHOUSE_SOURCE_CHANGED',
+                'session_date_et':session_date,'research_plan':plan,
+                'daily_diary_status':diary.get('status'),
+                'real_orders_enabled':False,'paper_ledger_advanced':False}
     if source and plan.get('source_snapshot_sha256') and source!=plan['source_snapshot_sha256']:
         return {'status':'SOURCE_SNAPSHOT_MISMATCH',
                 'code':'FORECAST_SOURCE_DIFFERS_FROM_DAILY_WAREHOUSE',
