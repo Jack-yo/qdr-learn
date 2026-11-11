@@ -124,3 +124,40 @@ def read_v4_daily(root, session_date: str, identity: str) -> dict:
             or result.get('real_orders_enabled') is not False):
         raise PolicyError('DAILY_RUN_SCOPE_INVALID','Daily archive claims unsupported execution')
     return result
+
+
+
+def latest_v4_daily(root, *, limit=5) -> dict:
+    """Read validated immutable daily logs; never recompute missing sessions."""
+    if type(limit) is not int or not 1<=limit<=20:
+        raise ValueError('Daily diary limit must be 1–20')
+    base=Path(root).resolve()/'outputs/v4_daily'
+    if not base.is_dir():
+        return {'status':'NO_RECORDED_V4_DAILY_RESEARCH','runs':[],
+                'real_orders_enabled':False}
+    runs=[]
+    for session_dir in sorted(base.iterdir(),reverse=True):
+        if not session_dir.is_dir():
+            continue
+        try:
+            day=date.fromisoformat(session_dir.name)
+            if day.isoformat()!=session_dir.name:
+                continue
+        except ValueError:
+            continue
+        for folder in sorted(session_dir.iterdir(),reverse=True):
+            if not folder.is_dir() or not re.fullmatch(r'[a-f0-9]{16}',folder.name):
+                continue
+            try:
+                result=read_v4_daily(root,session_dir.name,folder.name)
+                runs.append(result)
+            except (PolicyError,ValueError,OSError,KeyError,TypeError):
+                return {'status':'CORRUPT_V4_DAILY_ARCHIVE','runs':[],
+                        'real_orders_enabled':False}
+            if len(runs)>=limit:
+                break
+        if len(runs)>=limit:
+            break
+    runs.sort(key=lambda x:x.get('created_at_utc',''),reverse=True)
+    return {'status':'V4_DAILY_RESEARCH_LOG_ONLY' if runs else 'NO_RECORDED_V4_DAILY_RESEARCH',
+            'runs':runs[:limit],'real_orders_enabled':False}
