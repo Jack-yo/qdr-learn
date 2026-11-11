@@ -48,10 +48,9 @@ def run_v4_daily(root, session_date: str, *, source_snapshot_sha256: str,
     folder=base/identity
     manifest_path=folder/'manifest.json'
     if manifest_path.is_file():
-        existing=json.loads(manifest_path.read_text(encoding='utf-8'))
-        if existing.get('identity')!=identity:
-            raise ValueError('Immutable end-of-day manifest ID mismatch')
-        return existing
+        # A repeated scheduled run must authenticate the original bytes;
+        # otherwise a modified prior log could be returned as a valid day.
+        return read_v4_daily(root,session_date,identity)
     stages=[]
     for stage in _STAGES:
         if stage=='freeze' and any(x['status']!='PASS' for x in stages):
