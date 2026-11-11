@@ -53,6 +53,9 @@ def test_future_observation_uses_actual_bars_and_gap_through_stop(tmp_path):
     assert row['modeled_exit_reason']=='GAP_THROUGH_STOP'
     assert row['modeled_exit_session']=='2025-01-06'
     assert row['modeled_net_return']==pytest.approx(-.052)
+    assert row['horizon_gross_price_return']==pytest.approx(-.02)
+    assert row['horizon_close_session']=='2025-01-07'
+    assert row['horizon_gross_price_return']!=row['realized_gross_price_return']
     assert result['real_orders_enabled'] is False
     archived=outcomes.freeze_research_outcomes(tmp_path,result)
     assert archived==result
