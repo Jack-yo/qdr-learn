@@ -29,6 +29,7 @@ from quant_research.workflow.v4_alpha import study_conditional_alpha
 _ID = re.compile(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}\Z')
 _SHA = re.compile(r'[a-f0-9]{64}\Z')
 _FILES = ('factors.parquet','labels.parquet','market_style.parquet')
+_OPTIONAL_FILES = ('candidate_meta.parquet',)
 
 
 def _checked_inputs(root, bundle_id):
@@ -43,12 +44,13 @@ def _checked_inputs(root, bundle_id):
     manifest=json.loads(manifest_file.read_text(encoding='utf-8'))
     digests=manifest.get('artifacts_sha256')
     if (manifest.get('kind')!='V4_STRICT_LABEL_STUDY_INPUT'
-            or not isinstance(digests,dict) or set(digests)!=set(_FILES)
+            or not isinstance(digests,dict) or not set(_FILES).issubset(digests)
+            or set(digests)-set(_FILES)-set(_OPTIONAL_FILES)
             or not isinstance(manifest.get('source_snapshot_sha256'),str)
             or not _SHA.fullmatch(manifest['source_snapshot_sha256'])):
         raise ValueError('Unrecognized source-hashed V4 research input contract')
     frames={}
-    for name in _FILES:
+    for name in digests:
         file=(folder/name).resolve()
         expected=digests[name]
         if (not file.is_relative_to(folder) or not file.is_file()
