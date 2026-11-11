@@ -72,31 +72,31 @@
 
 本轮针对“有很多独立模型文件，却不能形成完整日终决策”的问题，修复并新增：
 
-1. **模型到计划字段契约**：\`models/v4_forward.py\` 现在冻结实际模型拟合 UTC 时间；\`workflow/v4_candidate_bridge.py\` 将 D 模型 H3 的总收益预测、超额收益、上涨/下跌概率及校准状态映射到 \`v4_decision.indicative_plans\`。修复了原计划引擎错误禁止“收盘后训练模型”的时间条件。
+1. **模型到计划字段契约**：`models/v4_forward.py` 现在冻结实际模型拟合 UTC 时间；`workflow/v4_candidate_bridge.py` 将 D 模型 H3 的总收益预测、超额收益、上涨/下跌概率及校准状态映射到 `v4_decision.indicative_plans`。修复了原计划引擎错误禁止“收盘后训练模型”的时间条件。
 2. **同日来源与持仓约束**：新桥接器强制 T 日真实候选元数据、价格/ATR20/ADV20 及来源摘要一致；若使用真实模拟账户，必须满足当天估值及内部对账；拒绝未知行业、未来可得数据和未校准概率。
-3. **空仓研究预算**：用户可明确指定 \`--research-budget\` 进行资金规模的研究场景测算；标记为 \`EXPLICIT_EMPTY_RESEARCH_BUDGET_NOT_A_PAPER_ACCOUNT\`，**不是历史持仓、模拟成交或真实收益**。缺少持仓时不再因为循环依赖而完全无法形成研究候选。
-4. **一次运行的研究入口**：\`python -m quant_research.workflow.v4_ops --root . --date YYYY-MM-DD --bundle-id <BUNDLE_ID> --research-budget 100000\` 尝试完成**合格研究数据包 → 模型训练与前向冻结 → H3 研究候选与成本/仓位审查 → 不可变研究计划 → 四层日终状态记录**。真实主数据仓库缺失或摘要不符时会另行报告阻断，绝不把研究场景升级为生产准入或模拟成交。
+3. **空仓研究预算**：用户可明确指定 `--research-budget` 进行资金规模的研究场景测算；标记为 `EXPLICIT_EMPTY_RESEARCH_BUDGET_NOT_A_PAPER_ACCOUNT`，**不是历史持仓、模拟成交或真实收益**。缺少持仓时不再因为循环依赖而完全无法形成研究候选。
+4. **一次运行的研究入口**：`python -m quant_research.workflow.v4_ops --root . --date YYYY-MM-DD --bundle-id <BUNDLE_ID> --research-budget 100000` 尝试完成**合格研究数据包 → 模型训练与前向冻结 → H3 研究候选与成本/仓位审查 → 不可变研究计划 → 四层日终状态记录**。真实主数据仓库缺失或摘要不符时会另行报告阻断，绝不把研究场景升级为生产准入或模拟成交。
 5. **前向真伪与幂等性**：与交易所次日开盘时间比较实际归档 UTC 时间；历史重放不可冒充真前向。重复同源同协议运行复用不可覆盖的原预测；更改研究预算不得悄然覆盖已有计划。
-6. **T+H 实际价格跟踪**：\`workflow/v4_plan_outcomes.py\` 接收后续真实原价 OHLC 和数据回执；检查交易日连续、来源、发布时间、公司行为“无变化”核验，估算止损触发及隔夜跳空后的模型成本净收益与预测误差。输出始终带 \`source_independently_attested=False\`、\`real_orders_enabled=False\`；它是价格路径研究回放，**不代表实际经纪商成交**。
-7. **结果阅读**：新增 \`/api/v1/v4/plans\`、\`/api/v1/v4/outcomes\` 只读归档及明细；总览与因子组选股页面增加已冻结研究候选、净优势、预算权重和实际未来原价路径复盘。没有真实存档时保持空态。
-8. **测试设计**：新增 \`tests/test_v4_candidate_bridge.py\`、\`tests/test_v4_review_cli.py\`、\`tests/test_v4_plan_outcomes.py\`，覆盖时间隔离、同源核对、历史重放、未校准概率、研究预算、止损跳空和不可变档案。**这些测试尚未在完整最新 main 环境实际执行。**
+6. **T+H 实际价格跟踪**：`workflow/v4_plan_outcomes.py` 接收后续真实原价 OHLC 和数据回执；检查交易日连续、来源、发布时间、公司行为“无变化”核验，估算止损触发及隔夜跳空后的模型成本净收益与预测误差。输出始终带 `source_independently_attested=False`、`real_orders_enabled=False`；它是价格路径研究回放，**不代表实际经纪商成交**。
+7. **结果阅读**：新增 `/api/v1/v4/plans`、`/api/v1/v4/outcomes` 只读归档及明细；总览与因子组选股页面增加已冻结研究候选、净优势、预算权重和实际未来原价路径复盘。没有真实存档时保持空态。
+8. **测试设计**：新增 `tests/test_v4_candidate_bridge.py`、`tests/test_v4_review_cli.py`、`tests/test_v4_plan_outcomes.py`，覆盖时间隔离、同源核对、历史重放、未校准概率、研究预算、止损跳空和不可变档案。**这些测试尚未在完整最新 main 环境实际执行。**
 
 ### 必须具备的本地研究输入
 
-已有 \`data/managed/v4_inputs/<BUNDLE_ID>/\` 的三个必需 Parquet 和 manifest 外，可增加摘要校验过的 \`candidate_meta.parquet\`，字段：
+已有 `data/managed/v4_inputs/<BUNDLE_ID>/` 的三个必需 Parquet 和 manifest 外，可增加摘要校验过的 `candidate_meta.parquet`，字段：
 
-\`date, security_id, symbol, sector, reference_close, atr20, adv20, available_at, source_snapshot_sha256\`。
+`date, security_id, symbol, sector, reference_close, atr20, adv20, available_at, source_snapshot_sha256`。
 
-必须是 **T 日信号时间前已真实可知** 的证券身份/行业、原始参考收盘价、ATR20 和 ADV20，不允许用最新重算的行业、未来成交或退市筛选替换。配置文件 \`manifest.json\` 的 \`artifacts_sha256\` 需包含这份额外 Parquet 的原始字节哈希。
+必须是 **T 日信号时间前已真实可知** 的证券身份/行业、原始参考收盘价、ATR20 和 ADV20，不允许用最新重算的行业、未来成交或退市筛选替换。配置文件 `manifest.json` 的 `artifacts_sha256` 需包含这份额外 Parquet 的原始字节哈希。
 
 用于 T+H 结算的原始日线包需存在：
 
-\`data/managed/v4_outcomes/<T_DATE>/<PLAN_ID>/manifest.json\`
-\`data/managed/v4_outcomes/<T_DATE>/<PLAN_ID>/bars.parquet\`
+`data/managed/v4_outcomes/<T_DATE>/<PLAN_ID>/manifest.json`
+`data/managed/v4_outcomes/<T_DATE>/<PLAN_ID>/bars.parquet`
 
-其中 manifest 必须具备 \`kind=V4_OBSERVED_RAW_BAR_PATH\`、\`session_date_et\`、\`plan_identity\`、\`bars_parquet_sha256\`；日线必须具备 \`session_date,security_id,open,high,low,close,available_at,source_sha256,corporate_action_status\`，当前代码只支持 \`corporate_action_status=VERIFIED_NO_ACTION\`。否则拒绝把拆股/分红路径当作正常价格收益。
+其中 manifest 必须具备 `kind=V4_OBSERVED_RAW_BAR_PATH`、`session_date_et`、`plan_identity`、`bars_parquet_sha256`；日线必须具备 `session_date,security_id,open,high,low,close,available_at,source_sha256,corporate_action_status`，当前代码只支持 `corporate_action_status=VERIFIED_NO_ACTION`。否则拒绝把拆股/分红路径当作正常价格收益。
 
-结算命令：\`python -m quant_research.workflow.v4_outcome_cli --root . --session-date YYYY-MM-DD --plan-id <PLAN_ID>\`。
+结算命令：`python -m quant_research.workflow.v4_outcome_cli --root . --session-date YYYY-MM-DD --plan-id <PLAN_ID>`。
 
 **仍未打通的最重要环节**：从现有供应商及历史仓库**自动生成上述合格模型数据包**，并让正式模拟账本逐日成交、退出和持仓滚动。当前主链路为“研究预测→成本后候选→前向价格路径评价”的非执行型垂直切片，不能称已完成可用 MVP，更不能称市场/Alpha 预测模型已取得真实经济优势。
 
