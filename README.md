@@ -343,10 +343,25 @@ uv run --locked python -m quant_research.workflow.v4_ops --root . --date 2026-11
 .\.venv\Scripts\python.exe -m quant_research.cli frozen-candidates
 .\.venv\Scripts\python.exe -m quant_research.cli paper-timeline
 
+# 新增 V4：只读核对同一交易日、原价行情/因子/未来标签的完整来源
+uv run --locked python -m quant_research.workflow.v4_ops --root . --date YYYY-MM-DD --bundle-id <DATA_BUNDLE_ID> --preflight-only
+
+# 合格来源和时间戳满足时：前向预测 → 风险研究计划 → 日终记录
+# 100000 只是独立研究预算，不是模拟券商账户
+uv run --locked python -m quant_research.workflow.v4_ops --root . --date YYYY-MM-DD --bundle-id <DATA_BUNDLE_ID> --research-budget 100000
+
+# 到期的冻结 H3 研究计划：默认只读预览，可显式选择源核验后的研究结果归档
+uv run --locked python -m quant_research.workflow.v4_settlement_sweep --root .
+uv run --locked python -m quant_research.workflow.v4_settlement_sweep --root . --freeze-outcomes
+
+# 使用真实前向日终标签衡量模型预测 Brier/MSE 与严格因果基线
+uv run --locked python -m quant_research.workflow.v4_forward_scorecard --root .
+
 # 测试：通过单元测试不代表真实数据／交易资格已通过
 uv run --locked pytest -q
 ```
 
+- [V4 工程进度、数据资格及本地验收](docs/V4_DEVELOPMENT_STATUS.md)
 - [REAL_ONLY 数据与防伪造政策](docs/REAL_DATA_POLICY.md)
 - [统一架构与使用说明](docs/system_guide.md)
 - [日常数据维护](docs/DAILY_DATA_MAINTENANCE.md)
