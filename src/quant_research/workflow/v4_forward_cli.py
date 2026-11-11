@@ -17,7 +17,8 @@ from quant_research.clock import TradingClock
 from quant_research.models.v4_forward import forecast_asof
 from quant_research.models.v4_oos import OOSProtocol
 from quant_research.models.v4_panel import prepare_v4_alpha_panel
-from quant_research.research.v4_forecast_archive import freeze_research_forecast, read_research_forecast
+from quant_research.research.v4_forecast_archive import (freeze_research_forecast,
+    read_research_forecast, forecast_archive_identity)
 from quant_research.workflow.v4_study_cli import _checked_inputs
 
 
@@ -40,7 +41,11 @@ def run_managed_forward(root: Path, *, bundle_id: str, asof_session: str) -> dic
         from quant_research.workflow.v4_bundle_contract import audit_forward_candidate_cohort
         audit_forward_candidate_cohort(inputs,manifest,day,signal)
     config_sha=sha256(config_path.read_bytes()).hexdigest()
-    archive_id=sha256((str(day)+manifest['source_snapshot_sha256']+config_sha).encode()).hexdigest()[:16]
+    input_contract={'artifacts_sha256':manifest['artifacts_sha256'],
+                    'factor_names':factor_names,
+                    'source_symbols':manifest.get('source_symbols') or []}
+    archive_id=forecast_archive_identity(str(day.date()),
+        manifest['source_snapshot_sha256'],config_sha,input_contract=input_contract)
     try:
         existing=read_research_forecast(root,str(day.date()),archive_id,include_rows=False)
     except FileNotFoundError:
@@ -72,7 +77,8 @@ def run_managed_forward(root: Path, *, bundle_id: str, asof_session: str) -> dic
         return {'status':report['status'],'session_date_et':asof_session,
                 'execution_eligible':False,'real_orders_enabled':False}
     frozen=freeze_research_forecast(root,report,
-                                   protocol_sha256=config_sha)
+                                   protocol_sha256=config_sha,
+                                   input_contract=input_contract)
     return {'status':('FORWARD_RESEARCH_FROZEN_ONLY'
                        if frozen['manifest']['prospective_before_next_open']
                        else 'RETROSPECTIVE_ASOF_RECONSTRUCTION_ONLY'),
