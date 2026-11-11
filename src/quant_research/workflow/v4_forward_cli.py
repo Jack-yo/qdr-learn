@@ -32,7 +32,13 @@ def run_managed_forward(root: Path, *, bundle_id: str, asof_session: str) -> dic
     protocol=OOSProtocol(**policy['oos'])
     clock=TradingClock()
     day=clock.session(asof_session)
-    clock.signal(day)  # Cannot generate a pre-close "after-close" prediction.
+    signal=clock.signal(day)  # Cannot generate a pre-close "after-close" prediction.
+    # Model-only historical studies may omit candidate metadata, but any
+    # forward bundle claiming candidate provenance must pass the complete
+    # same-day cohort audit even when called outside the V4 daily orchestrator.
+    if 'candidate_meta' in inputs:
+        from quant_research.workflow.v4_bundle_contract import audit_forward_candidate_cohort
+        audit_forward_candidate_cohort(inputs,manifest,day,signal)
     config_sha=sha256(config_path.read_bytes()).hexdigest()
     archive_id=sha256((str(day)+manifest['source_snapshot_sha256']+config_sha).encode()).hexdigest()[:16]
     try:
