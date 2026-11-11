@@ -6,6 +6,7 @@ does not grant historical PIT, model validation or paper trading privileges.
 from __future__ import annotations
 
 from hashlib import sha256
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
@@ -56,6 +57,12 @@ def freeze_research_forecast(root, report: dict, *, protocol_sha256: str) -> dic
     source=report.get('source_snapshot_sha256')
     if not all(isinstance(x,str) and _SHA.fullmatch(x) for x in (source,protocol_sha256)):
         raise ValueError('Source and research protocol digests required')
+    from quant_research.clock import TradingClock
+    clock=TradingClock()
+    window=clock.window(day,1)
+    created=datetime.now(timezone.utc)
+    genuine_forward=bool(pd.Timestamp(window.signal_time) <= pd.Timestamp(created)
+                         < pd.Timestamp(window.entry_time))
     identity=sha256((str(day)+source+protocol_sha256).encode()).hexdigest()[:16]
     base,dest=_loc(root,day,identity)
     if dest.exists():
@@ -74,7 +81,10 @@ def freeze_research_forecast(root, report: dict, *, protocol_sha256: str) -> dic
                   'protocol_sha256':protocol_sha256,
                   'forecast_rows':len(data),'model_cards':len(cards),
                   'artifacts_sha256':hashes,
-                  'status':'FROZEN_FORWARD_RESEARCH_ONLY',
+                  'created_at_utc':created.isoformat(),
+                  'prospective_before_next_open':genuine_forward,
+                  'status':('PROSPECTIVE_FORWARD_RESEARCH_ONLY' if genuine_forward
+                            else 'RETROSPECTIVE_ASOF_RECONSTRUCTION_ONLY'),
                   'decision_eligible':False,'source_independently_attested':False,
                   'real_orders_enabled':False}
         (work/'manifest.json').write_text(
@@ -97,6 +107,7 @@ def read_research_forecast(root, day, identity, *, include_rows=False):
             or manifest.get('decision_eligible') is not False
             or manifest.get('real_orders_enabled') is not False
             or manifest.get('source_independently_attested') is not False
+            or type(manifest.get('prospective_before_next_open')) is not bool
             or set(manifest.get('artifacts_sha256',{}))!=set(_FILE_NAMES)):
         raise ValueError('Forecast record is not a restricted research archive')
     for name in _FILE_NAMES:
@@ -106,7 +117,10 @@ def read_research_forecast(root, day, identity, *, include_rows=False):
                 or not artifact.is_file() or not isinstance(digest,str)
                 or not _SHA.fullmatch(digest) or _hash(artifact)!=digest):
             raise ValueError(f'Forecast artifact is missing or corrupt: {name}')
-    info={'status':'VERIFIED_LOCAL_FORWARD_RESEARCH_ONLY','manifest':manifest,
+    info={'status':('VERIFIED_LOCAL_FORWARD_RESEARCH_ONLY'
+                    if manifest['prospective_before_next_open']
+                    else 'VERIFIED_LOCAL_RETROSPECTIVE_ASOF_ONLY'),
+          'manifest':manifest,
           'manifest_sha256':_hash(path),'real_orders_enabled':False}
     if include_rows:
         forecasts=pd.read_parquet(folder/'forecasts.parquet')
