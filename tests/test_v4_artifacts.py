@@ -13,7 +13,9 @@ def _report():
             'predictions':pd.DataFrame([{'date':'2025-01-02','p_up':.61}]),
             'folds':pd.DataFrame([{'horizon':3,'train_sessions':500}]),
             'metrics':pd.DataFrame([{'variant':'A','horizon':3,'brier_up':.22}]),
-            'increment_vs_alpha_only':pd.DataFrame(columns=['horizon','brier_gain'])}
+            'increment_vs_alpha_only':pd.DataFrame(columns=['horizon','brier_gain']),
+            'alpha_ranking':pd.DataFrame(columns=['variant','horizon','rank_ic_mean']),
+            'daily_alpha_rank_ic':pd.DataFrame(columns=['date','rank_ic'])}
 
 
 def test_research_manifest_is_immutable_and_readable(tmp_path):
