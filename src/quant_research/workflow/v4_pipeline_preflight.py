@@ -38,13 +38,23 @@ def preflight_v4_day(root: Path, session_date: str, bundle_id: str,
     snapshot=manifest.get("source_snapshot_sha256")
     if not isinstance(snapshot,str) or not _SHA.fullmatch(snapshot):
         raise ValueError("SOURCE_BUNDLE_SNAPSHOT_INVALID")
-    state=readiness_fn(Path(root).resolve(),asof=str(day.date()))
+    source_symbols=manifest.get("source_symbols")
+    if (not isinstance(source_symbols,list) or not source_symbols
+            or any(not isinstance(x,str) or not x.strip() for x in source_symbols)
+            or len(set(source_symbols))!=len(source_symbols)):
+        raise ValueError("SOURCE_SYMBOL_BASKET_REQUIRED")
+    state=readiness_fn(Path(root).resolve(),asof=str(day.date()),
+                       symbols=source_symbols)
     dataset=(state.get("stages") or {}).get("dataset") or {}
     evidence=dataset.get("evidence") or {}
     if dataset.get("status")!="OBSERVATION_ONLY":
         raise ValueError("REAL_SOURCE_OBSERVATION_NOT_VERIFIED")
     if evidence.get("asof_date_et")!=str(day.date()):
         raise ValueError("REAL_SOURCE_SESSION_MISMATCH")
+    if evidence.get("latest_session_complete") is not True:
+        raise ValueError("REAL_SOURCE_LATEST_SESSION_INCOMPLETE")
+    if evidence.get("symbols") != source_symbols:
+        raise ValueError("SOURCE_BASKET_MISMATCH")
     if evidence.get("source_snapshot_sha256")!=snapshot:
         raise ValueError("BUNDLE_DIFFERS_FROM_LIVE_WAREHOUSE_SNAPSHOT")
     for name in ("factors","labels","market_style","candidate_meta"):
@@ -82,6 +92,8 @@ def preflight_v4_day(root: Path, session_date: str, bundle_id: str,
         raise ValueError("CANDIDATE_METADATA_SCHEMA_INCOMPLETE")
     if metadata.security_id.duplicated().any():
         raise ValueError("CANDIDATE_METADATA_DUPLICATE_IDENTITY")
+    if not set(metadata.symbol).issubset(set(source_symbols)):
+        raise ValueError("CANDIDATE_NOT_IN_VERIFIED_SOURCE_BASKET")
     if (not pd.to_datetime(metadata.date).eq(day).all()
             or not metadata.source_snapshot_sha256.eq(snapshot).all()
             or not pd.to_datetime(metadata.available_at,utc=True).le(signal).all()):
@@ -102,6 +114,7 @@ def preflight_v4_day(root: Path, session_date: str, bundle_id: str,
     return {"status":"PREFLIGHT_SOURCE_AND_TIME_MATCH_RESEARCH_ONLY",
             "session_date_et":str(day.date()),
             "source_snapshot_sha256":snapshot,
+            "source_symbols":source_symbols,
             "checked_candidate_rows":len(metadata),
             "checked_forward_label_rows":len(upcoming),
             "real_orders_enabled":False,
