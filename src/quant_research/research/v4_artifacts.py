@@ -17,7 +17,7 @@ import pandas as pd
 
 _ID = re.compile(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}\Z')
 _SHA = re.compile(r'[0-9a-f]{64}\Z')
-_FRAMES = ('predictions','folds','metrics','increment_vs_alpha_only')
+_FRAMES = ('predictions','folds','metrics','increment_vs_alpha_only','alpha_ranking','daily_alpha_rank_ic')
 _FOLDER = Path('outputs/v4_research/runs')
 
 
@@ -112,7 +112,7 @@ def read_research_run(root, run_id: str, *, include_rows=False) -> dict:
             'real_orders_enabled':False,'historical_decision_eligible':False}
     # Small numeric summaries can be used by the browser. Historical forecast
     # rows, with realized labels, remain in the research archive by default.
-    names = _FRAMES if include_rows else ('metrics','increment_vs_alpha_only','folds')
+    names = _FRAMES if include_rows else ('metrics','increment_vs_alpha_only','folds','alpha_ranking')
     for name in names:
         frame=pd.read_parquet(folder/(name+'.parquet'))
         if name=='predictions' and len(frame)>50_000:
