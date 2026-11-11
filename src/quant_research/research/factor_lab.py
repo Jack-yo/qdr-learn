@@ -13,6 +13,7 @@ import numpy as np
 from pydantic import BaseModel,ConfigDict,Field,StrictInt,model_validator
 
 from quant_research.features.factors import FunctionalFactor
+from quant_research.features.expression import compile_expression
 from quant_research.policy import PolicyError,SYMBOLS
 
 
@@ -24,8 +25,9 @@ def valid_id(value):return str(UUID(str(value)))
 class FactorSpec(BaseModel):
     model_config=ConfigDict(extra='forbid',frozen=True)
     name:str=Field(min_length=1,max_length=80)
-    template:Literal['reversal','momentum','volatility','liquidity','amihud','size','quality','sector_relative']
+    template:Literal['reversal','momentum','volatility','liquidity','amihud','size','quality','sector_relative','custom']
     window:StrictInt=Field(ge=1,le=252)
+    expression:str|None=None
     direction:StrictInt=1
     hypothesis:str=Field(default='',max_length=1000)
     parent_version_id:str|None=None
@@ -34,6 +36,12 @@ class FactorSpec(BaseModel):
     def validate_definition(self):
         if not re.fullmatch(r'[\w\u4e00-\u9fff .-]+',self.name) or not self.name.strip():raise ValueError('Invalid factor name')
         if self.direction not in (-1,1):raise ValueError('Direction must be +1 or -1')
+        if self.template=='custom':
+            compiled=compile_expression(self.expression)
+            if compiled.lookback>self.window:
+                raise ValueError(f'Custom expression requires window >= {compiled.lookback} sessions')
+        elif self.expression is not None:
+            raise ValueError('Expressions are supported only for custom factors')
         if self.template in ('volatility','liquidity','amihud') and self.window<5:raise ValueError('Rolling template needs at least 5 sessions')
         if self.template in ('size','quality') and self.window!=1:raise ValueError('PIT financial templates use window=1')
         if self.template=='sector_relative' and self.window!=5:raise ValueError('Sector-relative template requires 5 sessions')
@@ -60,7 +68,11 @@ class ExperimentSpec(BaseModel):
 
 def template_factor(spec,version_hash):
     w,d=spec.window,spec.direction
-    if spec.template=='reversal':
+    if spec.template=='custom':
+        compiled=compile_expression(spec.expression)
+        function=lambda c: d*compiled.compute(c)
+        definition=f'{d} * ({compiled.formula})'
+    elif spec.template=='reversal':
         function=lambda c: d*-(c.close/c.close.shift(w)-1)
         definition=f'{d} * -(close/close.shift({w})-1)'
     elif spec.template=='momentum':
