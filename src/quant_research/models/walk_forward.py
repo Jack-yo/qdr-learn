@@ -117,14 +117,19 @@ def train_alpha(frame,observed,clock,config,mode,market_columns,style_columns,fo
                 if train.date.nunique()<config.minimum_training_sessions or test.empty:
                     continue
                 for variant,columns in columns_by_variant.items():
-                    reg = regression(config.ridge_alpha).fit(train[columns],train.excess_target)
+                    # Gross trade return and benchmark-relative excess return are
+                    # distinct targets; the latter must never masquerade as a
+                    # directly tradable total-return forecast.
+                    reg_excess = regression(config.ridge_alpha).fit(train[columns],train.excess_target)
+                    reg_gross = regression(config.ridge_alpha).fit(train[columns],train.target)
                     p,naive,status = probabilities(train[columns],(train.target>0).astype(int),test[columns],config)
-                    expected_excess = reg.predict(test[columns])
-                    benchmark_mean = float(train.drop_duplicates("date").benchmark_target.mean())
+                    expected_excess = reg_excess.predict(test[columns])
+                    expected_gross = reg_gross.predict(test[columns])
                     out = test[["date","security_id","symbol","horizon","signal_time","feature_available_at","entry_time","exit_time",
                                 "label_available_at","atr20","reference_close","adv20","sector","reversal_5d"]].copy()
                     out["variant"],out["p_up"],out["expected_excess_return"] = variant,p,expected_excess
-                    out["predicted_return"] = expected_excess+benchmark_mean
+                    out["expected_gross_trade_return"] = expected_gross
+                    out["predicted_return"] = expected_gross
                     out["actual_return"],out["actual_excess_return"] = test.target.to_numpy(),test.excess_target.to_numpy()
                     out["naive_return"],out["naive_p_up"] = float(train.target.mean()),naive
                     out["downside_quantile"] = float(train.target.quantile(config.downside_quantile))
