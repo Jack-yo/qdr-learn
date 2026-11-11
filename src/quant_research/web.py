@@ -434,6 +434,14 @@ def handler(console):
                     return self.send(409, exc.payload())
                 except (ValueError, KeyError, OSError):
                     return self.send(409, {'status': 'BLOCKED', 'code': 'DAILY_OBSERVATION_INVALID'})
+            if path == '/api/v1/v4/daily':
+                from .workflow.v4_daily import latest_v4_daily
+                if urlsplit(self.path).query:
+                    return self.send(400,{'status':'BLOCKED','code':'UNEXPECTED_DAILY_QUERY'})
+                try:
+                    return self.send(200,latest_v4_daily(console.root,limit=5))
+                except (ValueError,OSError):
+                    return self.send(409,{'status':'BLOCKED','code':'V4_DAILY_ARCHIVE_UNREADABLE'})
             if path == '/api/v1/v4/research/runs' or path.startswith('/api/v1/v4/research/runs/'):
                 from .research.v4_artifacts import list_research_runs, read_research_run
                 if urlsplit(self.path).query:
