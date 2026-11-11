@@ -100,9 +100,10 @@ def observed_v4_adapters(root: Path, readiness: dict):
             'alpha':alpha,'risk':risk,'freeze':freeze}
 
 
-def run_observed_v4_daily(root: Path, session_date: str) -> dict:
+def run_observed_v4_daily(root: Path, session_date: str, *, symbols=None) -> dict:
     root=Path(root).resolve()
-    readiness=research_readiness(root,asof=session_date)
+    readiness=(research_readiness(root,asof=session_date,symbols=symbols)
+               if symbols is not None else research_readiness(root,asof=session_date))
     evidence=(readiness.get('stages') or {}).get('dataset',{}).get('evidence') or {}
     snapshot=evidence.get('source_snapshot_sha256')
     if not snapshot:
@@ -149,7 +150,8 @@ def run_v4_pipeline_day(root: Path, session_date: str, *,
               'code':type(exc).__name__,
               'session_date_et':session_date,
               'real_orders_enabled':False}
-    diary=run_observed_v4_daily(root,session_date)
+    diary=run_observed_v4_daily(root,session_date,
+                                 symbols=admitted['source_symbols'])
     source=diary.get('source_snapshot_sha256')
     if plan.get('source_snapshot_sha256') and plan['source_snapshot_sha256']!=admitted['source_snapshot_sha256']:
         return {'status':'SOURCE_SNAPSHOT_MISMATCH','code':'POST_ADMISSION_PLAN_SOURCE_CHANGED',
