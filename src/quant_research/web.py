@@ -456,7 +456,7 @@ def handler(console):
                         raise ValueError('Invalid research archive path')
                     data=read_research_run(console.root,run_id)
                     import pandas as pd
-                    for name in ('folds','metrics','increment_vs_alpha_only'):
+                    for name in ('folds','metrics','increment_vs_alpha_only','alpha_ranking'):
                         data[name]=json.loads(data[name].head(200).to_json(orient='records',date_format='iso'))
                     return self.send(200,data)
                 except FileNotFoundError:
