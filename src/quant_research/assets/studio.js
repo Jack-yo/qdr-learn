@@ -202,9 +202,16 @@ async function backtests(){
        esc(x.brier_gain_ci95?x.brier_gain_ci95.map(v=>fmt(v,6)).join(' ~ '):'—'),
        fmt(x.gross_mse_gain,8)])):
        empty('暂无同样本增量检验','若可用样本不足，应保持未判定状态。');
+     const rankRows=data.alpha_ranking||[];
+     const rankTable=rankRows.length?table(['模型','期限','有效日数','Rank IC','ICIR(非年化)','多空分组差'],
+       rankRows.map(x=>[esc(x.variant),esc(x.horizon)+'日',num(x.sessions),
+         fmt(x.rank_ic_mean,4),fmt(x.rank_icir_unannualized,3),
+         fmt(x.mean_top_bottom_spread,5)])):
+       empty('暂无有效的跨股票排序统计','需要在同一交易日具有足够多的真实个股标签；ETF 少量代理不代表全市场 Alpha。');
      $('#v4-oos-detail').innerHTML=panel('研究版本 '+esc(button.dataset.v4Run),
        metricTable+'<h4 class="section-title">市场/风格对 Alpha 的条件预测增量</h4>'+
-       incTable+'<p class="text-muted">区间未校正多重试验；哈希仅证明本地文件完整，不证明数据 PIT 或收益优势。</p>'+
+       incTable+'<h4 class="section-title">个股样本外排序能力</h4>'+rankTable+
+       '<p class="text-muted">分组收益不是可执行净收益。置信区间未校正多重试验；文件哈希不证明 PIT 数据或交易优势。</p>'+
        jsonNote(data.manifest));
    }));
  });
