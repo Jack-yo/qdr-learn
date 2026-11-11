@@ -434,6 +434,27 @@ def handler(console):
                     return self.send(409, exc.payload())
                 except (ValueError, KeyError, OSError):
                     return self.send(409, {'status': 'BLOCKED', 'code': 'DAILY_OBSERVATION_INVALID'})
+            if path == '/api/v1/v4/research/runs' or path.startswith('/api/v1/v4/research/runs/'):
+                from .research.v4_artifacts import list_research_runs, read_research_run
+                if urlsplit(self.path).query:
+                    return self.send(400,{'status':'BLOCKED','code':'UNEXPECTED_RESEARCH_QUERY'})
+                try:
+                    if path == '/api/v1/v4/research/runs':
+                        return self.send(200,{'status':'RESEARCH_ARCHIVE_INDEX',
+                                              'runs':list_research_runs(console.root),
+                                              'real_orders_enabled':False})
+                    run_id=path.removeprefix('/api/v1/v4/research/runs/')
+                    if not run_id or '/' in run_id:
+                        raise ValueError('Invalid research archive path')
+                    data=read_research_run(console.root,run_id)
+                    import pandas as pd
+                    for name in ('folds','metrics','increment_vs_alpha_only'):
+                        data[name]=json.loads(data[name].head(200).to_json(orient='records',date_format='iso'))
+                    return self.send(200,data)
+                except FileNotFoundError:
+                    return self.send(404,{'status':'BLOCKED','code':'RESEARCH_RUN_NOT_FOUND'})
+                except (ValueError,OSError,KeyError,TypeError):
+                    return self.send(409,{'status':'BLOCKED','code':'RESEARCH_RUN_INVALID_OR_UNVERIFIED'})
             if path == '/api/v1/paper/timeline':
                 from .workflow.paper_timeline import paper_timeline
                 query=parse_qs(urlsplit(self.path).query,keep_blank_values=True)
