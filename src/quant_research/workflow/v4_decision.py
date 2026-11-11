@@ -121,7 +121,7 @@ def indicative_plans(projections: pd.DataFrame, existing_holdings: pd.DataFrame,
         except (TypeError, ValueError, AttributeError):
             reason = 'INVALID_FORECAST_TIMESTAMPS'
         if reason is None and not (available <= signal <= frozen_at < entry < exit_time
-                                   and model_fit <= signal):
+                                   and model_fit <= frozen_at):
             reason = 'FUTURE_INPUT_OR_INVALID_ENTRY_WINDOW'
         digest = row.get('source_snapshot_sha256')
         if reason is None and not (isinstance(digest,str) and len(digest)==64
