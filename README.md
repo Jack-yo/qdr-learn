@@ -10,6 +10,24 @@
 
 设计映射、页面接口、交互说明与未完成的浏览器验收见 [V4 UI 高保真交付说明](docs/V4_UI_ACCEPTANCE.md)。**页面代码完成不等于浏览器视觉回归或真实策略性能通过。**
 
+## V4 日终研究垂直切片（新增，非实盘交易）
+
+当前已增加从真实标签研究包到日终研究计划的代码衔接，但**仍然需要输入真实、来源可追溯的本地数据**。它不会自动从供应商构建全部 PIT 个股样本，也不会自动买卖。
+
+合格数据包位于 `data/managed/v4_inputs/<BUNDLE_ID>/`，包含 `manifest.json`、`factors.parquet`、`labels.parquet`、`market_style.parquet`，以及研究候选计划所需的 `candidate_meta.parquet`；每份文件在 manifest 中都必须具备 SHA256。
+
+```powershell
+# T 收盘后、T+1 开盘前运行：研究预算 100000 是明确选择的空仓研究场景，不是实际账户
+uv run --locked python -m quant_research.workflow.v4_ops --root . --date 2026-11-11 --bundle-id YOUR_REAL_BUNDLE --research-budget 100000
+
+# 已冻结的候选完成 H3 观察期、未来原价数据具备时再回放路径
+uv run --locked python -m quant_research.workflow.v4_outcome_cli --root . --session-date 2026-11-11 --plan-id YOUR_ARCHIVED_PLAN_ID
+```
+
+结果可在新版首页和因子组选股页查看，或访问只读 `/api/v1/v4/plans` 与 `/api/v1/v4/outcomes`。**早于收盘或晚于次日开盘的重算不会成为合格前向研究计划**；缺少校准概率、来源核对、交易日原价、公司行为验证或对应日期的实际账本时，会说明阻断原因。
+
+详情见 [V4 当前实现与缺口](docs/V4_DEVELOPMENT_STATUS.md)。**这是研究型 MVP 垂直切片代码，不是已完成数据接入、生产模拟成交或真实盈利能力验证的量化交易系统。**
+
 ## V4 最新实现进度（2026-11-11）
 
 已新增可执行的自定义因子、因子冗余/贡献诊断、市场与个股 H1/H3/H5 滚动样本外预测和分期概率校准、经典风格领先性研究、个股 Rank IC 与条件 Alpha 消融、组合风险预警、不可变研究归档及四层日终研究记录。**它们是代码能力，不代表已用合格 PIT 全市场数据验证出可持续预测优势或成本后盈利。** 最新状态和待验收依赖见 [V4 开发进度](docs/V4_DEVELOPMENT_STATUS.md)。
