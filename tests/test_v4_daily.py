@@ -33,7 +33,7 @@ def test_all_stage_callbacks_complete_but_execution_is_not_granted(tmp_path):
     assert read==result
 
 
-def test_blocked_alpha_stops_risk_and_freeze(tmp_path):
+def test_blocked_alpha_still_allows_independent_risk_review(tmp_path):
     called=[]
     def stage(name):
         def fn(day, history):
@@ -44,7 +44,8 @@ def test_blocked_alpha_stops_risk_and_freeze(tmp_path):
     names=['data','market','styles','alpha','risk','freeze']
     result=run_v4_daily(tmp_path,_day(),source_snapshot_sha256='c'*64,
                         protocol_sha256='d'*64,adapters={name:stage(name) for name in names})
-    assert called==names[:4]
+    assert called==names[:5]
+    assert result['stages'][-1]['code']=='UPSTREAM_RESEARCH_NOT_ADMITTED_FOR_EXECUTION'
     assert result['status']=='BLOCKED_OR_NO_TRADE'
     assert result['stages'][-1]['code']=='MODEL_MISSING'
 
@@ -79,6 +80,6 @@ def test_descriptive_market_still_allows_independent_risk_review(tmp_path):
     result=run_v4_daily(tmp_path,_day(),source_snapshot_sha256='9'*64,
                         protocol_sha256='8'*64,adapters=adapters)
     assert called==['data','market','styles','alpha','risk']
-    assert result['stages'][-1]['code']=='RESEARCH_ONLY_NOT_ADMITTED_FOR_EXECUTION'
+    assert result['stages'][-1]['code']=='UPSTREAM_RESEARCH_NOT_ADMITTED_FOR_EXECUTION'
     assert result['status']=='RESEARCH_UPDATED_NO_TRADE'
     assert not result['paper_ledger_advanced']
