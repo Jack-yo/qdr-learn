@@ -448,12 +448,15 @@ def handler(console):
                 try:
                     minimum=int(query.get('minimum_sessions',['60'])[0])
                     lookback=int(query.get('baseline_sessions',['20'])[0])
+                    if not 10<=minimum<=10000 or not 5<=lookback<=1000:
+                        raise ValueError('Unsupported scorecard sample gate')
+                except (ValueError,TypeError):
+                    return self.send(400,{'status':'BLOCKED','code':'INVALID_FORWARD_SCORECARD_QUERY'})
+                try:
                     return self.send(200,score_prospective_research(
                         console.root,minimum_sessions=minimum,
                         baseline_sessions=lookback))
-                except (ValueError,TypeError):
-                    return self.send(400,{'status':'BLOCKED','code':'INVALID_FORWARD_SCORECARD_QUERY'})
-                except (OSError,KeyError):
+                except (OSError,KeyError,ValueError,TypeError):
                     return self.send(409,{'status':'BLOCKED','code':'FORWARD_SCORECARD_EVIDENCE_UNAVAILABLE'})
             if path == '/api/v1/v4/outcomes' or path.startswith('/api/v1/v4/outcomes/'):
                 from .workflow.v4_plan_outcomes import (
