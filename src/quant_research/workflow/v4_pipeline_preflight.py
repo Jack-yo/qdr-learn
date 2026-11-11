@@ -120,7 +120,12 @@ def preflight_v4_day(root: Path, session_date: str, bundle_id: str,
     if (len(state_t)!=1
             or not pd.to_datetime(state_t.state_available_at,utc=True).le(signal).all()):
         raise ValueError("MARKET_STYLE_NOT_KNOWN_AS_OF_T")
+    # Require exact T-day stock/factor/horizon coverage. A verified source
+    # hash alone must not hide inner-join attrition or NaN candidate factors.
+    from quant_research.workflow.v4_bundle_contract import audit_forward_candidate_cohort
+    cohort=audit_forward_candidate_cohort(frames,manifest,day,signal)
     return {"status":"PREFLIGHT_SOURCE_AND_TIME_MATCH_RESEARCH_ONLY",
+            "cohort_contract":cohort,
             "session_date_et":str(day.date()),
             "source_snapshot_sha256":snapshot,
             "source_symbols":source_symbols,
