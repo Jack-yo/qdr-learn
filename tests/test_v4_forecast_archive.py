@@ -56,3 +56,36 @@ def test_manifest_corruption_is_reported(tmp_path):
     with pytest.raises(ValueError,match='restricted'):
         read_research_forecast(tmp_path,'2025-01-02',archived['manifest']['identity'])
     assert latest_forward_research(tmp_path)[0]['status']=='CORRUPT_FORECAST_ARCHIVE'
+
+
+def test_v2_source_artifact_bytes_change_forecast_identity(tmp_path):
+    contract={'artifacts_sha256':{
+        'factors.parquet':'c'*64,'labels.parquet':'d'*64,
+        'market_style.parquet':'e'*64,'candidate_meta.parquet':'f'*64},
+        'factor_names':['reversal_5d'],'source_symbols':['AAA','SPY']}
+    first=freeze_research_forecast(tmp_path,_forecast(),
+        protocol_sha256='b'*64,input_contract=contract)
+    assert first['manifest']['schema']=='v4-forward-2'
+    changed={**contract,'artifacts_sha256':{
+        **contract['artifacts_sha256'],'factors.parquet':'0'*64}}
+    second=freeze_research_forecast(tmp_path,_forecast(),
+        protocol_sha256='b'*64,input_contract=changed)
+    assert first['manifest']['identity']!=second['manifest']['identity']
+    assert first['manifest']['input_contract_sha256']!=second['manifest']['input_contract_sha256']
+    assert len(latest_forward_research(tmp_path))==2
+
+
+def test_v2_source_input_contract_tampering_is_detected(tmp_path):
+    contract={'artifacts_sha256':{
+        'factors.parquet':'c'*64,'labels.parquet':'d'*64,
+        'market_style.parquet':'e'*64},
+        'factor_names':['alpha'],'source_symbols':['AAA']}
+    item=freeze_research_forecast(tmp_path,_forecast(),
+        protocol_sha256='b'*64,input_contract=contract)
+    identity=item['manifest']['identity']
+    path=(tmp_path/'outputs/v4_forecasts/2025-01-02'/identity/'manifest.json')
+    manifest=json.loads(path.read_text(encoding='utf-8'))
+    manifest['input_contract']['artifacts_sha256']['factors.parquet']='f'*64
+    path.write_text(json.dumps(manifest),encoding='utf-8')
+    with pytest.raises(ValueError,match='input provenance'):
+        read_research_forecast(tmp_path,'2025-01-02',identity)
