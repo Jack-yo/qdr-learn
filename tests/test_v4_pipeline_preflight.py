@@ -8,6 +8,7 @@ from quant_research.workflow.v4_pipeline_preflight import preflight_v4_day
 
 DAY='2026-11-10'
 SNAP='a'*64
+SYMBOLS=['AAA','SPY','IWM','IWD','IWF','MTUM','QUAL']
 NOW=datetime.fromisoformat('2026-11-10T22:00:00+00:00')
 
 
@@ -40,12 +41,14 @@ def _inputs():
              'reference_close':100.,'atr20':3.,'adv20':1000000.,
              'available_at':'2026-11-10T21:14:00Z',
              'source_snapshot_sha256':SNAP}])
-    },{'source_snapshot_sha256':SNAP})
+    },{'source_snapshot_sha256':SNAP,'source_symbols':SYMBOLS})
 
 
-def _readiness(root,asof):
+def _readiness(root,asof,*,symbols):
+    assert symbols==SYMBOLS
     return {'stages':{'dataset':{'status':'OBSERVATION_ONLY',
-        'evidence':{'asof_date_et':DAY,'source_snapshot_sha256':SNAP}}}}
+        'evidence':{'asof_date_et':DAY,'source_snapshot_sha256':SNAP,
+                   'latest_session_complete':True,'symbols':SYMBOLS}}}}
 
 
 def _check(frames=None,manifest=None,readiness=None,now=NOW):
@@ -74,7 +77,7 @@ def test_t_date_future_return_does_not_enter_forecast():
 
 def test_source_digest_must_match_current_real_warehouse():
     with pytest.raises(ValueError,match='BUNDLE_DIFFERS_FROM_LIVE_WAREHOUSE'):
-        _check(manifest={'source_snapshot_sha256':'b'*64})
+        _check(manifest={'source_snapshot_sha256':'b'*64,'source_symbols':SYMBOLS})
 
 
 def test_premarket_and_post_entry_window_both_fail_before_archive():
@@ -102,7 +105,21 @@ def test_market_style_must_be_known_by_signal_cutoff():
 
 
 def test_real_source_block_prevents_any_model_admission():
-    def denied(root,asof):
+    def denied(root,asof,*,symbols):
         return {'stages':{'dataset':{'status':'BLOCKED','evidence':{}}}}
     with pytest.raises(ValueError,match='REAL_SOURCE_OBSERVATION_NOT_VERIFIED'):
         _check(readiness=denied)
+
+
+
+def test_mismatched_or_incomplete_stock_cohort_blocks(monkeypatch):
+    def incomplete(root,asof,*,symbols):
+        return {'stages':{'dataset':{'status':'OBSERVATION_ONLY',
+            'evidence':{'asof_date_et':DAY,'source_snapshot_sha256':SNAP,
+                        'latest_session_complete':False,'symbols':symbols}}}}
+    with pytest.raises(ValueError,match='LATEST_SESSION_INCOMPLETE'):
+        _check(readiness=incomplete)
+    frames,_=_inputs()
+    frames['candidate_meta'].loc[0,'symbol']='UNSEEN_STOCK'
+    with pytest.raises(ValueError,match='CANDIDATE_NOT_IN_VERIFIED_SOURCE_BASKET'):
+        _check(frames=frames)
