@@ -65,14 +65,16 @@ def score_frozen_horizon_records(records: list[dict], *, minimum_sessions: int =
     for day in ordered:
         # End < T, not end <= T: H3 outcomes closed after today's decision
         # cannot be available as an unconditional prior on the same date.
-        eligible=[x for previous,rows in history if previous<day
-                  for x in rows]
-        eligible_days=sorted({x[0] for x in eligible})
+        eligible=[(previous,exit_date,realized)
+                  for previous,rows in history for exit_date,realized in rows
+                  if previous<day and exit_date<day]
+        eligible_days=sorted({signal_day for signal_day,_,_ in eligible})
         last_dates=set(eligible_days[-baseline_sessions:])
-        available=[x for x in eligible if x[0] in last_dates]
+        available=[realized for signal_day,_,realized in eligible
+                   if signal_day in last_dates]
         reference=None
         if len(eligible_days)>=baseline_sessions:
-            positives=sum(value[4]>0 for value in available)
+            positives=sum(actual>0 for actual in available)
             reference=(positives+1)/(len(available)+2)
         todays=grouped[day]
         model_brier=float(np.mean([(p-float(actual>0))**2
@@ -88,13 +90,10 @@ def score_frozen_horizon_records(records: list[dict], *, minimum_sessions: int =
                         "paired_brier_delta":model_brier-base})
             comparable.append(row)
         daily.append(row)
-        # The stored signal T outcome joins history under its ACTUAL H3
-        # close session, never the original signal session.
-        history.append((day,[(day,exit_day,pred,actual,net)
-                             for exit_day,p,pred,actual,net in todays]))
-    # Build causal prior correctly from earlier rows only, using the
-    # underlying H3 close date and the up indicator. No today/future labels.
-    # (The loop above directly computes this for session-level scoring.)
+        # Baseline can inspect this signal cohort only after each underlying
+        # H3 trade horizon has closed, regardless of when archives are read.
+        history.append((day,[(exit_day,actual)
+                             for exit_day,_,_,actual,_ in todays]))
     status=("FORWARD_RESEARCH_SAMPLE_SUFFICIENT_FOR_DIAGNOSTICS_ONLY"
             if len(comparable)>=minimum_sessions
             else "INSUFFICIENT_PROSPECTIVE_RESEARCH_SESSIONS")
