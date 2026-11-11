@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import json
+import math
 from pathlib import Path
 
 from quant_research.backtest.paper import account_summary
@@ -18,7 +19,8 @@ from quant_research.workflow.v4_forward_cli import run_managed_forward
 from quant_research.workflow.v4_study_cli import _checked_inputs
 
 
-def run_v4_review_day(root: Path, *, bundle_id: str, asof_session: str) -> dict:
+def run_v4_review_day(root: Path, *, bundle_id: str, asof_session: str,
+                      research_budget: float | None = None) -> dict:
     """Run only research-stage inference and freeze a non-executing decision."""
     root=Path(root).resolve()
     frames,manifest=_checked_inputs(root,bundle_id)
@@ -55,9 +57,17 @@ def run_v4_review_day(root: Path, *, bundle_id: str, asof_session: str) -> dict:
     config=load_settings(root/'configs/experiments/baseline.yaml')
     account=account_summary(root/'data/paper.sqlite3',config)
     if account.get('status')!='INTERNALLY_RECONCILED_PAPER_ESTIMATE':
-        return {**safe,'status':'RESEARCH_PLAN_BLOCKED',
-                'code':account.get('code','NO_RECONCILED_ACCOUNT'),
-                'research_plan_count':0}
+        if research_budget is None:
+            return {**safe,'status':'RESEARCH_PLAN_BLOCKED',
+                    'code':account.get('code','NO_RECONCILED_ACCOUNT'),
+                    'research_plan_count':0}
+        if (isinstance(research_budget,bool) or not isinstance(research_budget,(int,float))
+                or not math.isfinite(research_budget) or not 1<=research_budget<=1_000_000_000):
+            return {**safe,'status':'RESEARCH_PLAN_BLOCKED',
+                    'code':'INVALID_EXPLICIT_RESEARCH_BUDGET','research_plan_count':0}
+        account={'status':'EXPLICIT_EMPTY_RESEARCH_BUDGET',
+                 'session_date_et':asof_session,
+                 'has_actual_positions':False,'budget':float(research_budget)}
     now=datetime.now(timezone.utc).isoformat()
     try:
         review=make_indicative_review(
@@ -85,9 +95,12 @@ def main(argv=None):
     parser.add_argument('--root',type=Path,default=Path.cwd())
     parser.add_argument('--bundle-id',required=True)
     parser.add_argument('--asof',required=True)
+    parser.add_argument('--research-budget',type=float,default=None,
+                        help='Optional explicit cash-only research scenario; never a real paper account')
     args=parser.parse_args(argv)
     result=run_v4_review_day(args.root,bundle_id=args.bundle_id,
-                             asof_session=args.asof)
+                             asof_session=args.asof,
+                             research_budget=args.research_budget)
     print(json.dumps(result,ensure_ascii=False,indent=2,allow_nan=False))
     return 0 if result['status'] in ('RESEARCH_PLAN_FROZEN_NO_ORDER',
                                      'RESEARCH_PLAN_ALREADY_FROZEN') else 4
