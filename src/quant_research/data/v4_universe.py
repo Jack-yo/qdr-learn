@@ -42,8 +42,8 @@ def reconstruct_asof_stock_universe(members: pd.DataFrame,
         raise ValueError('Ambiguous as-of historical security observations')
     if set(records.session_date)!=set(sessions):
         raise ValueError('Missing entire historical-universe snapshots')
-    if not mem.session_date.isin(sessions).all():
-        raise ValueError('Universe member observation outside requested sessions')
+    if not mem.session_date.isin(sessions).all() or set(mem.session_date)!=set(sessions):
+        raise ValueError('Every full-session snapshot must include observed security membership')
     for col in ('observed_at',):
         mem[col]=pd.to_datetime(mem[col],utc=True)
     records['capture_finished_at']=pd.to_datetime(records.capture_finished_at,utc=True)
