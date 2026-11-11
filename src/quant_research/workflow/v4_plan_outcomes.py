@@ -116,6 +116,10 @@ def evaluate_research_outcomes(root, session_date: str, plan_identity: str,
                 exit_reason='INTRADAY_STOP_ASSUMED' if exit_price==stop else 'GAP_THROUGH_STOP'
                 break
         gross=exit_price/entry-1
+        # Probability calibration concerns the original T+1 OPEN -> T+H
+        # CLOSE horizon, not the stop-censored return actually modeled by
+        # this research exit simulation. Keep both targets distinct.
+        gross_horizon=float(exact.iloc[-1]['close'])/entry-1
         assumed_cost=float(plan['estimated_round_trip_cost'])
         if not math.isfinite(assumed_cost) or assumed_cost<0 or assumed_cost>.2:
             raise ValueError('FROZEN_COST_ASSUMPTION_UNVERIFIED')
@@ -126,6 +130,8 @@ def evaluate_research_outcomes(root, session_date: str, plan_identity: str,
                         'frozen_stop_distance':distance,
                         'expected_net_edge':float(plan['estimated_net_edge']),
                         'realized_gross_price_return':gross,
+                        'horizon_gross_price_return':gross_horizon,
+                        'horizon_close_session':str(required[-1].date()),
                         'assumed_round_trip_cost':assumed_cost,
                         'modeled_net_return':gross-assumed_cost,
                         'net_forecast_error':(gross-assumed_cost)-float(plan['estimated_net_edge']),
