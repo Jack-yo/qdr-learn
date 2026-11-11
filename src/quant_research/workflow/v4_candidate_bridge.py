@@ -31,6 +31,16 @@ def _canonical(obj):
 
 
 def _account_holdings(account, asof, *, clock):
+    if account.get('status')=='EXPLICIT_EMPTY_RESEARCH_BUDGET':
+        # A capital scenario is useful for sizing research opportunities before
+        # a real paper book exists; it is NOT a reconciled account or P&L.
+        capital=account.get('budget')
+        if (account.get('session_date_et')!=asof
+                or account.get('has_actual_positions') is not False
+                or not isinstance(capital,(float,int)) or isinstance(capital,bool)
+                or not math.isfinite(capital) or not 1<=capital<=1_000_000_000):
+            raise ValueError('RESEARCH_BUDGET_SCENARIO_UNVERIFIED')
+        return pd.DataFrame(columns=['security_id','sector','weight']),float(capital),float(capital)
     if account.get('status')!='INTERNALLY_RECONCILED_PAPER_ESTIMATE':
         raise ValueError('ACCOUNT_NOT_RECONCILED')
     if str(account.get('last_session')) != str(asof):
@@ -160,8 +170,10 @@ def make_indicative_review(root, *, session_date: str, forecast_identity: str,
     review.update({'source_forecast_identity':forecast_identity,
                    'source_forecast_manifest_sha256':archived['manifest_sha256'],
                    'source_snapshot_sha256':source,
-                   'source_account_session':account['last_session'],
-                   'account_evidence':'INTERNALLY_RECONCILED_PAPER_ONLY',
+                   'source_account_session':account.get('last_session',session_date),
+                   'account_evidence':('EXPLICIT_EMPTY_RESEARCH_BUDGET_NOT_A_PAPER_ACCOUNT'
+                                       if account.get('status')=='EXPLICIT_EMPTY_RESEARCH_BUDGET'
+                                       else 'INTERNALLY_RECONCILED_PAPER_ONLY'),
                    'admission':'RESEARCH_REVIEW_NOT_APPROVED_PAPER_ORDER',
                    'execution_eligible':False,'real_orders_enabled':False})
     review.pop('content_sha256',None)
