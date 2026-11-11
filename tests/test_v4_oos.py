@@ -42,7 +42,7 @@ def test_chronological_oos_and_paired_variants():
     assert not predictions.decision_eligible.any() and predictions.research_only.all()
     assert set(predictions.horizon)=={1,3,5}
     assert folds.model_fit_last_label_available.le(folds.calibration_first_signal).all()
-    assert folds.first_test.gt(folds.model_fit_last_label_available).all()
+    assert pd.to_datetime(folds.first_test,utc=True).gt(folds.model_fit_last_label_available).all()
     assert predictions.groupby(['variant','horizon']).size().nunique()==1
     report=score_oos(predictions)
     assert len(report)==12 and (report.rows>0).all()
