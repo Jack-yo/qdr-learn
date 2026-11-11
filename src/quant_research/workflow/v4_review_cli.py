@@ -45,6 +45,13 @@ def run_v4_review_day(root: Path, *, bundle_id: str, asof_session: str,
                 continue
             recorded=read_indicative_review(root,asof_session,child.name)
             if recorded.get('source_forecast_identity')==identity:
+                if (research_budget is not None and
+                    (recorded.get('account_evidence') !=
+                     'EXPLICIT_EMPTY_RESEARCH_BUDGET_NOT_A_PAPER_ACCOUNT'
+                     or recorded.get('account_budget') != float(research_budget))):
+                    return {**safe,'status':'RESEARCH_PLAN_BLOCKED',
+                            'code':'ALREADY_FROZEN_WITH_DIFFERENT_ACCOUNT_OR_BUDGET',
+                            'research_plan_count':0}
                 return {**safe,'status':'RESEARCH_PLAN_ALREADY_FROZEN',
                         'plan_identity':child.name,
                         'research_plan_count':len(recorded['plans']),
