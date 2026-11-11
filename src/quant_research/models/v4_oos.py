@@ -188,7 +188,13 @@ def run_oos(panel: pd.DataFrame, feature_sets: dict[str, list[str]],
                 result['baseline_up_rate'] = float((past.gross_return>0).mean())
                 result['baseline_downside_rate'] = float((past.gross_return<=protocol.downside_threshold).mean())
                 result['model_fit_time'] = fit_time
-                result['model_version'] = 'v4-' + protocol_hash[:12] + '-' + variant
+                fit_fingerprint = sha256(json.dumps({
+                    'protocol':protocol_hash,'source':input_snapshot_sha256,
+                    'variant':variant,'features':cols,'horizon':horizon,
+                    'fit_time':fit_time.isoformat(),
+                    'last_training_label':str(past.label_available_at.max())},
+                    sort_keys=True).encode()).hexdigest()
+                result['model_version'] = 'v4-' + fit_fingerprint[:20]
                 result['source_snapshot_sha256'] = input_snapshot_sha256
                 result['research_only'], result['decision_eligible'] = True, False
                 outputs.append(result)
