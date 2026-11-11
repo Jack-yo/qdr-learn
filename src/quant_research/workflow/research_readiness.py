@@ -27,7 +27,7 @@ def _failure(exc, purpose, href='/data'):
                   missing=[type(exc).__name__], href=href)
 
 
-def research_readiness(root, *, db=None, asof=None):
+def research_readiness(root, *, db=None, asof=None, symbols=None):
     """Expose only actually verified facts, without side effects or advisory scores.
 
     No file existence, account plan, observed asset UUID or previous experimental
@@ -53,7 +53,10 @@ def research_readiness(root, *, db=None, asof=None):
         try:
             from quant_research.data.bundle import load_real_bundle
             bundle = load_real_bundle(database, 'alpaca', asof=asof,
-                                      raw_root=root/'data/raw')
+                                      raw_root=root/'data/raw',symbols=symbols)
+            if bundle.capabilities.get('observation',{}).get('status')!='PASS':
+                raise PolicyError('SESSION_SOURCE_COVERAGE_INCOMPLETE',
+                                  'Requested stock and ETF basket lacks complete observed-session coverage')
             capabilities = bundle.capabilities
             stages['dataset'] = _entry('SOURCE_OBSERVATION_VERIFIED', '来源与能力核验',
                                        state='OBSERVATION_ONLY', evidence={
@@ -62,6 +65,8 @@ def research_readiness(root, *, db=None, asof=None):
                                            'source':bundle.metadata['source'],
                                            'feed':bundle.metadata['feed'],
                                            'rows':bundle.metadata['rows'],
+                                           'latest_session_complete':bundle.metadata['latest_session_complete'],
+                                           'symbols':bundle.metadata['symbols'],
                                        })
         except (PolicyError, OSError, ValueError) as exc:
             stages['dataset'] = _failure(exc,'来源与能力核验')
