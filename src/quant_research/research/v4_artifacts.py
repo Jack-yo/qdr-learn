@@ -56,7 +56,11 @@ def write_research_run(root, run_id: str, report: dict, *,
         digests={}
         for name in _FRAMES:
             file = work / (name+'.parquet')
-            report[name].to_parquet(file,index=False)
+            frame=report[name]
+            # Parquet writers require a schema even for a valid zero-result study.
+            if len(frame.columns)==0:
+                frame=pd.DataFrame({'_no_rows':pd.Series(dtype='string')})
+            frame.to_parquet(file,index=False)
             digests[file.name] = _digest(file)
         manifest = {
             'schema_version':'v4-research-1',
