@@ -61,13 +61,9 @@ def run_v4_review_day(root: Path, *, bundle_id: str, asof_session: str,
         return {**safe,'status':'RESEARCH_PLAN_BLOCKED',
                 'code':'SOURCE_HASHED_CANDIDATE_METADATA_MISSING',
                 'research_plan_count':0}
-    config=load_settings(root/'configs/experiments/baseline.yaml')
-    account=account_summary(root/'data/paper.sqlite3',config)
-    if account.get('status')!='INTERNALLY_RECONCILED_PAPER_ESTIMATE':
-        if research_budget is None:
-            return {**safe,'status':'RESEARCH_PLAN_BLOCKED',
-                    'code':account.get('code','NO_RECONCILED_ACCOUNT'),
-                    'research_plan_count':0}
+    if research_budget is not None:
+        # An explicit cash-only research scenario MUST NOT read or mutate the
+        # real paper ledger, even if an old account exists on disk.
         if (isinstance(research_budget,bool) or not isinstance(research_budget,(int,float))
                 or not math.isfinite(research_budget) or not 1<=research_budget<=1_000_000_000):
             return {**safe,'status':'RESEARCH_PLAN_BLOCKED',
@@ -75,6 +71,13 @@ def run_v4_review_day(root: Path, *, bundle_id: str, asof_session: str,
         account={'status':'EXPLICIT_EMPTY_RESEARCH_BUDGET',
                  'session_date_et':asof_session,
                  'has_actual_positions':False,'budget':float(research_budget)}
+    else:
+        config=load_settings(root/'configs/experiments/baseline.yaml')
+        account=account_summary(root/'data/paper.sqlite3',config)
+        if account.get('status')!='INTERNALLY_RECONCILED_PAPER_ESTIMATE':
+            return {**safe,'status':'RESEARCH_PLAN_BLOCKED',
+                    'code':account.get('code','NO_RECONCILED_ACCOUNT'),
+                    'research_plan_count':0}
     now=datetime.now(timezone.utc).isoformat()
     try:
         review=make_indicative_review(
