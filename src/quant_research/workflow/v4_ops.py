@@ -69,7 +69,9 @@ def observed_v4_adapters(root: Path, readiness: dict):
     def risk(day,history):
         from quant_research.workflow.v4_candidate_bridge import latest_indicative_reviews
         reviewed=latest_indicative_reviews(root,limit=20)
+        source=(stage.get('dataset') or {}).get('evidence',{}).get('source_snapshot_sha256')
         latest=[x for x in reviewed['records'] if x.get('session_date_et')==day
+                and x.get('source_snapshot_sha256')==source
                 and x.get('status')!='CORRUPT_RESEARCH_PLAN']
         if latest:
             return {'status':'RESEARCH_ONLY','code':'INDICATIVE_RISK_PLANS_NO_PAPER_EXECUTION',
