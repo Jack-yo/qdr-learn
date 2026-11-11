@@ -189,3 +189,40 @@ def read_research_outcomes(root, day, identity):
         raise ValueError('Outcome does not correspond to frozen source plan')
     recorded['content_sha256']=digest
     return recorded
+
+
+
+def latest_research_outcomes(root, *, limit=10) -> dict:
+    """List immutable observed future outcomes, never hypothetical equity curves."""
+    if type(limit) is not int or not 1<=limit<=30:
+        raise ValueError('Outcome list limit must be 1–30')
+    base=Path(root).resolve()/'outputs/v4_research_outcomes'
+    records=[]
+    if base.is_dir():
+        for day in sorted(base.iterdir(),reverse=True):
+            if not day.is_dir() or not re.fullmatch(r'\d{4}-\d{2}-\d{2}',day.name):
+                continue
+            for folder in sorted(day.iterdir(),reverse=True):
+                if not folder.is_dir() or not _ID.fullmatch(folder.name):
+                    continue
+                try:
+                    detail=read_research_outcomes(root,day.name,folder.name)
+                    observations=detail['evaluated']
+                    records.append({'session_date_et':day.name,
+                                    'plan_identity':folder.name,
+                                    'status':detail['status'],
+                                    'evaluated_trades':len(observations),
+                                    'mean_modeled_net_return':(
+                                        sum(x['modeled_net_return'] for x in observations)/len(observations)
+                                        if observations else None),
+                                    'source_independently_attested':False,
+                                    'real_orders_enabled':False})
+                except (OSError,ValueError,KeyError,TypeError):
+                    records.append({'session_date_et':day.name,'plan_identity':folder.name,
+                                    'status':'CORRUPT_RESEARCH_OUTCOMES',
+                                    'real_orders_enabled':False})
+                if len(records)>=limit:
+                    return {'status':'READ_ONLY_OBSERVED_RESEARCH_RESULTS',
+                            'records':records,'real_orders_enabled':False}
+    return {'status':'READ_ONLY_OBSERVED_RESEARCH_RESULTS',
+            'records':records,'real_orders_enabled':False}
