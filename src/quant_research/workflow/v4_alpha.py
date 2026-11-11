@@ -11,6 +11,7 @@ import pandas as pd
 from quant_research.models.v4_oos import OOSProtocol, run_oos, score_oos
 from quant_research.models.v4_panel import prepare_v4_alpha_panel
 from quant_research.research.v4_increment import paired_oos_increment
+from quant_research.research.v4_alpha_ranks import evaluate_alpha_ranking
 
 
 def study_conditional_alpha(*, factors: pd.DataFrame, labels: pd.DataFrame,
@@ -46,9 +47,11 @@ def study_conditional_alpha(*, factors: pd.DataFrame, labels: pd.DataFrame,
                              seed=protocol.seed)
         if not predictions.empty else pd.DataFrame()
     )
+    rank_summary, rank_daily = evaluate_alpha_ranking(predictions) if not predictions.empty else (pd.DataFrame(),pd.DataFrame())
     return {'status':'RESEARCH_ONLY_NOT_ADMITTED_TO_PAPER',
             'model_variants':groups,'panel_contract':contract,
             'predictions':predictions,'folds':folds,'metrics':report,
+            'alpha_ranking':rank_summary,'daily_alpha_rank_ic':rank_daily,
             'increment_vs_alpha_only':increments,
             'historical_decision_eligible':False,
             'real_orders_enabled':False,
