@@ -157,6 +157,7 @@ def _gather_verified_forward_outcomes(root, *, max_plans=5000):
             original=read_research_forecast(root,day,forecast_id)
             if (original["manifest"]["prospective_before_next_open"] is not True
                     or original["manifest"]["source_snapshot_sha256"]!=plan["source_snapshot_sha256"]
+                    or original["manifest_sha256"]!=plan.get("source_forecast_manifest_sha256")
                     or outcome["status"]!="PROSPECTIVE_RESEARCH_OUTCOME_REVIEW_ONLY"):
                 skipped["NOT_SOURCE_MATCHED_PROSPECTIVE"]+=1
                 continue
