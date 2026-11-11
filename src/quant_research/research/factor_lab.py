@@ -72,6 +72,9 @@ def template_factor(spec,version_hash):
         compiled=compile_expression(spec.expression)
         function=lambda c: d*compiled.compute(c)
         definition=f'{d} * ({compiled.formula})'
+        return FunctionalFactor(spec.name,w,function,definition,
+                                dependency='cross_section' if compiled.cross_sectional else 'self',
+                                version=version_hash[:16])
     elif spec.template=='reversal':
         function=lambda c: d*-(c.close/c.close.shift(w)-1)
         definition=f'{d} * -(close/close.shift({w})-1)'
