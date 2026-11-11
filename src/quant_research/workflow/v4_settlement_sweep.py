@@ -82,7 +82,12 @@ def sweep_matured_research_plans(root: Path, *, max_plans: int = 100,
             item["status"]="BLOCKED_NO_OUTCOME_ARCHIVE_WRITE"
             item["code"]=getattr(exc,"code",None) or str(exc)[:160] or type(exc).__name__
         rows.append(item)
-    blocked=sum(x["status"]=="BLOCKED_NO_OUTCOME_ARCHIVE_WRITE" for x in rows)
+    blocked=sum(x["status"]=="BLOCKED_NO_OUTCOME_ARCHIVE_WRITE" or
+                (freeze_outcomes and x["status"] not in (
+                    "NO_ACCEPTED_RESEARCH_PLANS","PENDING_FUTURE_PRICE_WINDOW",
+                    "ALREADY_FROZEN","OBSERVED_RESEARCH_OUTCOMES_FROZEN_NO_ORDERS",
+                    "OBSERVED_RESEARCH_OUTCOMES_ALREADY_FROZEN"))
+                for x in rows)
     return {"status":"READ_ONLY_SETTLEMENT_PREVIEW" if not freeze_outcomes
                 else "RESEARCH_OUTCOME_SETTLEMENT_SWEEP_ONLY",
             "checked_at_utc":now.isoformat(),"found_plans":total,"offset":offset,
