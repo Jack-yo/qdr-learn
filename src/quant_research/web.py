@@ -450,9 +450,16 @@ def handler(console):
                     item=read_research_forecast(console.root,parts[0],parts[1],include_rows=True)
                     if item['manifest']['forecast_rows']>20000:
                         raise ValueError('Forecast exceeds browser display quota')
-                    for name in ('forecasts','model_cards'):
-                        item[name]=json.loads(item[name].head(200).to_json(
-                            orient='records',date_format='iso'))
+                    # Return the top studied D candidates per horizon rather than
+                    # truncating the first 200 stored rows, which would hide the
+                    # D variant behind earlier A/B/C model rows.
+                    studied=item['forecasts'].loc[item['forecasts'].model_variant.eq('D')].copy()
+                    studied=studied.sort_values(['horizon','expected_gross_trade_return'],
+                                                ascending=[True,False],na_position='last')
+                    studied=studied.groupby('horizon',sort=True).head(40)
+                    item['forecasts']=json.loads(studied.to_json(orient='records',date_format='iso'))
+                    item['model_cards']=json.loads(item['model_cards'].head(200).to_json(
+                        orient='records',date_format='iso'))
                     return self.send(200,item)
                 except FileNotFoundError:
                     return self.send(404,{'status':'BLOCKED','code':'FORECAST_ARCHIVE_NOT_FOUND'})
