@@ -100,6 +100,44 @@
 
 **仍未打通的最重要环节**：从现有供应商及历史仓库**自动生成上述合格模型数据包**，并让正式模拟账本逐日成交、退出和持仓滚动。当前主链路为“研究预测→成本后候选→前向价格路径评价”的非执行型垂直切片，不能称已完成可用 MVP，更不能称市场/Alpha 预测模型已取得真实经济优势。
 
+## 本轮工程质量整改：真实来源预检 + 数据合同诊断（2026-11-11）
+
+这一轮针对代码审阅发现的实际执行缺陷，做了**先预检，后写入**的严格调整，而不是再次新增展示模块：
+
+- **先数据后模型**：`workflow/v4_pipeline_preflight.py` 在任何前向预测、研究计划或日终归档写入前检查：T 日期是否 XNYS 正式交易日；当前是否位于收盘延迟之后、T+1 开盘之前；当前 H1/H3/H5 的标签是否尚未观测；原始研究因子、市场/风格、候选元数据是否在 T 的信号截止前已可知。拒绝来源不一致、超时、未来标签和缺失数据。
+- **按本次证券池验证**：旧版 `research_readiness()` 默认验证一组 ETF，会与个股候选篮子的仓库快照 SHA256 天然不一致。现在支持指定完整 `symbols`；`v4_ops` 和预检统一读取本次数据包的 `source_symbols`，核对最新会话各证券完整覆盖及同一份原始快照。只要任何一项不满足，不创建不可覆盖的研究预测或计划。
+- **真实数据与研究预算隔离**：显式指定 `--research-budget` 后，不再读取或依赖旧模拟账户；研究资金是单独的空仓场景，仍不能冒充真实持仓或模拟盈亏。
+- **数据资格报告**：新增只读 `workflow/v4_data_diagnostics.py`，检查本地 DuckDB 里的原价 SIP 行情、原始回执、因子、已验证历史标签、未来尚未知标签、历史证券池、公司行为覆盖和带时间戳的行业分类。每个项目只给 `OBSERVED_FOR_REVIEW` 或 `BLOCKED`；即使结构齐全也不直接授予 PIT 或交易许可。
+
+**数据包 manifest 新的必要字段**：
+
+```json
+{
+  "kind": "V4_STRICT_LABEL_STUDY_INPUT",
+  "source_snapshot_sha256": "<SHA256 of the same source basket that the warehouse verifies>",
+  "source_symbols": ["AAA", "SPY", "IWM", "IWD", "IWF", "MTUM", "QUAL"],
+  "factor_names": ["reversal_5d", "volatility_20d"],
+  "artifacts_sha256": {
+    "factors.parquet": "<64-char sha256>",
+    "labels.parquet": "<64-char sha256>",
+    "market_style.parquet": "<64-char sha256>",
+    "candidate_meta.parquet": "<64-char sha256>"
+  }
+}
+```
+
+上例中的 AAA 与摘要字符串只是**文件结构说明**，不是股票研究样本、真实收益数据或生产数据资格。实际运行时 `source_symbols` 必须由本次真实采集和校验使用的股票 + ETF 列表构成，顺序必须一致；候选证券必须包含在该列表中。
+
+**本地诊断命令**（不修改数据库）：
+
+```powershell
+uv run --locked python -m quant_research.workflow.v4_data_diagnostics --db data/real_v21.duckdb --asof YYYY-MM-DD --symbols "SPY,IWM,IWD,IWF,MTUM,QUAL"
+```
+
+根据诊断中 `blocked_checks` 与 `checks[].reason` 补齐来源。该命令本身不创建可信的公司行为结算证据，不自动生成 PIT 数据，更不证明任何策略具有正收益。
+
+**实际执行的独立测试**：新预检与仓库数据合同诊断在临时隔离 Python 环境中运行共 11 项确定性数值/结构单元测试，11 项通过；只用于测试算法和拒绝条件。GitHub 最新 main 的完整 pytest、真实 DuckDB 与真实行情/券商集成仍未执行。额外新增 GitHub 侧的流水线集成契约测试，尚待完整仓库运行。
+
 ## 测试证据
 
 - 已为自定义因子、市场/Alpha OOS、时间戳标签、统计增量、历史股票池、风格、候选计划、风险、实验归档和日终编排增加独立单元测试文件。**本轮未能在完整最新 main 环境执行这些新增测试或全部 pytest，因此不可宣称通过。**
