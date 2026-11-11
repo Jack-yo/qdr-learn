@@ -121,6 +121,7 @@ def forecast_asof(panel: pd.DataFrame, feature_sets: dict[str,list[str]],
             out=test[['date','security_id','horizon','signal_time',
                       'feature_available_at','entry_time','exit_time']].copy()
             out['model_variant']=variant
+            out['model_fit_time']=pd.Timestamp.now(tz='UTC')
             out['expected_gross_trade_return']=pred_gross
             out['expected_excess_return']=pred_excess
             out['p_up']=up
@@ -140,6 +141,7 @@ def forecast_asof(panel: pd.DataFrame, feature_sets: dict[str,list[str]],
                           'probability_up_status':up_status,
                           'probability_downside_status':down_status,
                           'asof_session':session,
+                          'model_fit_time':out['model_fit_time'].iloc[0],
                           'research_only':True})
     forecast=pd.concat(predictions,ignore_index=True) if predictions else pd.DataFrame()
     return {'status':'FORWARD_RESEARCH_PREDICTIONS_ONLY' if not forecast.empty
