@@ -65,3 +65,20 @@ def test_nonexchange_date_rejected(tmp_path):
     with pytest.raises(ValueError):
         run_v4_daily(tmp_path,'2026-11-08',source_snapshot_sha256='a'*64,
                      protocol_sha256='b'*64,adapters={})
+
+
+
+def test_descriptive_market_still_allows_independent_risk_review(tmp_path):
+    called=[]
+    def fn(name):
+        def run(day,history):
+            called.append(name)
+            return {'status':'RESEARCH_ONLY' if name in ('market','styles','alpha') else 'PASS'}
+        return run
+    adapters={name:fn(name) for name in ['data','market','styles','alpha','risk','freeze']}
+    result=run_v4_daily(tmp_path,_day(),source_snapshot_sha256='9'*64,
+                        protocol_sha256='8'*64,adapters=adapters)
+    assert called==['data','market','styles','alpha','risk']
+    assert result['stages'][-1]['code']=='RESEARCH_ONLY_NOT_ADMITTED_FOR_EXECUTION'
+    assert result['status']=='RESEARCH_UPDATED_NO_TRADE'
+    assert not result['paper_ledger_advanced']
