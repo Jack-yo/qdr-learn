@@ -36,6 +36,8 @@ def run_v4_daily(root, session_date: str, *, source_snapshot_sha256: str,
     day=date.fromisoformat(session_date)
     if day.isoformat()!=session_date:
         raise ValueError('Session date must use ISO format')
+    from quant_research.clock import TradingClock
+    TradingClock().signal(session_date)  # Reject weekends and pre-close execution
     if not all(isinstance(x,str) and _DIGEST.fullmatch(x)
                for x in (source_snapshot_sha256,protocol_sha256)):
         raise ValueError('Complete source/protocol hashes required')
