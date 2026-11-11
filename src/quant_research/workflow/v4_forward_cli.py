@@ -76,6 +76,17 @@ def run_managed_forward(root: Path, *, bundle_id: str, asof_session: str) -> dic
     if report['status']!='FORWARD_RESEARCH_PREDICTIONS_ONLY':
         return {'status':report['status'],'session_date_et':asof_session,
                 'execution_eligible':False,'real_orders_enabled':False}
+    # A model may take minutes to fit. Re-check all source-file bytes and
+    # the protocol on disk immediately before the immutable archive write.
+    # A changed Parquet/manifest between admission and freeze must not be
+    # represented as the earlier fingerprint or admitted retrospectively.
+    _,current_manifest=_checked_inputs(root,bundle_id)
+    for field in ('source_snapshot_sha256','artifacts_sha256',
+                  'factor_names','source_symbols'):
+        if current_manifest.get(field)!=manifest.get(field):
+            raise ValueError('MODEL_INPUT_CHANGED_DURING_FIT_NO_ARCHIVE_WRITE')
+    if sha256(config_path.read_bytes()).hexdigest()!=config_sha:
+        raise ValueError('MODEL_PROTOCOL_CHANGED_DURING_FIT_NO_ARCHIVE_WRITE')
     frozen=freeze_research_forecast(root,report,
                                    protocol_sha256=config_sha,
                                    input_contract=input_contract)
