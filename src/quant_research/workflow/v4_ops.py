@@ -120,15 +120,65 @@ def run_observed_v4_daily(root: Path, session_date: str) -> dict:
                         adapters=observed_v4_adapters(root,readiness))
 
 
+def run_v4_pipeline_day(root: Path, session_date: str, *,
+                        bundle_id: str, research_budget: float | None = None) -> dict:
+    """Single research command. Model inference + indicative plans + daily diary.
+
+    Source/ledger qualification is never inferred from a model's own hash.
+    The two independently recorded outputs are joined only when their real
+    raw source snapshot digest matches.
+    """
+    from quant_research.workflow.v4_review_cli import run_v4_review_day
+    root=Path(root).resolve()
+    try:
+        plan=run_v4_review_day(root,bundle_id=bundle_id,asof_session=session_date,
+                               research_budget=research_budget)
+    except (OSError,ValueError,TypeError,KeyError,FileNotFoundError) as exc:
+        plan={'status':'RESEARCH_PLAN_BLOCKED',
+              'code':type(exc).__name__,
+              'session_date_et':session_date,
+              'real_orders_enabled':False}
+    diary=run_observed_v4_daily(root,session_date)
+    source=diary.get('source_snapshot_sha256')
+    if source and plan.get('source_snapshot_sha256') and source!=plan['source_snapshot_sha256']:
+        return {'status':'SOURCE_SNAPSHOT_MISMATCH',
+                'code':'FORECAST_SOURCE_DIFFERS_FROM_DAILY_WAREHOUSE',
+                'session_date_et':session_date,
+                'research_plan':plan,'daily_diary_status':diary.get('status'),
+                'real_orders_enabled':False,'paper_ledger_advanced':False}
+    plan_ok=plan.get('status') in ('RESEARCH_PLAN_FROZEN_NO_ORDER',
+                                   'RESEARCH_PLAN_ALREADY_FROZEN')
+    diary_ok=diary.get('status') in ('RESEARCH_UPDATED_NO_TRADE',
+                                      'STAGES_COMPLETE_ADMISSION_PENDING')
+    return {'status':('RESEARCH_PLAN_AND_DIARY_SAVED' if plan_ok and diary_ok
+                      else 'RESEARCH_PLAN_SAVED_DAILY_DATA_UNVERIFIED' if plan_ok
+                      else 'RESEARCH_ONLY_PARTIALLY_BLOCKED'),
+            'session_date_et':session_date,
+            'research_plan':plan,
+            'daily_diary':diary,
+            'real_orders_enabled':False,
+            'paper_ledger_advanced':False}
+
+
 def main(argv=None):
     parser=argparse.ArgumentParser(description='Source-observed V4 daily research diary (not a trade runner)')
     parser.add_argument('--root',type=Path,default=Path.cwd())
     parser.add_argument('--date',required=True,help='Completed XNYS session YYYY-MM-DD')
+    parser.add_argument('--bundle-id',default=None,
+                        help='Optional strict source-hashed Alpha input bundle for full research review')
+    parser.add_argument('--research-budget',type=float,default=None,
+                        help='Explicit cash-only research scenario, not an actual paper account')
     args=parser.parse_args(argv)
-    result=run_observed_v4_daily(args.root,args.date)
+    if args.research_budget is not None and args.bundle_id is None:
+        parser.error('--research-budget requires --bundle-id')
+    result=(run_v4_pipeline_day(args.root,args.date,bundle_id=args.bundle_id,
+                                research_budget=args.research_budget)
+            if args.bundle_id else run_observed_v4_daily(args.root,args.date))
     print(json.dumps(result,ensure_ascii=False,indent=2,allow_nan=False))
     return 0 if result['status'] in ('RESEARCH_UPDATED_NO_TRADE',
-                                      'STAGES_COMPLETE_ADMISSION_PENDING') else 4
+                                      'STAGES_COMPLETE_ADMISSION_PENDING',
+                                      'RESEARCH_PLAN_AND_DIARY_SAVED',
+                                      'RESEARCH_PLAN_SAVED_DAILY_DATA_UNVERIFIED') else 4
 
 
 if __name__=='__main__':
