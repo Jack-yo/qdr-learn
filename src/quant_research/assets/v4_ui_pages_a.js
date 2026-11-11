@@ -30,8 +30,8 @@ pages.overview=async()=>{
  const stages=latest?.stages||[];
  const stageRows=stages.map(x=>[e(({data:'数据来源',market:'① 市场',styles:'② 风格',alpha:'③ Alpha',risk:'④ 风控',freeze:'计划冻结'})[x.stage]||x.stage),statusBadge(x.status),e(x.code||'—')]);
  const factorBars=styleStrong.length?styleStrong.map(x=>progress(x.factor_name,Math.min(100,Math.abs(Number(x.sum_5d))*1400),signed(x.sum_5d))).join(''):empty('暂无风格监测数据','等待来自真实来源的经典因子观察记录。');
- const riskRows=hasPaper?(risk.alerts||[]).map(x=>[e(x.code),e(x.subject||'组合'),e(isnum(x.actual)?pct(x.actual):'—')]):[];
  const isnum=(v)=>v!=null&&Number.isFinite(Number(v));
+ const riskRows=hasPaper?(risk.alerts||[]).map(x=>[e(x.code),e(x.subject||'组合'),e(isnum(x.actual)?pct(x.actual):'—')]):[];
  const content=heading('研究总览','四层模型的日终研究结论、实际预测归档与组合风险，统一按真实证据展示',
      link('/market','查看市场研究')+link('/strategies','进入因子组选股'))+
      '<div class="v4-muted-note" style="margin-bottom:15px">数据交易日 '+e(day)+' · 未验收的研究结果不会包装成交易建议</div>'+
