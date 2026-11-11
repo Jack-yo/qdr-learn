@@ -168,6 +168,22 @@ def run_v4_pipeline_day(root: Path, session_date: str, *,
                 'code':'POST_ADMISSION_PLAN_SOURCE_CHANGED',
                 'session_date_et':session_date,'research_plan':plan,
                 'real_orders_enabled':False,'paper_ledger_advanced':False}
+    # Re-check the mutable warehouse AFTER expensive model fitting and risk
+    # freezing but BEFORE the write-once daily diary. The source may have
+    # changed since preflight; never bind such a diary to stale provenance.
+    source_now=research_readiness(
+        root,asof=session_date,symbols=admitted['source_symbols'])
+    dataset=(source_now.get('stages') or {}).get('dataset') or {}
+    evidence=dataset.get('evidence') or {}
+    if (dataset.get('status')!='OBSERVATION_ONLY'
+            or evidence.get('asof_date_et')!=session_date
+            or evidence.get('symbols')!=admitted['source_symbols']
+            or evidence.get('latest_session_complete') is not True
+            or evidence.get('source_snapshot_sha256')!=admitted['source_snapshot_sha256']):
+        return {'status':'SOURCE_SNAPSHOT_MISMATCH',
+                'code':'POST_MODEL_WAREHOUSE_SOURCE_CHANGED_BEFORE_DAILY_FREEZE',
+                'session_date_et':session_date,'research_plan':plan,
+                'real_orders_enabled':False,'paper_ledger_advanced':False}
     diary=run_observed_v4_daily(root,session_date,
                                  symbols=admitted['source_symbols'])
     source=diary.get('source_snapshot_sha256')
@@ -221,14 +237,29 @@ def main(argv=None):
                         help='Optional strict source-hashed Alpha input bundle for full research review')
     parser.add_argument('--research-budget',type=float,default=None,
                         help='Explicit cash-only research scenario, not an actual paper account')
+    parser.add_argument('--preflight-only',action='store_true',
+                        help='Validate current T-day source/time/cohort without writing a forecast or daily diary')
     args=parser.parse_args(argv)
     if args.research_budget is not None and args.bundle_id is None:
         parser.error('--research-budget requires --bundle-id')
-    result=(run_v4_pipeline_day(args.root,args.date,bundle_id=args.bundle_id,
-                                research_budget=args.research_budget)
-            if args.bundle_id else run_observed_v4_daily(args.root,args.date))
+    if args.preflight_only and not args.bundle_id:
+        parser.error('--preflight-only requires --bundle-id')
+    if args.preflight_only:
+        from quant_research.workflow.v4_pipeline_preflight import preflight_v4_day
+        try:
+            result=preflight_v4_day(args.root,args.date,args.bundle_id)
+        except (OSError,ValueError,TypeError,KeyError) as exc:
+            result={'status':'PREFLIGHT_BLOCKED_NO_ARCHIVE_WRITE',
+                    'code':getattr(exc,'code',None) or str(exc)[:160] or type(exc).__name__,
+                    'session_date_et':args.date,'real_orders_enabled':False,
+                    'paper_ledger_advanced':False}
+    else:
+        result=(run_v4_pipeline_day(args.root,args.date,bundle_id=args.bundle_id,
+                                    research_budget=args.research_budget)
+                if args.bundle_id else run_observed_v4_daily(args.root,args.date))
     print(json.dumps(result,ensure_ascii=False,indent=2,allow_nan=False))
-    return 0 if result['status'] in ('RESEARCH_UPDATED_NO_TRADE',
+    return 0 if result['status'] in ('PREFLIGHT_SOURCE_AND_TIME_MATCH_RESEARCH_ONLY',
+                                      'RESEARCH_UPDATED_NO_TRADE',
                                       'STAGES_COMPLETE_ADMISSION_PENDING',
                                       'RESEARCH_PLAN_AND_DIARY_SAVED') else 4
 
