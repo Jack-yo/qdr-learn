@@ -30,7 +30,7 @@ def compute_features(context, clock, factors=None, mode="strict", exclude_symbol
     signals = pd.Series([clock.signal(day) for day in context.close.index], index=context.close.index)
     results = []
     for factor in factors:
-        if factor.lookback < 0 or factor.dependency not in ("self", "market", "sector"):
+        if factor.lookback < 0 or factor.dependency not in ("self", "market", "sector", "cross_section"):
             raise ValueError("Invalid factor dependency declaration")
         values = factor.compute(context)
         if not values.index.equals(context.close.index) or not values.columns.equals(context.close.columns):
@@ -38,6 +38,10 @@ def compute_features(context, clock, factors=None, mode="strict", exclude_symbol
         validate_causality(factor,context,values)
         values = values[columns].replace([np.inf,-np.inf],np.nan)
         available = context.available(factor.lookback + 1)[columns].copy()
+        if factor.dependency == "cross_section":
+            # Cross-sectional ranks depend on all members being available.
+            cross_available = context.available(factor.lookback + 1).max(axis=1)
+            available = available.apply(lambda col: pd.concat([col, cross_available], axis=1).max(axis=1))
         if factor.dependency == "market":
             benchmark = context.available(factor.lookback+1)[context.benchmark_id]
             available = available.apply(lambda x: pd.concat([x, benchmark], axis=1).max(axis=1))
@@ -50,6 +54,10 @@ def compute_features(context, clock, factors=None, mode="strict", exclude_symbol
                         available.loc[mask,security] = combined.loc[mask]
         # Require complete calendar windows for each declared dependency.
         complete = context.close[columns].notna().rolling(factor.lookback+1,min_periods=factor.lookback+1).sum().eq(factor.lookback+1)
+        if factor.dependency == "cross_section":
+            cross_complete = context.close.notna().rolling(
+                factor.lookback + 1, min_periods=factor.lookback + 1).sum().eq(factor.lookback + 1).all(axis=1)
+            complete = complete.mul(cross_complete, axis=0)
         if factor.dependency == "market":
             complete = complete.mul(context.close[context.benchmark_id].notna().rolling(factor.lookback+1,min_periods=factor.lookback+1).sum().eq(factor.lookback+1),axis=0)
         if factor.dependency == "sector" and context.sector_proxy is not None:
