@@ -44,6 +44,8 @@ def evaluate_research_outcomes(root, session_date: str, plan_identity: str,
     if asof.tzinfo is None:
         raise ValueError('EVALUATION_ASOF_REQUIRES_UTC_OFFSET')
     asof=asof.tz_convert('UTC')
+    if asof > pd.Timestamp.now(tz='UTC'):
+        raise ValueError('EVALUATION_CUTOFF_CANNOT_BE_IN_THE_FUTURE')
     clock=TradingClock()
     horizon=int(review['horizon'])
     window=clock.window(session_date,horizon)
@@ -182,5 +184,8 @@ def read_research_outcomes(root, day, identity):
             or recorded.get('real_orders_enabled') is not False
             or recorded.get('paper_ledger_advanced') is not False):
         raise ValueError('Frozen outcome integrity or execution claim invalid')
+    original=read_indicative_review(root,day,identity)
+    if recorded.get('source_plan_sha256')!=original.get('content_sha256'):
+        raise ValueError('Outcome does not correspond to frozen source plan')
     recorded['content_sha256']=digest
     return recorded
