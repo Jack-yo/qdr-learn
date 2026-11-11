@@ -113,13 +113,15 @@ pages.screen=async()=>{
  const all=await Promise.all([
     settle('/api/v1/strategies'),settle('/api/v1/v4/research/runs'),
     settle('/api/v1/backtests/verified'),settle('/api/v1/v4/forecasts'),
-    settle('/api/v1/v4/plans')]);
- const [saved,runs,backtests,forecasts,planArchive]=all.map(x=>x.ok?x.data:null);
+    settle('/api/v1/v4/plans'),settle('/api/v1/v4/outcomes')]);
+ const [saved,runs,backtests,forecasts,planArchive,outcomeArchive]=all.map(x=>x.ok?x.data:null);
  const strategies=saved?.strategies||[],experiments=saved?.factor_experiments||[];
  const studies=runs?.runs||[],frozen=(forecasts?.records||[]).filter(x=>x.status==='VERIFIED_LOCAL_FORWARD_RESEARCH_ONLY');
  const planRecords=(planArchive?.records||[]).filter(x=>x.status!=='CORRUPT_RESEARCH_PLAN');
  const planRow=planRecords[0]||null;
  const planDetail=planRow?((await settle('/api/v1/v4/plans/'+encodeURIComponent(planRow.session_date_et)+'/'+encodeURIComponent(planRow.identity))).data||null):null;
+ const outcomeRow=(outcomeArchive?.records||[]).find(x=>x.status==='PROSPECTIVE_RESEARCH_OUTCOME_REVIEW_ONLY')||null;
+ const outcomeDetail=outcomeRow?((await settle('/api/v1/v4/outcomes/'+encodeURIComponent(outcomeRow.session_date_et)+'/'+encodeURIComponent(outcomeRow.plan_identity))).data||null):null;
  const verified=Array.isArray(backtests?.results)?backtests.results:Array.isArray(backtests?.runs)?backtests.runs:[];
  const stratrows=strategies.slice(0,12).map(x=>[
     e(x.name)+' · v'+e(x.version),e(x.config?.strategy?.horizon||'—')+'日',
@@ -172,7 +174,17 @@ pages.screen=async()=>{
            '缺少历史 PIT/公司行为/原价成交资格时，不显示净值、收益和回撤曲线。'))+
         '<div class="v4-actions" style="margin-top:15px">'+link('/backtests','查看资格检查与回测结果')+'</div>',
         '收益、成本与模拟交易')
-   '</div>';
+   '</div>'+
+   '<div style="margin-top:15px">'+card('冻结预测的后续结果复盘',
+     outcomeDetail?.evaluated?.length?table(
+       ['候选证券','实际观察止盈止损路径','原始价格模型收益','假设成本后收益','与预测净优势差'],
+       outcomeDetail.evaluated.slice(0,20).map(x=>[
+         e(x.security_id),e(x.modeled_exit_reason),
+         signed(x.realized_gross_price_return),signed(x.modeled_net_return),
+         signed(x.net_forecast_error)])):
+       empty('暂无完成期限的前向研究复盘',
+         '必须先在T日收盘后冻结研究计划，再等待T+H真实交易日及带来源回执的原价数据。'),
+     '历史价格路径模拟，不是实际成交或已验证的投资回报')+'</div>';
  return {title:'因子组选股与模拟回测',html,mount(){
     $('#v4-strategy-h')?.addEventListener('change',x=>state.screenHorizon=Number(x.target.value));
     const action=async(fn)=>{try{await fn()}catch(error){toast(error.message||'请核对研究版本与数据资格')}};
