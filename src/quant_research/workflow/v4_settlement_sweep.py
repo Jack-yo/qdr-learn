@@ -24,10 +24,12 @@ _ID = re.compile(r"[0-9a-f]{16}")
 
 
 def sweep_matured_research_plans(root: Path, *, max_plans: int = 100,
+                                offset: int = 0,
                                 freeze_outcomes: bool = False,
                                 now_utc=None) -> dict:
-    if type(max_plans) is not int or not 1<=max_plans<=1000:
-        raise ValueError("SETTLEMENT_SWEEP_LIMIT_INVALID")
+    if (type(max_plans) is not int or not 1<=max_plans<=1000
+            or type(offset) is not int or not 0<=offset<=100000):
+        raise ValueError("SETTLEMENT_SWEEP_PAGINATION_INVALID")
     now=pd.Timestamp(now_utc if now_utc is not None
                      else datetime.now(timezone.utc))
     if now.tzinfo is None:
@@ -37,15 +39,15 @@ def sweep_matured_research_plans(root: Path, *, max_plans: int = 100,
     base=Path(root).resolve()/"outputs/v4_research_plans"
     entries=[]
     if base.is_dir():
-        for day in sorted(base.iterdir()):
+        for day in sorted(base.iterdir(),reverse=True):
             if not day.is_dir() or not _DAY.fullmatch(day.name):
                 continue
-            for folder in sorted(day.iterdir()):
+            for folder in sorted(day.iterdir(),reverse=True):
                 if folder.is_dir() and _ID.fullmatch(folder.name):
                     entries.append((day.name,folder.name))
     total=len(entries)
     rows=[]
-    for day,identity in entries[:max_plans]:
+    for day,identity in entries[offset:offset+max_plans]:
         item={"session_date_et":day,"plan_identity":identity}
         try:
             review=read_indicative_review(root,day,identity)
@@ -83,8 +85,8 @@ def sweep_matured_research_plans(root: Path, *, max_plans: int = 100,
     blocked=sum(x["status"]=="BLOCKED_NO_OUTCOME_ARCHIVE_WRITE" for x in rows)
     return {"status":"READ_ONLY_SETTLEMENT_PREVIEW" if not freeze_outcomes
                 else "RESEARCH_OUTCOME_SETTLEMENT_SWEEP_ONLY",
-            "checked_at_utc":now.isoformat(),"found_plans":total,
-            "checked_plans":len(rows),"truncated":total>len(rows),
+            "checked_at_utc":now.isoformat(),"found_plans":total,"offset":offset,
+            "checked_plans":len(rows),"truncated":total>offset+len(rows),
             "blocked_plans":blocked,"records":rows,
             "paper_ledger_advanced":False,"broker_fills_observed":False,
             "real_orders_enabled":False}
@@ -95,11 +97,13 @@ def main(argv=None):
         description="Bulk V4 H3 research outcome review; never places or records orders")
     parser.add_argument("--root",type=Path,default=Path.cwd())
     parser.add_argument("--max-plans",type=int,default=100)
+    parser.add_argument("--offset",type=int,default=0)
     parser.add_argument("--freeze-outcomes",action="store_true",
                         help="Write verified modeled outcome archives, never paper fills")
     args=parser.parse_args(argv)
     result=sweep_matured_research_plans(
-        args.root,max_plans=args.max_plans,freeze_outcomes=args.freeze_outcomes)
+        args.root,max_plans=args.max_plans,offset=args.offset,
+        freeze_outcomes=args.freeze_outcomes)
     print(json.dumps(result,ensure_ascii=False,indent=2,allow_nan=False))
     return 4 if result["blocked_plans"] or result["truncated"] else 0
 
