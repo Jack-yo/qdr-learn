@@ -12,6 +12,7 @@ import pandas as pd
 from quant_research.policy import PolicyError
 from quant_research.research.strategy import StrategyRegistry
 from quant_research.research.statistics import daily_rank_ic
+from quant_research.research.factor_diagnostics import pairwise_daily_rank_correlations
 from quant_research.workflow.factor_lab import result as checked_experiment
 
 
@@ -81,6 +82,7 @@ def compute_composite(root, strategy_id):
     validation = joined.loc[joined.date.between(start, cutoff)].copy()
     if validation.empty:
         raise PolicyError('NO_VALIDATION_COMPOSITE', 'No complete multivariate validation rows')
+    correlations = pairwise_daily_rank_correlations(validation, identifiers, min_securities=5)
     labels = _verified_parquet(root, identifiers[0], 'labels.parquet')
     required = {'date', 'security_id', 'horizon', 'exit_date', 'proxy_forward_return'}
     if required - set(labels):
@@ -111,16 +113,24 @@ def compute_composite(root, strategy_id):
         'factors':[{'factor_name':a['dependency']['factor_name'],
                     'experiment_id':a['factor_experiment_id'],'weight':a['weight']}
                    for a in allocations],
+        'factor_correlations': correlations,
+        'redundancy_warning_count': sum(row['redundancy_warning'] for row in correlations),
         'matched_validation_rows':len(validation),
         'complete_case_count':int(validation[['value','target']].notna().all(axis=1).sum()),
         'validation_daily_ic_count':int(usable.count()),
         'validation_rank_ic_mean':float(usable.mean()),
-        'latest_composite_ranking':[{'security_id':str(row.security_id),'score':float(row.value)}
-                                    for row in latest.head(30).itertuples(index=False)],
+        'latest_composite_ranking':[
+            {'security_id':str(row['security_id']),'score':float(row['value']),
+             'factor_percentiles':{identifier:float(row[identifier]) for identifier in identifiers},
+             'weighted_factor_contributions':{
+                 a['factor_experiment_id']:float(row[a['factor_experiment_id']]*a['weight'])
+                 for a in allocations}}
+            for row in latest.head(30).to_dict('records')],
         'factor_coverage_policy':'ALL_COMPONENTS_REQUIRED_NO_IMPUTATION',
         'label_basis':'REAL_CURRENT_VINTAGE_FORWARD_PRICE_PROXY_NOT_MODEL_FILL',
         'historical_decision_eligible':False,'research_grade':False,'execution_ready':False,
         'real_orders_enabled':False,'sealed_test_used':False,
         'limitations':['HISTORICAL_PIT_NOT_PROVEN','NOT_A_BACKTEST','NOT_TRADING_SIGNALS',
-                       'NOT_MULTIPLE_TESTING_CORRECTED','PRICE_PROXY_NOT_NET_RETURN'],
+                       'NOT_MULTIPLE_TESTING_CORRECTED','PRICE_PROXY_NOT_NET_RETURN',
+                       'FACTOR_CORRELATIONS_DESCRIPTIVE_ONLY'],
     }
