@@ -174,6 +174,7 @@ def indicative_plans(projections: pd.DataFrame, existing_holdings: pd.DataFrame,
                          'expected_excess_return':_finite(row,'predicted_excess_return'),
                          'probability_up':p_up,'probability_downside':p_down,
                          'estimated_round_trip_cost':cost,'estimated_net_edge':net_edge,
+                         'reference_price':price,'adv20':adv,
                          'indicative_weight':room,'indicative_shares':floor(notional/price),
                          'entry_rule':'NEXT_SESSION_OPEN_IF_FROZEN_CONDITIONS_REMAIN_VALID',
                          'stop_rule':f'{policy.stop_atr_multiple}xATR_FROM_ACTUAL_ENTRY_FILL',
@@ -194,7 +195,14 @@ def indicative_plans(projections: pd.DataFrame, existing_holdings: pd.DataFrame,
             evaluated.append({'security_id':sid,'accepted':False,'reason':'FINAL_PORTFOLIO_CAPACITY'})
             continue
         row['indicative_weight'] = space
-        row['indicative_shares'] = floor(space*equity / (space*equity / max(1,row['indicative_shares']))) if False else row['indicative_shares']
+        row['indicative_shares'] = floor(space*equity/row['reference_price'])
+        if row['indicative_shares'] < 1:
+            evaluated.append({'security_id':sid,'accepted':False,'reason':'LESS_THAN_ONE_SHARE'})
+            continue
+        row['estimated_round_trip_cost'] = _cost_fraction(space*equity,row['adv20'],policy)
+        row['estimated_net_edge'] = row['expected_gross_return']-row['estimated_round_trip_cost']
+        row.pop('reference_price')
+        row.pop('adv20')
         plans.append(row)
         total_exposure += space
         allocated += space
