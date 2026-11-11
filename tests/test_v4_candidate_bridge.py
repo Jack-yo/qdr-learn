@@ -117,3 +117,25 @@ def test_immutable_plan_archive_and_tamper_detection(tmp_path,monkeypatch):
     path.write_text(path.read_text().replace('AAA','MUTATED'),encoding='utf-8')
     with pytest.raises(ValueError,match='modified'):
         bridge.read_indicative_review(tmp_path,'2026-11-10',identity)
+
+
+
+def test_explicit_research_budget_is_never_a_reconciled_paper_account(monkeypatch):
+    monkeypatch.setattr(bridge,'read_research_forecast',lambda *args,**kw:_archived())
+    scenario={'status':'EXPLICIT_EMPTY_RESEARCH_BUDGET',
+              'session_date_et':'2026-11-10',
+              'has_actual_positions':False,'budget':100000.}
+    result=bridge.make_indicative_review(
+        '.',session_date='2026-11-10',forecast_identity='c'*16,
+        securities=_metadata(),account=scenario,
+        frozen_at_utc='2026-11-10T22:00:00Z')
+    assert result['status']=='RESEARCH_PLANS_ONLY'
+    assert result['account_budget']==100000.
+    assert result['account_evidence']=='EXPLICIT_EMPTY_RESEARCH_BUDGET_NOT_A_PAPER_ACCOUNT'
+    assert result['real_orders_enabled'] is False
+    scenario['has_actual_positions']=True
+    with pytest.raises(ValueError,match='SCENARIO_UNVERIFIED'):
+        bridge.make_indicative_review(
+            '.',session_date='2026-11-10',forecast_identity='c'*16,
+            securities=_metadata(),account=scenario,
+            frozen_at_utc='2026-11-10T22:00:00Z')
