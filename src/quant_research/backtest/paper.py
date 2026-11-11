@@ -134,7 +134,7 @@ def account_summary(path, config, account="forward-shadow-h3"):
             fills=db.execute("SELECT count(*) FROM events WHERE account=? AND kind='fill'",[account]).fetchone()[0]
             return {"status":"INTERNALLY_RECONCILED_PAPER_ESTIMATE","account":account,
                     "last_session":state['last_date'],"cash":cash,"equity":equity,
-                    "positions":len(positions),"position_details":positions,"fills":fills,
+                    "positions":len(positions),"position_details":positions,"last_prices":state["last_prices"],"fills":fills,
                     "recorded_sessions":len(dates),"real_orders_enabled":False,
                     "notice":"Internal ledger reconciliation only; external source receipts must be rechecked before claiming source-verified fills. No broker fills."}
     except (sqlite3.DatabaseError,ValueError,KeyError,TypeError,OSError):
