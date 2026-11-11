@@ -110,6 +110,21 @@ def read_research_forecast(root, day, identity, *, include_rows=False):
             or type(manifest.get('prospective_before_next_open')) is not bool
             or set(manifest.get('artifacts_sha256',{}))!=set(_FILE_NAMES)):
         raise ValueError('Forecast record is not a restricted research archive')
+    # The manifest's prospective flag must agree with its actual recorded
+    # creation timestamp and the exchange's next-open window. A replay
+    # after T+1 cannot be upgraded by merely changing a JSON boolean.
+    try:
+        from quant_research.clock import TradingClock
+        window=TradingClock().window(day,1)
+        created=pd.Timestamp(manifest['created_at_utc'])
+        if created.tzinfo is None:
+            raise ValueError('Forecast creation time must be UTC aware')
+        expected=bool(pd.Timestamp(window.signal_time)<=created
+                      <pd.Timestamp(window.entry_time))
+    except (KeyError,TypeError,ValueError) as exc:
+        raise ValueError('Invalid frozen forecast creation timestamp') from exc
+    if expected is not manifest['prospective_before_next_open']:
+        raise ValueError('Forecast prospective timing flag contradicts its timestamp')
     for name in _FILE_NAMES:
         artifact=(folder/name).resolve()
         digest=manifest['artifacts_sha256'][name]
