@@ -9,6 +9,7 @@ def _allow_matched_source(monkeypatch):
     monkeypatch.setattr(v4_pipeline_preflight,'preflight_v4_day',
         lambda *args,**kw:{'status':'PREFLIGHT_SOURCE_AND_TIME_MATCH_RESEARCH_ONLY',
                            'source_snapshot_sha256':'a'*64,
+                           'source_symbols':['AAA','SPY'],
                            'real_orders_enabled':False})
 
 
