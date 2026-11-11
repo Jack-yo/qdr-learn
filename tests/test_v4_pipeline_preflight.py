@@ -27,21 +27,26 @@ class Clock:
 
 def _inputs():
     return ({
-        'factors':pd.DataFrame([{'date':DAY,'available_at':'2026-11-10T21:10:00Z'}]),
+        'factors':pd.DataFrame([{'date':DAY,'security_id':'AAA',
+            'feature_name':'alpha','value':.12,'decision_eligible':True,
+            'available_at':'2026-11-10T21:10:00Z'}]),
         'labels':pd.DataFrame([
             {'date':DAY,'security_id':'AAA','horizon':h,'label_kind':'FUTURE_UNOBSERVED',
              'gross_return':float('nan'),'excess_return':float('nan'),
+             'available_at':None,
              'entry_time':'2026-11-11T14:30:00Z',
              'exit_time':str(pd.Timestamp('2026-11-13T21:00:00Z')+pd.Timedelta(days=h))}
             for h in (1,3,5)]),
         'market_style':pd.DataFrame([
-            {'date':DAY,'state_available_at':'2026-11-10T21:10:00Z'}]),
+            {'date':DAY,'state_available_at':'2026-11-10T21:10:00Z',
+             'market_return_5':.01,'style_momentum_5':.02}]),
         'candidate_meta':pd.DataFrame([
             {'date':DAY,'security_id':'AAA','symbol':'AAA','sector':'TECH',
              'reference_close':100.,'atr20':3.,'adv20':1000000.,
              'available_at':'2026-11-10T21:14:00Z',
              'source_snapshot_sha256':SNAP}])
-    },{'source_snapshot_sha256':SNAP,'source_symbols':SYMBOLS})
+    },{'source_snapshot_sha256':SNAP,'source_symbols':SYMBOLS,
+       'factor_names':['alpha']})
 
 
 def _readiness(root,asof,*,symbols):
@@ -154,4 +159,40 @@ def test_candidate_must_have_matching_current_label_identity():
     source,_=_inputs()
     source['candidate_meta'].loc[0,'security_id']='UNRELATED'
     with pytest.raises(ValueError,match='CANDIDATE_MISSING_FROM_CURRENT_HORIZON_LABELS'):
+        _check(frames=source)
+
+
+def test_fails_closed_if_current_stock_has_missing_registered_factor():
+    source,_=_inputs()
+    source['factors'].loc[0,'feature_name']='different_factor'
+    with pytest.raises(ValueError,match='CURRENT_FACTOR_COHORT'):
+        _check(frames=source)
+
+
+def test_fails_closed_if_current_factor_is_nan_or_retrospective():
+    source,_=_inputs()
+    source['factors'].loc[0,'value']=float('nan')
+    with pytest.raises(ValueError,match='CURRENT_FACTOR_VALUE_INVALID'):
+        _check(frames=source)
+    source,_=_inputs()
+    source['factors'].loc[0,'decision_eligible']=False
+    with pytest.raises(ValueError,match='NOT_DECISION_ELIGIBLE'):
+        _check(frames=source)
+
+
+def test_fails_closed_if_future_label_has_leaked_availability():
+    source,_=_inputs()
+    source['labels'].loc[0,'available_at']='2026-11-11T21:00:00Z'
+    with pytest.raises(ValueError,match='CURRENT_LABEL_OUTCOME_LEAKAGE'):
+        _check(frames=source)
+
+
+def test_unverified_sector_and_missing_market_style_block():
+    source,_=_inputs()
+    source['candidate_meta'].loc[0,'sector']='UNKNOWN'
+    with pytest.raises(ValueError,match='SECTOR_UNVERIFIED'):
+        _check(frames=source)
+    source,_=_inputs()
+    source['market_style'].loc[0,'market_return_5']=float('nan')
+    with pytest.raises(ValueError,match='CONDITIONS_MISSING'):
         _check(frames=source)
