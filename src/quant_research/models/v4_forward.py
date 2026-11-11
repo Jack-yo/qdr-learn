@@ -29,7 +29,10 @@ def forecast_asof(panel: pd.DataFrame, feature_sets: dict[str,list[str]],
             or len(source_snapshot_sha256)!=64
             or any(c not in '0123456789abcdef' for c in source_snapshot_sha256)):
         raise ValueError('Complete input snapshot digest is required')
+    if 'entry_time' not in panel:
+        raise ValueError('Forward candidate contract needs next-session entry_time')
     values, _, sessions = _canonical(panel,feature_sets,exchange_sessions)
+    values['entry_time'] = pd.to_datetime(values.entry_time,utc=True)
     session = pd.Timestamp(asof_session)
     if session.tzinfo is not None or session not in sessions:
         raise ValueError('Forecast date must be a timezone-naive XNYS session')
@@ -43,6 +46,14 @@ def forecast_asof(panel: pd.DataFrame, feature_sets: dict[str,list[str]],
         raise ValueError('Forward input features were not known by their signal time')
     if chosen.signal_time.nunique()!=1 or pd.Timestamp(chosen.signal_time.iloc[0]).tzinfo is None:
         raise ValueError('Ambiguous as-of decision cutoff')
+    from quant_research.clock import TradingClock
+    exchange=TradingClock()
+    for horizon,rows in chosen.groupby('horizon'):
+        window=exchange.window(session,int(horizon))
+        if not (rows.entry_time.eq(pd.Timestamp(window.entry_time)).all()
+                and rows.exit_time.eq(pd.Timestamp(window.exit_time)).all()
+                and rows.signal_time.lt(rows.entry_time).all()):
+            raise ValueError('Forecast trade windows violate next-session XNYS execution')
     cutoff=chosen.signal_time.iloc[0]
     loc=sessions.get_loc(session)
     last_fit_session=sessions[loc-protocol.gap_sessions-1] if loc>protocol.gap_sessions else None
@@ -106,7 +117,7 @@ def forecast_asof(panel: pd.DataFrame, feature_sets: dict[str,list[str]],
             model_version='v4-forecast-'+sha256(json.dumps(
                 version_input,sort_keys=True).encode()).hexdigest()[:20]
             out=test[['date','security_id','horizon','signal_time',
-                      'feature_available_at','exit_time']].copy()
+                      'feature_available_at','entry_time','exit_time']].copy()
             out['model_variant']=variant
             out['expected_gross_trade_return']=pred_gross
             out['expected_excess_return']=pred_excess
