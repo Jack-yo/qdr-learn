@@ -11,7 +11,7 @@
 <div id="blocked-view" hidden aria-live="polite"></div>
 <div class="app-shell">
   <aside id="sidebar" class="sidebar" aria-label="主导航">
-    <a class="brand" href="/overview"><span class="brand-logo">Q<span>·</span></span><span><strong>Quant Studio</strong><small>研究与交易决策工作台</small></span></a>
+    <a class="brand" href="/studio" title="返回 QDR V4 新版研究主工作台"><span class="brand-logo">Q<span>·</span></span><span><strong>Quant Studio</strong><small>研究与交易决策工作台</small></span></a>
     <div class="side-scroll">
       <div class="nav-label">研究总览</div>
       <a class="nav-item" data-path="/overview" href="/overview"><span class="nav-glyph">▦</span> 总览 · 每日决策</a>
@@ -31,7 +31,7 @@
     <div class="side-bottom"><span class="real-dot"></span><div><b>REAL_ONLY</b><small>仅展示真实且可追溯的数据</small></div></div>
   </aside>
   <div class="main-shell">
-    <header class="topbar"><button class="menu-trigger" id="menu-trigger" aria-label="打开菜单" aria-expanded="false">☰</button><div class="breadcrumbs" id="breadcrumbs">研究工作台</div><div class="top-right"><span class="environment">本地研究环境</span><span class="top-status" id="top-status">核验中</span><button class="icon-button" id="refresh-current" title="刷新当前页面" aria-label="刷新当前页面">↻</button></div></header>
+    <header class="topbar"><button class="menu-trigger" id="menu-trigger" aria-label="打开菜单" aria-expanded="false">☰</button><div class="breadcrumbs" id="breadcrumbs">研究工作台</div><div class="top-right"><a class="environment" href="/studio" style="text-decoration:none" title="返回新版四层研究工作台">返回 V4 主工作台</a><span class="environment">本地研究环境</span><span class="top-status" id="top-status">核验中</span><button class="icon-button" id="refresh-current" title="刷新当前页面" aria-label="刷新当前页面">↻</button></div></header>
     <main class="workspace" id="workspace"><div class="loading-view"><span class="spin"></span><p>正在加载真实数据与研究状态…</p></div></main>
     <footer class="footer">Quant Studio · 所有预测和回测必须附带来源、日期与适用范围 · 不支持真实券商下单</footer>
   </div>
