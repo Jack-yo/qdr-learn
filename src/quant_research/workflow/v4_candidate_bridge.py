@@ -213,3 +213,38 @@ def read_indicative_review(root, session_date: str, identity: str) -> dict:
     if data.get('execution_eligible') is not False or data.get('real_orders_enabled') is not False:
         raise ValueError('Archive attempts to grant execution eligibility')
     return data
+
+
+
+def latest_indicative_reviews(root, *, limit=10) -> dict:
+    """Browse immutable, hash-verified research-only plans without paper trades."""
+    if type(limit) is not int or not 1<=limit<=30:
+        raise ValueError('Review index limit must be 1–30')
+    base=Path(root).resolve()/_PARENT
+    rows=[]
+    if base.is_dir():
+        for folder in sorted(base.iterdir(),reverse=True):
+            if not folder.is_dir() or not re.fullmatch(r'\d{4}-\d\d-\d\d',folder.name):
+                continue
+            for child in sorted(folder.iterdir(),reverse=True):
+                if not child.is_dir() or not _ID.fullmatch(child.name):
+                    continue
+                try:
+                    review=read_indicative_review(root,folder.name,child.name)
+                    rows.append({'session_date_et':folder.name,'identity':child.name,
+                                 'status':review['status'],
+                                 'research_plan_count':len(review['plans']),
+                                 'rejected_count':sum(not x.get('accepted',False)
+                                                      for x in review['evaluated']),
+                                 'source_forecast_identity':review['source_forecast_identity'],
+                                 'real_orders_enabled':False})
+                except (ValueError,KeyError,OSError,TypeError):
+                    rows.append({'session_date_et':folder.name,'identity':child.name,
+                                 'status':'CORRUPT_RESEARCH_PLAN',
+                                 'real_orders_enabled':False})
+                if len(rows)>=limit:
+                    break
+            if len(rows)>=limit:
+                break
+    return {'status':'RESEARCH_PLANS_ONLY','records':rows,
+            'real_orders_enabled':False}
