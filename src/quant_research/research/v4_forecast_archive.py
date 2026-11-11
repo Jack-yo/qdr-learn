@@ -22,6 +22,42 @@ _FILE_NAMES=('forecasts.parquet','model_cards.parquet')
 _BANNED=frozenset({'gross_return','excess_return','actual_return','future_return',
                    'realized_return','net_pnl','broker_order_id'})
 
+def _validated_input_contract(contract):
+    """Bind every input Parquet byte digest and factor/cohort registry to a run."""
+    if contract is None:
+        return None  # Legacy v1 research-only archive compatibility.
+    if not isinstance(contract,dict) or set(contract)!={
+            'artifacts_sha256','factor_names','source_symbols'}:
+        raise ValueError('Invalid V4 forward input provenance contract')
+    files,names,symbols=(contract[key] for key in
+                         ('artifacts_sha256','factor_names','source_symbols'))
+    if (not isinstance(files,dict) or not
+            {'factors.parquet','labels.parquet','market_style.parquet'}<=set(files)
+            or any(not isinstance(key,str) or not key.endswith('.parquet')
+                   or not isinstance(value,str) or not _SHA.fullmatch(value)
+                   for key,value in files.items())):
+        raise ValueError('Incomplete V4 forward input byte fingerprints')
+    if (not isinstance(names,list) or not names or len(set(names))!=len(names)
+            or any(not isinstance(x,str) or not x for x in names)
+            or not isinstance(symbols,list) or len(set(symbols))!=len(symbols)
+            or any(not isinstance(x,str) or not x for x in symbols)):
+        raise ValueError('Invalid V4 factor/security cohort fingerprint')
+    return {'artifacts_sha256':dict(sorted(files.items())),
+            'factor_names':list(names),'source_symbols':list(symbols)}
+
+
+def forecast_archive_identity(day,source,protocol_sha256,*,input_contract=None):
+    """V2 binds exact local dataset artifacts; V1 reads remain compatible."""
+    if any(not isinstance(x,str) or not _SHA.fullmatch(x)
+           for x in (source,protocol_sha256)):
+        raise ValueError('Valid source and protocol SHA256 required')
+    validated=_validated_input_contract(input_contract)
+    if validated is None:
+        return sha256((str(day)+source+protocol_sha256).encode()).hexdigest()[:16]
+    key={'day':str(day),'source':source,'protocol':protocol_sha256,
+         'input_contract':validated,'schema':'v4-forward-2'}
+    return sha256(json.dumps(key,sort_keys=True,separators=(',',':')).encode()).hexdigest()[:16]
+
 
 def _hash(path):
     return sha256(path.read_bytes()).hexdigest()
@@ -40,7 +76,8 @@ def _loc(root, day, ident):
     return base,folder
 
 
-def freeze_research_forecast(root, report: dict, *, protocol_sha256: str) -> dict:
+def freeze_research_forecast(root, report: dict, *, protocol_sha256: str,
+                             input_contract: dict | None = None) -> dict:
     """Freeze one as-of model output. Does not write paper orders."""
     if report.get('status')!='FORWARD_RESEARCH_PREDICTIONS_ONLY':
         raise ValueError('Cannot freeze a missing/blocked forecast as a successful run')
@@ -63,7 +100,9 @@ def freeze_research_forecast(root, report: dict, *, protocol_sha256: str) -> dic
     created=datetime.now(timezone.utc)
     genuine_forward=bool(pd.Timestamp(window.signal_time) <= pd.Timestamp(created)
                          < pd.Timestamp(window.entry_time))
-    identity=sha256((str(day)+source+protocol_sha256).encode()).hexdigest()[:16]
+    validated=_validated_input_contract(input_contract)
+    identity=forecast_archive_identity(day,source,protocol_sha256,
+                                       input_contract=validated)
     base,dest=_loc(root,day,identity)
     if dest.exists():
         raise FileExistsError('Already froze this input/protocol/day')
@@ -76,7 +115,8 @@ def freeze_research_forecast(root, report: dict, *, protocol_sha256: str) -> dic
             target=work/name
             frame.to_parquet(target,index=False)
             hashes[name]=_hash(target)
-        manifest={'schema':'v4-forward-1','session_date_et':str(day),
+        manifest={'schema':('v4-forward-2' if validated is not None else 'v4-forward-1'),
+                  'session_date_et':str(day),
                   'identity':identity,'source_snapshot_sha256':source,
                   'protocol_sha256':protocol_sha256,
                   'forecast_rows':len(data),'model_cards':len(cards),
@@ -87,6 +127,10 @@ def freeze_research_forecast(root, report: dict, *, protocol_sha256: str) -> dic
                             else 'RETROSPECTIVE_ASOF_RECONSTRUCTION_ONLY'),
                   'decision_eligible':False,'source_independently_attested':False,
                   'real_orders_enabled':False}
+        if validated is not None:
+            manifest['input_contract']=validated
+            manifest['input_contract_sha256']=sha256(json.dumps(
+                validated,sort_keys=True,separators=(',',':')).encode()).hexdigest()
         (work/'manifest.json').write_text(
             json.dumps(manifest,sort_keys=True,indent=2,allow_nan=False),encoding='utf-8')
         if dest.exists():
@@ -101,7 +145,7 @@ def read_research_forecast(root, day, identity, *, include_rows=False):
     if not path.is_file():
         raise FileNotFoundError('Forecast record unavailable')
     manifest=json.loads(path.read_text(encoding='utf-8'))
-    if (manifest.get('schema')!='v4-forward-1'
+    if (manifest.get('schema') not in ('v4-forward-1','v4-forward-2')
             or manifest.get('identity')!=identity
             or manifest.get('session_date_et')!=str(day)
             or manifest.get('decision_eligible') is not False
@@ -110,6 +154,16 @@ def read_research_forecast(root, day, identity, *, include_rows=False):
             or type(manifest.get('prospective_before_next_open')) is not bool
             or set(manifest.get('artifacts_sha256',{}))!=set(_FILE_NAMES)):
         raise ValueError('Forecast record is not a restricted research archive')
+    if manifest['schema']=='v4-forward-2':
+        contract=_validated_input_contract(manifest.get('input_contract'))
+        if contract is None:
+            raise ValueError('V2 input provenance missing')
+        contract_digest=sha256(json.dumps(contract,sort_keys=True,
+            separators=(',',':')).encode()).hexdigest()
+        if (manifest.get('input_contract_sha256')!=contract_digest or
+                forecast_archive_identity(day,manifest.get('source_snapshot_sha256'),
+                    manifest.get('protocol_sha256'),input_contract=contract)!=identity):
+            raise ValueError('Frozen forecast input provenance or identity changed')
     # The manifest's prospective flag must agree with its actual recorded
     # creation timestamp and the exchange's next-open window. A replay
     # after T+1 cannot be upgraded by merely changing a JSON boolean.
