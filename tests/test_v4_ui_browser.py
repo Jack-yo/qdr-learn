@@ -127,6 +127,18 @@ def _server():
                 return
             return super().do_GET()
 
+        def do_POST(self):
+            route=urlsplit(self.path).path
+            if route!="/api/run/daily-observation":
+                self.send_error(404)
+                return
+            raw=b'{"status":"RUNNING","action":"daily-observation"}'
+            self.send_response(202)
+            self.send_header("Content-Type","application/json")
+            self.send_header("Content-Length",str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
         def log_message(self,*args):
             pass
 
@@ -190,6 +202,8 @@ def test_overview_research_flow_and_market_validation(browser,local_app):
     page=_open(browser,local_app,"overview")
     try:
         assert page.locator(".v4-workflow-step").count()==5
+        page.locator("#v4-run-observation").click()
+        assert page.get_by_text("已提交日终观察").count()>=1
         page.locator("#nav-market").click()
         page.get_by_role("tab",name="预测验证").click()
         assert page.get_by_text("历史样本外概率可靠性").count()==1
