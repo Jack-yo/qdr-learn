@@ -13,8 +13,9 @@ def _fixture():
     values=pd.DataFrame({'IWM':100+ix*.12+np.sin(ix*.23),
                          'SPY':120+ix*.10+np.sin(ix*.17),
                          'IWD':100+ix*.15,'IWF':110+ix*.10},index=sessions)
+    clock=TradingClock()
     availability=pd.DataFrame({
-        s:pd.to_datetime(sessions,utc=True)+pd.Timedelta(hours=21)
+        s:pd.DatetimeIndex([clock.close(day)+pd.Timedelta(minutes=5) for day in sessions])
         for s in values.columns},index=sessions)
     return sessions,values,availability
 

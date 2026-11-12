@@ -203,7 +203,7 @@ def test_overview_research_flow_and_market_validation(browser,local_app):
     try:
         assert page.locator(".v4-workflow-step").count()==5
         page.locator("#v4-run-observation").click()
-        assert page.get_by_text("已提交日终观察").count()>=1
+        page.get_by_text("已提交日终观察", exact=False).first.wait_for()
         page.locator("#nav-market").click()
         page.get_by_role("tab",name="预测验证").click()
         assert page.get_by_text("历史样本外概率可靠性").count()==1
@@ -237,7 +237,7 @@ def test_factor_comparison_and_risk_tabs(browser,local_app):
         page.locator("#v4-compare-left").select_option("F1")
         page.locator("#v4-compare-right").select_option("F2")
         page.locator("#v4-compare-run").click()
-        assert page.get_by_text("IC增量").count()>=1
+        page.get_by_text("IC增量").first.wait_for()
         assert page.get_by_text("0.0300").count()>=1
     finally:
         page.close()

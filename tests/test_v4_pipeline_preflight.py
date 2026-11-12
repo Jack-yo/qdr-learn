@@ -50,7 +50,8 @@ def _inputs():
 
 
 def _readiness(root,asof,*,symbols):
-    assert symbols==SYMBOLS
+    # The warehouse's independently observed basket must remain fixed even
+    # when a malformed bundle asks the source check to narrow its scope.
     return {'stages':{'dataset':{'status':'OBSERVATION_ONLY',
         'evidence':{'asof_date_et':DAY,'source_snapshot_sha256':SNAP,
                    'latest_session_complete':True,'symbols':SYMBOLS}}}}

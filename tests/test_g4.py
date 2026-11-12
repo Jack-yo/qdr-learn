@@ -17,8 +17,11 @@ def real_bundle(**kw):
 def test_real_raw_does_not_unlock_historical_or_forward_execution():
     bundle=real_bundle()
     bundle.require('observation');bundle.require('raw_prices')
-    assert bundle.metadata['source_provenance']['verified_rows']==5
-    assert bundle.metadata['feed']=='sip' and bundle.metadata['rows']==5
+    assert bundle.metadata['source_provenance']['verified_rows']==bundle.metadata['rows']
+    assert bundle.metadata['feed']=='sip'
+    from quant_research.clock import TradingClock
+    expected=TradingClock().calendar.sessions_in_range('2026-11-02',bundle.metadata['asof_date_et'])
+    assert {day.date() for day in bundle.prices.date}=={day.date() for day in expected}
     for cap in ('historical_backtest','forward_shadow','historical_model','exploratory_price_factors','pit_fundamentals'):
         with pytest.raises(PolicyError,match='lacks'):bundle.require(cap)
     assert bundle.capabilities['historical_backtest']['missing_evidence']

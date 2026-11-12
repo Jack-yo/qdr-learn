@@ -24,8 +24,11 @@ def catalog():
 
 def test_categories_preserve_versions_and_missing_evidence(catalog):
     datasets={d['dataset_id']:d for d in catalog['datasets']}
-    assert datasets['market_prices']['latest_rows']==49520
-    assert datasets['market_prices']['rows']>=49520  # Retained real source revisions, not extra sessions.
+    configured=yaml.safe_load(Path('configs/data_maintenance.yaml').read_text(encoding='utf-8'))['prices']['symbols']
+    sessions=TradingClock().calendar.sessions_in_range('2017-01-03',datasets['market_prices']['last_date'])
+    expected=len(configured)*len(sessions)
+    assert datasets['market_prices']['latest_rows']==expected
+    assert datasets['market_prices']['rows']>=expected  # Retained real source revisions, not extra sessions.
     assert datasets['corporate_actions']['latest_rows']==1042
     assert datasets['sec_candidates']['eligible_rows']==0
     assert datasets['yahoo_research_prices']['latest_rows']==40240

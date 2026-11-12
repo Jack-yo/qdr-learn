@@ -118,7 +118,7 @@ def test_invalid_budget_and_missing_metadata_do_not_freeze_forecast(monkeypatch,
 
 def test_research_budget_archive_cannot_be_reused_as_reconciled_paper_plan(monkeypatch,tmp_path):
     _setup(monkeypatch)
-    day=tmp_path/'outputs/v4_research_plans/2026-11-10'/'c'*16
+    day=tmp_path/'outputs/v4_research_plans/2026-11-10'/('c'*16)
     day.mkdir(parents=True)
     monkeypatch.setattr(workflow,'read_indicative_review',
         lambda *args,**kwargs:{'source_forecast_identity':'b'*16,

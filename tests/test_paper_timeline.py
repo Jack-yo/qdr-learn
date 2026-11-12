@@ -44,4 +44,4 @@ def test_ui_uses_source_observations_and_read_only_account_timeline():
     assert "request('/api/v1/paper/timeline')" in js
     assert 'observation.snapshots||[]' in js
     assert 'timeline.sessions||[]' in js
-    assert 'externally_verified_fills' in (root/'src/quant_research/workflow/paper_timeline.py').read_text()
+    assert 'externally_verified_fills' in (root/'src/quant_research/workflow/paper_timeline.py').read_text(encoding='utf-8')

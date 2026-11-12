@@ -47,7 +47,7 @@ def test_blocked_alpha_still_allows_independent_risk_review(tmp_path):
     assert called==names[:5]
     assert result['stages'][-1]['code']=='UPSTREAM_RESEARCH_NOT_ADMITTED_FOR_EXECUTION'
     assert result['status']=='BLOCKED_OR_NO_TRADE'
-    assert result['stages'][-1]['code']=='MODEL_MISSING'
+    assert result['stages'][3]['code']=='MODEL_MISSING'
 
 
 def test_missing_adapter_and_tampered_archive(tmp_path):

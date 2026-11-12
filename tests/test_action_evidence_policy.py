@@ -77,7 +77,7 @@ def test_event_day_is_a_label_not_publication_time():
 
 
 def test_no_production_code_writes_backtest_acceptance():
-    code = Path(__file__).resolve().parents[1] / 'quant_research/data/action_audit.py'
+    code = Path(__file__).resolve().parents[1] / 'src/quant_research/data/action_audit.py'
     content = code.read_text(encoding='utf-8')
     assert 'PIT_VERIFIED' not in content
     assert 'INSERT INTO' not in content
