@@ -3,6 +3,7 @@ from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+from typing import Literal
 import sqlite3
 from uuid import uuid4
 
@@ -22,6 +23,8 @@ class FactorAllocation(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     factor_experiment_id: str
     weight: StrictFloat = Field(gt=0, le=1, allow_inf_nan=False)
+    # Optional immutable UX grouping; ranking mathematics still uses actual weights.
+    group: Literal['A', 'B', 'C'] | None = None
 
     @model_validator(mode="after")
     def validate_experiment(self):
@@ -125,8 +128,12 @@ def research_mix(root, factors, horizon):
                 "Multi-factor research requires identical actual data snapshot, symbols and evaluation protocol",
                 sorted(k for k in baseline if baseline[k] != signature[k]),
             )
-        allocations.append({"factor_experiment_id": identifier,
-                            "weight": factor.weight, "dependency": dependency})
+        allocation={"factor_experiment_id": identifier,
+                    "weight": factor.weight, "dependency": dependency}
+        # Preserve older registered strategies with no group in the mix hash.
+        if factor.group is not None:
+            allocation["group"]=factor.group
+        allocations.append(allocation)
     return {"allocations": allocations, "research_scope": baseline,
             "combination": "WEIGHTED_DAILY_CROSS_SECTIONAL_PERCENTILE_RANK",
             "missing_policy": "ALL_COMPONENTS_REQUIRED",
