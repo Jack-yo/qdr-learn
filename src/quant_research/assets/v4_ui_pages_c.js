@@ -94,8 +94,9 @@ pages.risk=async()=>{
 pages.data=async()=>{
  const all=await Promise.all([
     settle('/api/status'),settle('/api/v1/research/readiness'),
-    settle('/api/v1/v4/daily'),settle('/api/v1/data/catalog')]);
- const [system,readiness,diary,catalog]=all.map(x=>x.ok?x.data:null);
+    settle('/api/v1/v4/daily'),settle('/api/v1/data/catalog'),
+    settle('/api/v1/v4/freshness')]);
+ const [system,readiness,diary,catalog,freshness]=all.map(x=>x.ok?x.data:null);
  const latest=(diary?.runs||[])[0]||null;
  const checks=Object.entries(readiness?.stages||{}).map(([id,x])=>[
   e(x.description||id),riskStatus(x.status),e(x.code||'—'),
@@ -105,6 +106,10 @@ pages.data=async()=>{
  const prices=system?.prices||[];
  const status=system?.dataset||{};
  const limitations=(system?.limitations||[]).map(x=>'<div class="v4-stat-pair"><span class="muted">'+e(x)+'</span></div>').join('');
+ const freshRows=Object.entries(freshness?.modules||{}).map(([name,x])=>[
+   e(name),date(x.asof_session),date(x.source_data_asof),
+   e(x.knowledge_cutoff_utc||'—'),riskStatus(x.freshness_status),
+   e(x.blocked_reason||'—')]);
  const html=heading('数据中心与研究资格',
    '底层市场数据、历史证券身份、因子版本及模型运行证据集中管理，不让 API 错误占据用户主界面',
    link('/data','打开完整数据管理工具'))+
@@ -131,6 +136,10 @@ pages.data=async()=>{
       checks.length?table(['项目','状态','代码','缺失证据'],checks):
          empty('资格矩阵尚未就绪',readiness?'尚无资格项':'检查本地数据库和数据审计记录。'),
       '模型训练 / 历史回测 / 前向模拟分别验收')+'</div>'+
+   '<div style="margin-top:15px">'+card('统一决策时点与模块新鲜度',
+      freshRows.length?table(['模块','研究交易日','实际数据日','决策截止 UTC','时效状态','阻断原因'],freshRows):
+        empty('新鲜度证据暂不可用','检查本地时钟、行情仓库和来源可用时间。'),
+      '行情观察 CURRENT 不代表预测或交易合格')+'</div>'+
    '<div class="grid cols2" style="margin-top:15px">'+
       card('数据使用限制',limitations||
        empty('当前无附加说明','不等于已通过历史 PIT 或策略有效性认证。'),'来源与更新时间')+

@@ -25,9 +25,10 @@ pages.overview=async()=>{
  const recent=runs.find(x=>x.status==='VERIFIED_LOCAL_FORWARD_RESEARCH_ONLY')||runs[0]||null;
  const hasPaper=risk?.status==='CONCENTRATION_MEASURED';
  const day=system?.dataset?.asof_date_et||latest?.session_date_et||'—';
+ const styleDay=style?.asof_date_et||'未知';
  const kpis=grid(4,[
    kpi('L1 / 市场状态','—','当日校准后的市场方向概率未形成','blue'),
-   kpi('L2 / 经典风格',styleStrong.length?e(styleStrong.map(x=>x.factor_name).join(' / ')):'—',styleStrong.length?'真实历史因子最近5日表现（非预测）':'无可用因子观察','purple'),
+   kpi('L2 / 经典风格',styleStrong.length?e(styleStrong.map(x=>x.factor_name).join(' / ')):'—',styleStrong.length?'French 截止 '+styleDay+' · 历史表现，非预测':'无可用因子观察','purple'),
    kpi('L3 / Alpha 预测研究',recent?n(recent.forecast_rows,0):'—',recent?'已存档个股预测记录，不等于合格交易候选':'当前无冻结预测记录','green'),
    kpi('L4 / 持仓风险',hasPaper?n(risk.alerts?.length||0,0):'—',hasPaper?'本地对账持仓的规则预警数量':'组合风险证据未完整','amber')
  ].join(''));
@@ -45,7 +46,7 @@ pages.overview=async()=>{
          note('当前展示框架保留三个交易期限；不借用历史回溯预测或演示概率填充。')+
          '<div class="v4-actions" style="margin-top:14px">'+link('/studio#market','市场预测研究')+'</div>','L1 · 前向预测资格待核验')+
        card('经典因子 · 风格轮动',factorBars+note('French 历史修订版本仅供当前观察；领先性须另行样本外验证。')+
-         '<div style="margin-top:10px">'+link('/studio#style','查看经典因子趋势')+'</div>','L2 · 实际因子观察')+
+         '<div style="margin-top:10px">'+link('/studio#style','查看经典因子趋势')+'</div>','L2 · French 截止 '+styleDay)+
      '</div>'+
      '<div class="grid cols2" style="margin-bottom:15px">'+
        card('Alpha 研究与候选',latestPlan?

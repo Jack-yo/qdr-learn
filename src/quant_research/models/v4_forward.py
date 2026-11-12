@@ -31,6 +31,14 @@ def forecast_asof(panel: pd.DataFrame, feature_sets: dict[str,list[str]],
         raise ValueError('Complete input snapshot digest is required')
     if 'entry_time' not in panel:
         raise ValueError('Forward candidate contract needs next-session entry_time')
+    # The selected session has no observable outcomes at freeze time. Reject
+    # leaked values before the general historical-label validator so callers
+    # get the precise current-session contract failure.
+    asof_rows = panel.loc[pd.to_datetime(panel['date']).eq(pd.Timestamp(asof_session))]
+    if (asof_rows['gross_return'].notna().any()
+            or asof_rows['excess_return'].notna().any()
+            or asof_rows['label_available_at'].notna().any()):
+        raise ValueError('Forward forecast rows must not contain future outcome labels')
     values, _, sessions = _canonical(panel,feature_sets,exchange_sessions)
     values['entry_time'] = pd.to_datetime(values.entry_time,utc=True)
     session = pd.Timestamp(asof_session)

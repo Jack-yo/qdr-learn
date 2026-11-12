@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 from pathlib import Path
 import shutil
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -12,6 +13,12 @@ from quant_research.data.feature_prices import build_split_prices, compare_refer
 from quant_research.data.http import HttpCache, DataUnavailable
 from quant_research.clock import TradingClock
 from quant_research.policy import PolicyError
+
+
+def test_reference_refresh_cannot_claim_offline_source():
+    from quant_research.workflow.feature_price_audit import execute
+    with pytest.raises(ValueError, match='Offline audit cannot refresh'):
+        execute(SimpleNamespace(offline=True, refresh_source_responses=True))
 
 
 @pytest.fixture(scope='module')

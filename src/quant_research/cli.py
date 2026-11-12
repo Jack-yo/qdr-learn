@@ -118,6 +118,8 @@ def main(argv=None):
     feature_prices=commands.add_parser('feature-price-audit',help='Audit split-only features against real SIP reference; never enables execution')
     feature_prices.add_argument('--env-file',type=Path)
     feature_prices.add_argument('--offline',action='store_true')
+    feature_prices.add_argument('--refresh-source-responses',action='store_true',
+                                help='Fetch new action/reference vintages and retain old receipts')
     feature_prices.add_argument('--issuer-documents',action='store_true',help='Also verify reviewed public issuer PDF cases')
     feature_prices.add_argument('--db',type=Path,default=Path('data/real_v21.duckdb'))
     feature_prices.add_argument('--data-dir',type=Path,default=Path('data'))

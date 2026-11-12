@@ -16,12 +16,15 @@ from quant_research.data.split_evidence import precision_diagnostics, review_iss
 
 
 def execute(args):
+    if args.offline and getattr(args, 'refresh_source_responses', False):
+        raise ValueError('Offline audit cannot refresh source responses')
     cutoff = datetime.fromisoformat(args.cutoff) if args.cutoff else None
     raw_root = args.data_dir/'raw'
     bundle = load_real_bundle(args.db, asof=args.asof, cutoff=cutoff, start=args.start, raw_root=raw_root)
     bundle.require('observation')
     meta = bundle.metadata
-    http = HttpCache(raw_root, offline=args.offline)
+    http = HttpCache(raw_root, offline=args.offline,
+                     refresh=getattr(args, 'refresh_source_responses', False))
     # Fetch before setting the default knowledge cutoff. Explicit cutoffs never move.
     ActionProvider(http).events(meta['symbols'], args.action_start, args.action_end)
     reference, pages = split_reference(http, TradingClock(), meta['symbols'], args.start, meta['asof_date_et'])

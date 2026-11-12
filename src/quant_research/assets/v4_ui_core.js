@@ -54,13 +54,12 @@ const toast=(txt)=>{
  el.style.pointerEvents='none';el.innerHTML='<div class="v4-message">'+e(txt)+'</div>';clearTimeout(toast.id);toast.id=setTimeout(()=>el.innerHTML='',5500);
 };
 async function updateStatus(){
- const [sys,daily]=await Promise.all([settle('/api/status'),settle('/api/v1/v4/daily')]);
- const data=sys.ok?sys.data:{};
- const d=data.dataset||{};
+ const [daily,fresh]=await Promise.all([settle('/api/v1/v4/daily'),settle('/api/v1/v4/freshness')]);
  const latest=(daily.ok?daily.data.runs||[]:[])[0]||null;
- $('#v4-trading-date').textContent=d.asof_date_et||latest?.session_date_et||'—';
- $('#v4-source-status').textContent=(data.prices||[]).length?'已接入真实观察':'待验证';
- $('#v4-model-status').textContent=latest?.status||'尚无日终归档';
+ const clock=fresh.ok?fresh.data:null;
+ $('#v4-trading-date').textContent=clock?.asof_session||latest?.session_date_et||'—';
+ $('#v4-source-status').textContent=clock?.modules?.market_observation?.freshness_status||'待验证';
+ $('#v4-model-status').textContent=latest?.session_date_et===clock?.asof_session?latest.status:'当前批次未完成';
 }
 async function show(page){
  const key=pages[page]?page:'overview';state.page=key;const epoch=++state.epoch;

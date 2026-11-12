@@ -88,7 +88,7 @@ def assess(db, prices, raw_root, asof, cutoff):
     when = pd.to_datetime(prices.available_at, utc=True)
     signal_times = pd.to_datetime([clock.close(d) + clock.delay for d in pd.to_datetime(prices.date).dt.date], utc=True)
     history_known = bool((when <= signal_times).all())
-    missing["historical_time"] = [] if history_known else ["historic prices first observed after their signal times"]
+    missing["historical_time"] = [] if history_known else ["historical publication-time evidence: historic prices first observed after their signal times"]
 
     registered = set()
     if _relation(db, "securities"):

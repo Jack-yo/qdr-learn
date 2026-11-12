@@ -148,7 +148,7 @@ def snapshot(root,source='alpaca',database=None,asof=None,cutoff=None):
               "limitations": ["当前20只ETF列表不是历史PIT股票池", "缺少退市证券和永久证券映射",
                               "Yahoo价格为拆股调整口径，不能作原始成交价", "SEC快照不是历史PIT基本面",
                               "2025起最终测试期封存；页面只展示同期及过去观察值"]}
-    result['limitations']=['当前显式ETF列表不是历史PIT股票池','永久身份、退市和完整公司行为仍未验收','raw价格的跨期收益需要公司行为调整，缺失时显示N/A','SEC财务候选不具备PIT资格','2025起最终策略测试保持封存']
+    result['limitations']=['当前显式ETF列表不是历史PIT股票池','永久身份、退市和完整公司行为仍未验收','raw价格的跨期收益需要公司行为调整，缺失时显示N/A','SEC财务候选不具备PIT资格','旧 baseline 的 2025+ 封存仅约束旧实验；V4 可使用最新合格数据']
     if database.exists():
         try:
             bundle=load_real_bundle(database,source,asof,cutoff,raw_root=root/'data/raw')
@@ -441,6 +441,14 @@ def handler(console):
                     return self.send(409, exc.payload())
                 except (OSError, ValueError):
                     return self.send(409, {'status':'BLOCKED', 'code':'READINESS_LOCAL_EVIDENCE_UNAVAILABLE'})
+            if path == '/api/v1/v4/freshness':
+                if urlsplit(self.path).query:
+                    return self.send(400, {'status':'BLOCKED','code':'FRESHNESS_QUERY_INVALID'})
+                from .workflow.v4_freshness import current_v4_freshness
+                try:
+                    return self.send(200, current_v4_freshness(console.root))
+                except (OSError, ValueError, duckdb.Error):
+                    return self.send(409, {'status':'BLOCKED','code':'FRESHNESS_EVIDENCE_UNAVAILABLE'})
             if path == '/api/v1/signals/frozen':
                 from .workflow.frozen_decisions import inspect_frozen_decision
                 query=parse_qs(urlsplit(self.path).query,keep_blank_values=True)
