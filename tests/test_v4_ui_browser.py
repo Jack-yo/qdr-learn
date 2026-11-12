@@ -63,7 +63,10 @@ def _payload(path: str):
                                     "config":{"template":"momentum"}}],
                 "experiments":[]}
     if route=="/api/v1/factor-lab/compare":
-        return {"matched_pairs":100,"pearson":0.25,"spearman":0.21}
+        return {"status":"DESCRIPTIVE_COMPARISON_ONLY",
+                "rows":[{"partition":"validation","horizon":3,
+                         "rank_ic_mean_left":0.03,"rank_ic_mean_right":0.06,
+                         "delta_rank_ic":0.03,"label_pair_coverage_left":0.65}]}
     if route=="/api/v1/strategies":
         return {"strategies":[{"id":"S1","name":"反转组合","version":1,
                                "status":"FROZEN","config":{"strategy":{"horizon":3}}}],
@@ -220,8 +223,8 @@ def test_factor_comparison_and_risk_tabs(browser,local_app):
         page.locator("#v4-compare-left").select_option("F1")
         page.locator("#v4-compare-right").select_option("F2")
         page.locator("#v4-compare-run").click()
-        assert page.get_by_text("pearson").count()>=1
-        assert page.get_by_text("0.25").count()>=1
+        assert page.get_by_text("IC增量").count()>=1
+        assert page.get_by_text("0.0300").count()>=1
     finally:
         page.close()
     risk=_open(browser,local_app,"risk")
