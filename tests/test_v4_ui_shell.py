@@ -15,13 +15,14 @@ APP = ROOT / 'src/quant_research'
 SHELL = APP / 'v4_shell.html'
 CORE = 'v4_ui_core.js'
 PAGES = ('v4_ui_pages_a.js','v4_ui_pages_b.js','v4_ui_pages_c.js')
+FIDELITY = 'v4_ui_fidelity.js'
 
 
 def test_approved_six_page_hierarchy_is_present():
     html = SHELL.read_text(encoding='utf-8')
     for page in ('overview','market','style','lab','screen','risk','data'):
         assert 'data-page="'+page+'"' in html
-    for name in (CORE,*PAGES):
+    for name in (CORE,*PAGES,FIDELITY):
         assert '/assets/'+name in html
     assert 'id="v4-trading-date"' in html
     assert 'id="v4-source-status"' in html
@@ -34,7 +35,7 @@ def test_approved_six_page_hierarchy_is_present():
 
 def test_workspaces_protect_real_research_data_and_navigation():
     root=(APP/'assets'/CORE).read_text(encoding='utf-8')
-    script=''.join((APP/'assets'/name).read_text(encoding='utf-8') for name in PAGES)
+    script=''.join((APP/'assets'/name).read_text(encoding='utf-8') for name in (*PAGES,FIDELITY))
     for page in ('overview','market','style','lab','screen','risk','data'):
         assert 'pages.'+page+'=' in script
     for url in ('/api/v1/v4/daily','/api/v1/v4/forecasts',
@@ -49,7 +50,7 @@ def test_workspaces_protect_real_research_data_and_navigation():
 
 
 @pytest.mark.skipif(shutil.which('node') is None, reason='Node.js not installed')
-@pytest.mark.parametrize('name',(CORE,*PAGES))
+@pytest.mark.parametrize('name',(CORE,*PAGES,FIDELITY))
 def test_javascript_syntax(name):
     asset=APP/'assets'/name
     result=subprocess.run(['node','--check',str(asset)],capture_output=True,
@@ -61,7 +62,31 @@ def test_server_default_entry_and_legacy_tools():
     script=(APP/'web.py').read_text(encoding='utf-8')
     assert 'if path in {"/","/studio"}' in script
     assert 'v4_shell.html' in script
-    for name in (CORE,*PAGES):
+    for name in (CORE,*PAGES,FIDELITY):
         assert '/assets/'+name in script
     assert 'app_shell.html' in script
     assert 'src="http://' not in SHELL.read_text(encoding='utf-8')
+
+
+def test_fidelity_workspace_implements_real_tabs_and_stock_master_detail():
+    source=(APP/'assets'/FIDELITY).read_text(encoding='utf-8')
+    shell=SHELL.read_text(encoding='utf-8')
+    assert 'v4_ui_fidelity.js' in shell
+    assert '.v4-subtab[aria-selected="true"]' in shell
+    assert '.v4-tabpanel[hidden]' in shell
+    for name in ('market','style','lab','screen','risk'):
+        assert " "+name+":" in source
+    for tab in ('状态识别','风险驱动','预测验证','ETF 代理观察','领先性验证',
+                '因子有效性','因子相关性','候选股票与解释',
+                '样本外实验','实时预警','交易复盘'):
+        assert tab in source
+    assert 'data-v4-stock' in source
+    assert 'v4-stock-detail' in source
+    assert '/api/v1/strategies/' in source
+    assert '/api/v1/factor-lab/compare' in source
+    assert 'calibrationHistory' in source
+    assert 'historicalTransitions' in source
+    assert 'RETROSPECTIVE_CURRENT_VINTAGE_NOT_PIT_NOT_FORWARD' in (
+        APP/'web.py').read_text(encoding='utf-8')
+    assert 'Math.random' not in source
+    assert 'demoProbabilities' not in source
