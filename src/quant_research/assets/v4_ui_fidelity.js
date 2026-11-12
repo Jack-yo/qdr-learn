@@ -79,6 +79,47 @@ function studyNote(text){return note(text);}
 function asList(items,emptyTitle,body){
  return items.length?items.join(''):empty(emptyTitle,body);
 }
+
+function calibrationHistory(summary){
+ const buckets=(summary?.calibration||[]).filter(x=>
+  actual(x.mean_probability)&&actual(x.observed_up_rate)&&Number(x.count)>=5)
+  .sort((a,b)=>Number(a.bin)-Number(b.bin));
+ if(!buckets.length)return empty('无足够的历史概率分箱',
+  '需至少每桶 5 次经核对的已成熟结果才能画出实际频率。');
+ return '<div class="v4-calibration-rows">'+buckets.map(x=>{
+  const estimate=Math.max(0,Math.min(100,Number(x.mean_probability)*100));
+  const observed=Math.max(0,Math.min(100,Number(x.observed_up_rate)*100));
+  return '<div class="v4-calibration-row"><div><b>'+Math.round(Number(x.bin)*20)+'%–'+
+    Math.round((Number(x.bin)+1)*20)+'%</b><small>n='+n(x.count,0)+'</small></div>'+
+    '<div class="v4-calibration-bar"><div style="width:'+estimate.toFixed(2)+'%"></div></div>'+
+    '<div class="v4-calibration-bar observed"><div style="width:'+observed.toFixed(2)+'%"></div></div>'+
+    '<span>'+estimate.toFixed(1)+'% / '+observed.toFixed(1)+'%</span></div>';
+ }).join('')+'</div>'+note('每组蓝色为预测概率，青色为实际发生率。历史探索结果不得称作当前已校准预测。');
+}
+function historicalTransitions(history){
+ const allowed=['UP_LOW_VOL','UP_HIGH_VOL','DOWN_LOW_VOL','DOWN_HIGH_VOL'];
+ const ordered=(history||[]).filter(x=>allowed.includes(x.market_state)&&x.date)
+   .sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+ if(ordered.length<40)return empty('不足以推导历史五日状态转移',
+   '至少需要 40 条有明确市场状态的真实历史观察。');
+ const tally={};for(const from of allowed)tally[from]=[0,0,0,0];
+ for(let i=0;i+5<ordered.length;i++){
+  const a=ordered[i],b=ordered[i+5];
+  const elapsed=(Date.parse(b.date)-Date.parse(a.date))/86400000;
+  if(!(elapsed>=5&&elapsed<=12))continue;
+  tally[a.market_state][allowed.indexOf(b.market_state)]++;
+ }
+ if(Object.values(tally).reduce((sum,counts)=>sum+counts.reduce((a,b)=>a+b,0),0)<20)
+  return empty('有效转移样本偏少','仅计算实际相隔五个观察交易日的样本，不对缺口补值。');
+ return '<div class="v4-transition-table"><table class="table"><thead><tr><th>历史当前状态 ↓</th>'+
+  allowed.map(x=>'<th>'+e(x)+'</th>').join('')+'</tr></thead><tbody>'+
+  allowed.map(from=>{
+   const total=tally[from].reduce((a,b)=>a+b,0);
+   return '<tr><th>'+e(from)+' (n='+total+')</th>'+tally[from].map(v=>
+     '<td>'+(total>=5?(v/total*100).toFixed(1)+'%':'—')+'</td>').join('')+'</tr>';
+  }).join('')+'</tbody></table></div>'+note('这是历史经验转移频率，分母为该起始状态有效样本；不是经验证的未来状态转移概率。');
+}
+
 function overview(original){
  const a=unwrap(original.html);
  const market=a.take('市场状态预测');
@@ -103,6 +144,8 @@ async function market(original){
  const r=await settle('/api/v1/market/research?horizon='+Number(state.marketHorizon||3));
  const data=r.ok?r.data:null,states=Array.isArray(data?.states)?data.states:[];
  const current=states[0]||null;
+ const history=Array.isArray(data?.state_history)?data.state_history:[];
+ const summary=data?.summary||{};
  const factors=[
   ['市场 1 日收益','market_return_1','收益'],
   ['市场 5 日收益','market_return_5','收益'],
@@ -131,23 +174,36 @@ async function market(original){
     '<button type="button" data-v4-switch-market="3" class="btn">H3</button>'+
     '<button type="button" data-v4-switch-market="5" class="btn">H5</button></div>',
     '期限切换保持原始历史研究口径');
- const transition=box('未来状态转移 · 数据约束',
-   empty('尚无来源核验的状态转移矩阵',
-     '需要逐交易日完整状态序列与事前冻结的状态划分阈值；不能把演示矩阵当作实际转移概率。'),
-    '历史频率 ≠ 已校准未来转移预测');
+ const transition=box('未来状态转移 · 历史经验矩阵',
+   historicalTransitions(history),
+   '按 5 个观察交易日 · 非前向概率');
  const regime=box('市场状态与历史演变',
-    current?row('历史市场状态',e(current.market_state||'未知'))+
+    current?((history.filter(x=>actual(x.market_return_20)).length>1?
+       svgLine(history.filter(x=>actual(x.market_return_20)).map(x=>x.market_return_20),
+       '#57d5b8',190):'')+
+     row('历史市场状态',e(current.market_state||'未知'))+
      row('研究观测日期',date(current.date||data?.manifest?.asof_date_et))+
      row('输入数据可用时间',e(current.state_available_at||'—'))+
      row('市场 20 日收益',actual(current.market_return_20)?signed(current.market_return_20):'—')+
-     row('市场 20 日波动',actual(current.market_vol_20)?pct(current.market_vol_20):'—'):
+     row('市场 20 日波动',actual(current.market_vol_20)?pct(current.market_vol_20):'—')):
      empty('尚无可核验的市场状态','需要已完成的历史状态观测记录。'),
     '真实历史状态');
- const validation=box('样本外概率可靠性 · 校准曲线',
-    empty('暂无可绘制的前向可靠性曲线',
-     '需要事前冻结概率及相应已成熟的真实收益标签；当前研究报告不等于连续前向校准。')+
-    studyNote('正式评估需展示 Brier / 基准 Brier、Log Loss、逐概率桶实际频率、样本数与时间块置信区间。'),
-    '拒绝示意命中率');
+ const metrics=(summary.direction||[])[0]||null;
+ const downside=(summary.downside||[])[0]||null;
+ const validation=box('历史样本外概率可靠性 · 分箱与基准',
+   (metrics?'<div class="v4-workspace-pair">'+
+     titleNumber('上涨 Brier',numeric(metrics.brier))+
+     titleNumber('基础概率 Brier',numeric(metrics.naive_brier))+'</div>'+
+     row('上涨 Log Loss',numeric(metrics.log_loss))+
+     row('基础概率 Log Loss',numeric(metrics.naive_log_loss))+
+     row('历史验证日期数',numeric(metrics.dates,0))+
+     row('研究结果状态',badge('历史探索 · 不获前向资格','amber')):
+     empty('暂无历史预测误差报告','市场研究尚未返回已核验的历史样本外统计。'))+
+   calibrationHistory(summary)+
+   (downside?row('显著下跌 Brier / 朴素基线',
+    numeric(downside.brier)+' / '+numeric(downside.naive_brier)):'')+
+   studyNote('这是历史价格代理数据的回顾评估，不构成独立的真实前向预测概率校准证明。'),
+   '历史研究对照 · 非正式实盘概率');
  const parameters=box('模型参数与可解释性',
     table(['模型','因子集合','参数来源','实际系数'],[
       ['M0','market_return_5, market_vol_20','训练期 Logistic / Ridge','—'],
@@ -329,13 +385,14 @@ async function screen(original){
  const selected=box('所选股票 · 个股因子解释',
   '<div id="v4-stock-detail">'+candidateDetail(candidate)+'</div>',
   '选择股票实时联动');
- const candidates=box('当日候选股票 · 因子排名',
+ const candidates=box('历史候选股票 · 因子排名',
   selector+
   (ranks.length?table(['股票','综合分位','行业','有效因子','状态'],candidateRows(ranks)):
    empty('尚无当前策略可用排名',composite?.ok?
     '策略没有合格的真实横截面复合排名。':
     '需要保存策略及已完成的共同交易日因子实验，或核查当前数据来源。'))+
-  note('只列出真实策略返回的候选；不自动将历史排名称为可执行股票计划。'),
+  row('实际研究观察日',date(composite?.ok?composite.data.asof_date_et:null))+
+  note('此排名来自历史验证期的实际样本，非当日可交易股票；不自动当作 Alpha 未来收益预测。'),
   '选择候选展示右侧因子拆解');
  const planIdx=index[1].ok?(index[1].data.records||[]):[];
  const planRow=planIdx.find(x=>x.status!=='CORRUPT_RESEARCH_PLAN')||null;
@@ -397,12 +454,13 @@ async function risk(original){
      date(x.session_date_et),short(x.plan_identity,18),e(x.status||'—')])):
      empty('没有完成期限的研究复盘','先事前冻结研究计划，再按真实价格和来源回执检验后续结果。'),
     '不把回测价格路径当真实券商成交');
+ const equityHistory=a.take('逐日权益');
  const panels=[
-   stack(layout(a.take('当前模拟持仓'),a.take('组合风险度量')),a.take('逐日权益')),
+   stack(layout(a.take('当前模拟持仓'),a.take('组合风险度量'))),
    layout(analysis,a.take('来源与模型可靠性')),
    stack(alerts),
    layout(a.take('仓位与退出规则'),exitPlans),
-   layout(a.take('逐日权益'),replay)
+   layout(equityHistory,replay)
  ];
  return {html:panelHtml('risk',a.heading+a.hero,panels)};
 }
