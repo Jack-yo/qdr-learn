@@ -80,6 +80,26 @@ function asList(items,emptyTitle,body){
  return items.length?items.join(''):empty(emptyTitle,body);
 }
 
+
+function realQuintileChart(items){
+ const good=items.filter(x=>actual(x.value));
+ if(good.length<2)return '';
+ const width=540,height=200,mid=94,scale=70/Math.max(1e-10,...good.map(x=>Math.abs(Number(x.value))));
+ const parts=['<svg class="v4-factor-chart" viewBox="0 0 '+width+' '+height+
+   '" role="img" aria-label="实际历史因子分组未来收益图，仅用于历史研究">'+
+   '<line x1="18" x2="'+(width-18)+'" y1="'+mid+'" y2="'+mid+'" stroke="#546a84" stroke-width="1.2"/>'];
+ for(const item of items){
+  const index=item.bucket-1,x=40+index*103,v=actual(item.value)?Number(item.value):null;
+  const bh=v===null?0:Math.abs(v)*scale,y=v===null?mid:(v>=0?mid-bh:mid);
+  if(v!==null)parts.push('<rect x="'+x+'" y="'+y.toFixed(2)+'" width="62" height="'+
+   bh.toFixed(2)+'" rx="3" fill="'+(v>=0?'#50c6af':'#e58793')+'"/>');
+  parts.push('<text x="'+(x+31)+'" y="180" fill="#a8bad2" font-size="12" text-anchor="middle">Q'+item.bucket+'</text>');
+  if(v!==null)parts.push('<text x="'+(x+31)+'" y="'+(v>=0?Math.max(15,y-8):Math.min(167,y+bh+15)).toFixed(2)+
+    '" fill="#e0edfb" font-size="11" text-anchor="middle">'+(v*100).toFixed(2)+'%</text>');
+ }
+ return parts.join('')+'</svg>';
+}
+
 function calibrationHistory(summary){
  const buckets=(summary?.calibration||[]).filter(x=>
   actual(x.mean_probability)&&actual(x.observed_up_rate)&&Number(x.count)>=5)
@@ -120,9 +140,17 @@ function historicalTransitions(history){
   }).join('')+'</tbody></table></div>'+note('这是历史经验转移频率，分母为该起始状态有效样本；不是经验证的未来状态转移概率。');
 }
 
-function overview(original){
+async function overview(original){
  const a=unwrap(original.html);
- const market=a.take('市场状态预测');
+ const historical=await settle('/api/v1/market/research?horizon=3');
+ const history=historical.ok&&Array.isArray(historical.data.state_history)?
+   historical.data.state_history.filter(x=>actual(x.market_return_20)):[];
+ const chart=history.length>=2?
+   '<div class="v4-overview-trend"><div class="v4-chart-caption">SPY 20日历史收益趋势 · '+date(history[0].date)+' 至 '+date(history.at(-1).date)+'</div>'+
+    svgLine(history.map(x=>x.market_return_20),'#50cab1',192)+
+    note('真实历史观察趋势，不属于最新 H1/H3/H5 前向概率预测。')+'</div>':'';
+ const baseMarket=a.take('市场状态预测');
+ const market=chart?baseMarket.replace(/<\/section>\s*$/,chart+'</section>'):baseMarket;
  const style=a.take('经典因子');
  const alpha=a.take('Alpha 研究');
  const risk=a.take('组合持仓');
@@ -303,7 +331,7 @@ async function lab(original){
  const fac=res.ok?(res.data.factor_versions||[]):[];
  const exp=res.ok?(res.data.experiments||[]):[];
  const completed=exp.filter(x=>x.status==='COMPLETED');
- const selected=completed[0]||null;
+ const selected=completed.find(x=>(x.config?.factor_version_id||x.factor_version_id)===state.factorVersion)||completed[0]||null;
  const detail=selected?await settle('/api/v1/factor-lab/experiments/'+encodeURIComponent(selected.id)):null;
  const report=detail?.ok?detail.data.result:null;
  const validation=Array.isArray(report?.summary)?report.summary.filter(x=>x.partition==='validation'):[];
@@ -323,7 +351,7 @@ async function lab(original){
   value:h3['q'+i+'_mean_forward_price_return']})):[];
  const outcome=box('历史价格代理 · 未来 3 日因子分组收益',
    quintiles.some(x=>actual(x.value))?
-    table(['因子组','事后价格代理收益'],quintiles.map(x=>[
+    realQuintileChart(quintiles)+table(['因子组','事后价格代理收益'],quintiles.map(x=>[
       'Q'+x.bucket,actual(x.value)?signed(x.value):'—']))+
     row('Q5 − Q1 价格收益差',actual(h3.q5_minus_q1_price_return_spread)?
       signed(h3.q5_minus_q1_price_return_spread):'—')+
@@ -422,7 +450,8 @@ async function screen(original){
   settle('/api/v1/strategies'),settle('/api/v1/v4/plans'),
   settle('/api/v1/backtests/verified'),settle('/api/v1/v4/research/runs')
  ]);
- const strategies=index[0].ok?(index[0].data.strategies||[]):[];
+ const allStrategies=index[0].ok?(index[0].data.strategies||[]):[];
+ const strategies=allStrategies.filter(x=>Array.isArray(x.config?.strategy?.factors)&&x.config.strategy.factors.length>=2);
  if(!strategies.some(x=>String(x.id)===view.strategy))view.strategy=strategies[0]?.id||null;
  const composite=view.strategy?await settle('/api/v1/strategies/'+encodeURIComponent(view.strategy)+'/composite'):null;
  const ranks=composite?.ok?(composite.data.latest_composite_ranking||[]):[];
@@ -438,9 +467,9 @@ async function screen(original){
  const candidates=box('历史候选股票 · 因子排名',
   selector+
   (ranks.length?table(['股票','综合分位','行业','有效因子','状态'],candidateRows(ranks)):
-   empty('尚无当前策略可用排名',composite?.ok?
-    '策略没有合格的真实横截面复合排名。':
-    '需要保存策略及已完成的共同交易日因子实验，或核查当前数据来源。'))+
+   empty('尚无已验证的历史多因子排名',composite?.ok?
+    '策略没有可审查的真实横截面复合排名。':
+    strategies.length?'请核对各因子实验的共同交易日及数据来源。':'需要至少一个由两个以上已完成因子实验组成的策略。'))+
   row('实际研究观察日',date(composite?.ok?composite.data.asof_date_et:null))+
   note('此排名来自历史验证期的实际样本，非当日可交易股票；不自动当作 Alpha 未来收益预测。'),
   '选择候选展示右侧因子拆解');
