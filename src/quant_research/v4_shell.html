@@ -50,6 +50,23 @@ textarea{min-height:84px;resize:vertical}
 @media(max-width:1300px){aside{width:232px}.content{padding:20px}.grid.cols4{grid-template-columns:repeat(2,minmax(0,1fr))}.top-status{gap:12px}.top-status span{padding-right:12px}}
 @media(max-width:800px){body{overflow:auto}.app{display:block;height:auto;min-height:100vh}aside{height:auto;width:100%;display:flex;flex-direction:row;flex-wrap:wrap;padding:12px;gap:7px;border-bottom:1px solid #33445b;border-right:none}.brand{width:100%;padding:0 8px 10px}.side-section,.sidefoot{display:none}.nav{font-size:12px;margin:0;padding:9px}.nav small{display:none}.sub-nav{padding:9px;font-size:11px}.topbar{height:auto;min-height:55px;padding:12px;gap:7px}.top-status{gap:8px;flex-wrap:wrap}.top-status span{border:0;padding:0}.content{overflow:visible;padding:16px}.heading{flex-wrap:wrap}.title{font-size:22px}.grid.cols2,.grid.cols3,.grid.cols4,.v4-form{grid-template-columns:1fr!important}}
 
+/* Source-derived probability diagnostics; no random or example numbers. */
+.v4-calibration-rows{display:flex;flex-direction:column;gap:10px;margin:14px 0}
+.v4-calibration-row{display:grid;grid-template-columns:100px minmax(75px,1fr) minmax(75px,1fr) 130px;gap:10px;align-items:center}
+.v4-calibration-row>div:first-child{display:flex;flex-direction:column;gap:3px;font-size:11px;color:#cce0f7}
+.v4-calibration-row small{color:#8da5be;font-weight:400}
+.v4-calibration-row>span{font-size:11px;text-align:right;color:#aec9dc;font-variant-numeric:tabular-nums}
+.v4-calibration-bar{height:10px;background:#223750;border-radius:7px;overflow:hidden}
+.v4-calibration-bar>div{height:100%;background:#638ef1;border-radius:7px}
+.v4-calibration-bar.observed>div{background:#46c7ac}
+.v4-transition-table{overflow-x:auto}
+.v4-transition-table .table{min-width:570px}
+.v4-transition-table th{font-size:10px;word-break:break-word}
+.v4-quick-actions{display:flex;align-items:center;flex-wrap:wrap;gap:9px;margin:11px 0 16px}
+.v4-quick-actions>a{color:#a4c2e6;border:1px solid #2a415b;background:#17283d;padding:9px 12px;border-radius:8px;font-size:12px;white-space:nowrap}
+.v4-quick-actions>a:hover{background:#254266;color:#fff;text-decoration:none}
+@media(max-width:850px){.v4-calibration-row{grid-template-columns:85px minmax(40px,1fr) minmax(40px,1fr)}.v4-calibration-row>span{grid-column:2/4;text-align:left}}
+
 /* Approved high-fidelity workspaces: same card language, task-oriented sub-navigation. */
 .content{overflow-y:auto;overscroll-behavior:contain;min-height:0;scrollbar-color:#344c69 #101b2d}
 .v4-subtabs{display:flex;gap:4px;flex-wrap:wrap;margin:18px 0 14px;border-bottom:1px solid #34465e;padding:0 3px}
