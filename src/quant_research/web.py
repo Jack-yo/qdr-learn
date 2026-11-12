@@ -71,7 +71,22 @@ def market_research(root, horizon, asof=None):
         if asof:
             predictions = predictions.loc[predictions.date.eq(pd.Timestamp(asof))]
             states = states.loc[states.date.eq(pd.Timestamp(asof))]
-        state_fields = ['date', 'market_return_20', 'market_vol_20', 'market_state', 'state_available_at']
+        # The research UI needs the actual historical features, not inferred
+        # values or simulated illustrations. Expose only vetted market and
+        # tradeable-ETF style observation columns from the verified artifact.
+        state_fields = ['date', 'market_state', 'state_available_at']
+        state_fields += [field for field in (
+            'market_return_1', 'market_return_5', 'market_return_20',
+            'market_vol_5', 'market_vol_20', 'market_vol_ratio',
+            'market_concentration_5', 'market_credit_5',
+            'market_sector_dispersion', 'market_sector_mean_correlation',
+            'market_breadth_etf_proxy',
+            'style_small_relative_return_5d', 'style_small_relative_return_20d',
+            'style_value_relative_return_5d', 'style_value_relative_return_20d',
+            'style_momentum_relative_return_5d', 'style_momentum_relative_return_20d',
+            'style_quality_relative_return_5d', 'style_quality_relative_return_20d',
+            'style_low_vol_relative_return_5d', 'style_low_vol_relative_return_20d',
+        ) if field in states]
         return {
             'status': manifest['status'], 'horizon': horizon, 'requested_date': asof,
             'manifest': {name: manifest[name] for name in (
@@ -80,6 +95,8 @@ def market_research(root, horizon, asof=None):
                 'market_model_usage', 'prediction_rows', 'sealed_test_used')},
             'predictions': json.loads(predictions.sort_values('date').tail(1).to_json(orient='records', date_format='iso')),
             'states': json.loads(states[state_fields].tail(1).to_json(orient='records', date_format='iso')),
+            'state_history': json.loads(states[state_fields].tail(126).to_json(orient='records', date_format='iso')),
+            'state_history_scope': 'RETROSPECTIVE_CURRENT_VINTAGE_NOT_PIT_NOT_FORWARD',
             'summary': {key: [row for row in rows if row['horizon'] == horizon] for key, rows in summary.items()},
             'artifacts': {name: (path.parent / name).relative_to(root).as_posix() for name in required[3:]},
         }
