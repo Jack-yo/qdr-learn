@@ -9,7 +9,7 @@
 ## 本轮实际交付
 
 - **主入口**：`http://127.0.0.1:8766/` 和 `/studio`，均打开新 `src/quant_research/v4_shell.html`。
-- **旧版完整功能**：原 `/overview`、`/market`、`/styles`、`/factors`、`/strategies`、`/backtests`、`/paper`、`/data` 等保留。为防止影响原有复杂操作，旧页面有「返回 V4 主工作台」入口。
+- **已清理重复页面**：旧 `/overview`、`/market`、`/styles` 现在统一 302 跳转新版 `/studio#overview`、`/studio#market`、`/studio#style`，不再加载旧 UI。`/factors`、`/strategies`、`/backtests`、`/signals`、`/paper`、`/data` 暂保留实际高级操作（版本、冻结、预检、回测与数据维护），这些功能完全迁入 V4 前不能安全移除。
 - **视觉系统**：`v4_shell.html` 复用已确认样稿的深色视觉框架，补充响应式滚动、表单、状态与交互反馈；不覆盖旧站样式，不删除已有工具。
 - **数据和交互**：`v4_ui_core.js` 和 `v4_ui_pages_a.js / b.js / c.js` 实现页面、导航、无模拟值的占位、服务端实际 API 读取与异常状态。
 
@@ -62,3 +62,13 @@
 - 可在开发环境运行：uv run --locked pytest -q tests/test_v4_ui_shell.py tests/test_multifactor_contract.py；安装 Playwright + Chromium 后运行 uv run --locked pytest -q tests/test_v4_ui_browser.py。
 - **尚未在最新完整仓库运行全量 pytest、真实 Chrome UI 回归和实际 PIT 数据对接，不得宣称测试已通过。**
 - 页面布局与交互路径补齐，不代表量化预测系统整体完成：L1 前向预测参数归档和可靠性验证、L1/L2→L3 正式模型编排、完整 PIT 数据生成、严格原价回测和连续前向模拟账本仍未完成。缺证据就显示空态，不能填原设计演示概率或虚拟收益。
+
+
+## 2026-11-12 · 无用静态页面删除与入口收敛
+
+- 从当前运行包 src/quant_research 删除早期独立单页：web.html、market.html、styles.html、factor_lab.html、strategies.html、backtests.html、paper.html、data.html、daily_observation.html。这些页面不是 HTTP 服务实际使用的模板。
+- 从历史归档包 src/quant_research_v1 删除 6 个重复静态页面：web.html、market.html、styles.html、factor_lab.html、strategies.html、daily_observation.html。只清理页面副本，暂不删除历史研究源代码或其算法文件。
+- 旧常用入口 /overview、/market、/styles 变成 302 重定向到 V4 工作台对应 hash；/ 和 /studio 继续唯一使用 v4_shell.html。
+- 必须保留 app_shell.html、assets/studio.js、assets/studio.css 和高级工具 URL，直到其策略冻结/资格预检、合格回测审阅、账户及数据维护流程完全迁移。此处是有依赖的代码，不应为了减少文件数而提前删除。
+- 更新 tests/test_web.py，检查重定向后新 UI 生效、未使用的 .html 返回 404、仍有工作流的旧工具返回旧控制台；生产 API 路由不变。
+- 仍待最新完整环境运行 pytest 和浏览器交互回归，因此只能声明 GitHub 删除及路由修改已提交，不能声称所有运行时验证通过。
