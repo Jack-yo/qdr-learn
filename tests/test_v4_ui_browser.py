@@ -36,7 +36,10 @@ def _payload(path: str):
                    "market_vol_ratio":0.765,
                    "style_small_relative_return_5d":0.004,
                    "style_small_relative_return_20d":0.015}],
-        "state_history":[],
+        "state_history":[
+            {"date":"2024-12-26","market_state":"UP_LOW_VOL","market_return_20":0.012},
+            {"date":"2024-12-27","market_state":"UP_LOW_VOL","market_return_20":0.018},
+            {"date":"2024-12-30","market_state":"UP_LOW_VOL","market_return_20":0.023}],
         "summary":{"direction":[{"brier":0.22,"naive_brier":0.24,
                                  "log_loss":0.65,"naive_log_loss":0.69,
                                  "dates":63}],
@@ -224,6 +227,7 @@ def test_overview_research_flow_and_market_validation(browser,local_app):
     page=_open(browser,local_app,"overview")
     try:
         assert page.locator(".v4-workflow-step").count()==5
+        assert page.locator(".v4-overview-trend .v4-spark").count()==1
         page.locator("#v4-run-observation").click()
         assert page.get_by_text("已提交日终观察").count()>=1
         page.locator("#nav-market").click()
