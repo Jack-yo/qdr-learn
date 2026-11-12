@@ -49,5 +49,42 @@ textarea{min-height:84px;resize:vertical}
 .v4-numbers{font-variant-numeric:tabular-nums}
 @media(max-width:1300px){aside{width:232px}.content{padding:20px}.grid.cols4{grid-template-columns:repeat(2,minmax(0,1fr))}.top-status{gap:12px}.top-status span{padding-right:12px}}
 @media(max-width:800px){body{overflow:auto}.app{display:block;height:auto;min-height:100vh}aside{height:auto;width:100%;display:flex;flex-direction:row;flex-wrap:wrap;padding:12px;gap:7px;border-bottom:1px solid #33445b;border-right:none}.brand{width:100%;padding:0 8px 10px}.side-section,.sidefoot{display:none}.nav{font-size:12px;margin:0;padding:9px}.nav small{display:none}.sub-nav{padding:9px;font-size:11px}.topbar{height:auto;min-height:55px;padding:12px;gap:7px}.top-status{gap:8px;flex-wrap:wrap}.top-status span{border:0;padding:0}.content{overflow:visible;padding:16px}.heading{flex-wrap:wrap}.title{font-size:22px}.grid.cols2,.grid.cols3,.grid.cols4,.v4-form{grid-template-columns:1fr!important}}
+
+/* Approved high-fidelity workspaces: same card language, task-oriented sub-navigation. */
+.content{overflow-y:auto;overscroll-behavior:contain;min-height:0;scrollbar-color:#344c69 #101b2d}
+.v4-subtabs{display:flex;gap:4px;flex-wrap:wrap;margin:18px 0 14px;border-bottom:1px solid #34465e;padding:0 3px}
+.v4-subtab{border:0;border-bottom:3px solid transparent;background:transparent;color:#96a9c2;
+  cursor:pointer;font-size:13px;font-weight:550;padding:13px 19px;min-height:43px}
+.v4-subtab:hover{color:#eff5ff;background:#17283e}
+.v4-subtab.active,.v4-subtab[aria-selected="true"]{color:#dfeeff;border-color:#79afff;background:#192a42;font-weight:750}
+.v4-subtab:focus-visible{outline:2px solid #9bbdff;outline-offset:-2px}
+.v4-tabpanel{padding-bottom:28px;min-height:320px}
+.v4-tabpanel[hidden]{display:none!important}
+.v4-workspace-pair{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);gap:14px;margin:0 0 15px;align-items:start}
+.v4-workspace-stack{display:flex;flex-direction:column;gap:14px;margin-bottom:15px;min-width:0}
+.v4-workspace-pair>.card,.v4-workspace-stack>.card{min-width:0}
+.v4-workspace-aside{display:grid;grid-template-columns:300px minmax(0,1fr);gap:14px;align-items:start}
+.v4-workspace-aside>.card{min-width:0}
+.v4-workspace-main{min-width:0;display:flex;flex-direction:column;gap:14px}
+.v4-workspace-main>.card{min-width:0}
+.v4-workspace-actions{display:flex;gap:8px;align-items:center;margin-top:13px;flex-wrap:wrap}
+.v4-compare-factors{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:10px;align-items:end;margin-bottom:16px}
+.v4-compare-factors .btn{white-space:nowrap}
+.v4-detail-title{font-size:20px;color:#eaf4ff;margin:0 0 14px}
+.v4-symbol-pick{padding:6px 10px;white-space:nowrap}
+.v4-stock-selected{background:#274e67!important;border-color:#6cbaa9!important;color:#f0fffa!important}
+.v4-workspace-details{border:1px solid #2f4057;background:#111c2e;border-radius:10px;padding:10px 14px;margin:15px 0}
+.v4-workspace-details summary{cursor:pointer;color:#b7cae7;font-size:13px;font-weight:650;padding:8px;user-select:none}
+.v4-workspace-details[open] summary{margin-bottom:12px}
+.v4-workflow-steps{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.v4-workflow-step{border-radius:8px;border:1px solid #314662;background:#101f35;
+  padding:15px 10px;display:flex;align-items:center;gap:11px;min-width:0}
+.v4-workflow-step span{font-size:14px;color:#76adf7;font-weight:800}
+.v4-workflow-step b{color:#d0e2f7;font-size:12px}
+.v4-mini-metric{background:#112238;border:1px solid #2a4262;border-radius:9px;padding:12px;min-width:0}
+.v4-mini-metric b{font-size:18px;display:block;margin-top:6px;color:#cbe6ff}
+@media(max-width:1350px){.v4-workspace-aside{grid-template-columns:255px minmax(0,1fr)}.v4-workflow-steps{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:950px){.v4-workspace-pair,.v4-workspace-aside{grid-template-columns:1fr}.v4-workflow-steps{grid-template-columns:repeat(2,minmax(0,1fr))}.v4-compare-factors{grid-template-columns:1fr}}
+@media(max-width:800px){.v4-subtabs{flex-wrap:nowrap;overflow-x:auto}.v4-subtab{white-space:nowrap;padding:12px 13px}.v4-tabpanel{min-height:0}}
 </style></head><body><div class="app"><aside><div class="brand"><div class="brandmark"><b></b><b></b><b></b><b></b></div><div><div class="brandname">QDR <span style="font-weight:450">Studio</span></div><div class="brandsub">美股多层量化研究系统</div></div></div><div class="side-section">WORKSPACE · 工作台</div><div class="nav" id="nav-overview" data-page="overview"><div class="nav-symbol">⌂</div><div>总览<small>每日研究与全局结果</small></div></div><div class="side-section">MODELS · 四层研究体系</div><div class="nav" id="nav-market" data-page="market"><div class="nav-symbol">◈</div><div>01 市场状态预测<small>方向 · 风险 · 状态转移</small></div></div><div class="nav" id="nav-style" data-page="style"><div class="nav-symbol">▥</div><div>02 经典因子跟踪<small>风格 · 收益 · 轮动</small></div></div><div class="nav" id="nav-alpha" data-page="lab"><div class="nav-symbol">◬</div><div>03 个股 Alpha 研究<small>因子 · 选股 · 收益预测</small></div></div><div class="sub-nav" id="nav-lab" data-page="lab">自定义因子实验室</div><div class="sub-nav" id="nav-screen" data-page="screen">因子组选股与模拟回测</div><div class="nav" id="nav-risk" data-page="risk"><div class="nav-symbol">◇</div><div>04 持仓与风控<small>组合 · 敞口 · 风险预警</small></div></div><div class="side-section">INFRASTRUCTURE · 研究基础</div><div class="nav" id="nav-data" data-page="data"><div class="nav-symbol">▤</div><div>数据中心<small>真实数据 · 更新 · 可用性</small></div></div><div class="sidefoot"><div><span class="dot"></span><b style="font-size:12px">真实研究数据</b></div><div class="muted">六个研究工作区 · 统一四层架构<br>仅呈现实际数据与已归档的研究结果。</div></div></aside><main><div class="topbar"><div class="top-label">QDR / QUANT RESEARCH TERMINAL</div><div class="top-status"><span>交易日　<b id="v4-trading-date">—</b></span><span>数据状态　<b id="v4-source-status">核验中</b></span><span>研究任务　<b id="v4-model-status">—</b></span><div class="status-pill">真实证据 · 非券商交易</div><button type="button" id="v4-refresh" aria-label="刷新当前页面" class="btn smallbtn">↻</button></div></div><div class="content" id="content"></div></main></div>
-<div id="v4-toast" role="status" aria-live="polite" style="position:fixed;right:22px;bottom:20px;z-index:50;pointer-events:none"></div><script>window.CONSOLE_TOKEN="__TOKEN__";</script><script src="/assets/v4_ui_core.js" defer></script><script src="/assets/v4_ui_pages_a.js" defer></script><script src="/assets/v4_ui_pages_b.js" defer></script><script src="/assets/v4_ui_pages_c.js" defer></script></body></html>
+<div id="v4-toast" role="status" aria-live="polite" style="position:fixed;right:22px;bottom:20px;z-index:50;pointer-events:none"></div><script>window.CONSOLE_TOKEN="__TOKEN__";</script><script src="/assets/v4_ui_core.js" defer></script><script src="/assets/v4_ui_pages_a.js" defer></script><script src="/assets/v4_ui_pages_b.js" defer></script><script src="/assets/v4_ui_pages_c.js" defer></script><script src="/assets/v4_ui_fidelity.js" defer></script></body></html>
