@@ -132,7 +132,10 @@ function overview(original){
  const flow=['数据更新','因子计算','四层条件预测','候选与风险计划','冻结及前向复盘'];
  const steps='<div class="v4-workflow-steps">'+flow.map((name,i)=>
   '<div class="v4-workflow-step"><span>0'+(i+1)+'</span><b>'+e(name)+'</b></div>').join('')+'</div>';
- const wrap=a.heading+a.hero+
+ const shortcuts='<nav class="v4-quick-actions" aria-label="四层研究工作区">'+
+  [['market','01 市场预测'],['style','02 风格轮动'],['lab','03 因子实验'],['screen','03 选股与回测'],['risk','04 持仓风控']]
+  .map(([id,label])=>'<a href="/studio#'+id+'">'+e(label)+'</a>').join('')+'</nav>';
+ const wrap=a.heading+a.hero+shortcuts+
   layout(market,style)+layout(alpha,risk)+
   box('前向研究闭环 · 日终五阶段',steps, '进展以真实研究任务为准')+
   '<details class="v4-workspace-details"><summary>预测验证、归档状态与数据资格</summary>'+
