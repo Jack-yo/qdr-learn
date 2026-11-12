@@ -61,16 +61,38 @@ def _payload(path: str):
                                     "config":{"template":"reversal"}},
                                    {"id":"F2","name":"动量B","version":1,
                                     "config":{"template":"momentum"}}],
-                "experiments":[]}
+                "experiments":[
+                   {"id":"E1","status":"COMPLETED","config":{"factor_version_id":"F1","source":"yahoo"}},
+                   {"id":"E2","status":"COMPLETED","config":{"factor_version_id":"F2","source":"yahoo"}}]}
+    if route=="/api/v1/factor-lab/experiments/E1":
+        return {"status":"COMPLETED","result":{"summary":[{
+          "partition":"validation","horizon":3,
+          "rank_ic_mean":0.12,"icir_unannualized":0.45,"daily_ic_count":70,
+          "label_pair_coverage":0.8,"q1_mean_forward_price_return":-0.02,
+          "q2_mean_forward_price_return":-0.01,"q3_mean_forward_price_return":0.0,
+          "q4_mean_forward_price_return":0.01,"q5_mean_forward_price_return":0.02}]}}
+    if route=="/api/v1/factor-lab/experiments/E2":
+        return {"status":"COMPLETED","result":{"summary":[{
+          "partition":"validation","horizon":3,
+          "rank_ic_mean":0.03,"icir_unannualized":0.11,"daily_ic_count":60,
+          "label_pair_coverage":0.7,"q1_mean_forward_price_return":-0.01,
+          "q2_mean_forward_price_return":0.005,"q3_mean_forward_price_return":0.02,
+          "q4_mean_forward_price_return":0.015,"q5_mean_forward_price_return":0.0}]}}
     if route=="/api/v1/factor-lab/compare":
         return {"status":"DESCRIPTIVE_COMPARISON_ONLY",
                 "rows":[{"partition":"validation","horizon":3,
                          "rank_ic_mean_left":0.03,"rank_ic_mean_right":0.06,
                          "delta_rank_ic":0.03,"label_pair_coverage_left":0.65}]}
     if route=="/api/v1/strategies":
-        return {"strategies":[{"id":"S1","name":"反转组合","version":1,
-                               "status":"FROZEN","config":{"strategy":{"horizon":3}}}],
-                "factor_experiments":[]}
+        return {"strategies":[
+                   {"id":"S0","name":"旧单因子策略","version":1,"status":"FROZEN",
+                    "config":{"strategy":{"horizon":3,"factor_experiment_id":"E1"}}},
+                   {"id":"S1","name":"反转组合","version":1,"status":"FROZEN",
+                    "config":{"strategy":{"horizon":3,"factors":[
+                      {"factor_experiment_id":"E1","weight":0.4},
+                      {"factor_experiment_id":"E2","weight":0.6}]}}}],
+                "factor_experiments":[{"id":"E1","factor_name":"反转A","factor_version":1},
+                                      {"id":"E2","factor_name":"动量B","factor_version":1}]}
     if route=="/api/v1/strategies/S1/composite":
         return {"status":"RETROSPECTIVE_COMPOSITE_RESEARCH_ONLY",
                 "asof_date_et":"2024-12-30",
@@ -220,6 +242,7 @@ def test_screen_candidate_master_detail_uses_actual_api_scores(browser,local_app
     try:
         page.get_by_role("tab",name="候选股票与解释").click()
         assert page.get_by_text("历史候选股票").count()>=1
+        assert page.locator("#v4-workspace-strategy").input_value()=="S1"
         page.locator('[data-v4-stock="1"]').click()
         detail=page.locator("#v4-stock-detail")
         assert detail.get_by_text("SID-B").count()>=1
@@ -248,3 +271,20 @@ def test_factor_comparison_and_risk_tabs(browser,local_app):
         assert risk.get_by_text("没有完成期限的研究复盘").count()==1
     finally:
         risk.close()
+
+
+
+def test_factor_lab_quintile_chart_tracks_selected_factor_version(browser,local_app):
+    page=_open(browser,local_app,"lab")
+    try:
+        page.get_by_role("tab",name="因子有效性").click()
+        assert page.locator(".v4-factor-chart").count()==1
+        assert page.get_by_text("0.1200").count()>=1
+        page.get_by_role("tab",name="因子实验室").click()
+        page.locator('[data-factor-version="F2"]').click()
+        page.get_by_role("tab",name="因子有效性").click()
+        assert page.locator(".v4-factor-chart").count()==1
+        assert page.get_by_text("0.0300").count()>=1
+        assert page.locator(".v4-factor-chart").get_by_text("2.00%").count()>=1
+    finally:
+        page.close()
