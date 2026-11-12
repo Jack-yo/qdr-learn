@@ -5,7 +5,7 @@ const V=window.V4;
 const {pages,state,$,e,n,pct,signed,date,short,badge,button,link,heading,card,kpi,empty,note,row,table,fail,value,api,settle,grid,toolbar,field,select,svgLine,progress,toast,show}=V;
 const stepper=(steps)=>'<div class="v4-actions" style="margin-bottom:15px">'+steps.map((x,i)=>'<span class="v4-step"><strong>'+(i+1)+'</strong>'+e(x)+'</span>').join('')+'</div>';
 const savedFactor=(x)=>'<button type="button" class="btn smallbtn" data-factor-version="'+e(x.id)+'" style="width:100%;text-align:left;margin-bottom:7px">'+e(x.name)+' · v'+e(x.version)+'　'+badge(x.config?.template||'未知','purple')+'</button>';
-const optionFactor=(x)=>'<div style="padding:9px;border-bottom:1px solid #30445b"><label style="display:flex;gap:10px;align-items:center;cursor:pointer;margin:0"><input type="checkbox" class="v4-factor-pick" data-exp="'+e(x.id)+'" style="width:17px;height:17px"/><span style="flex:1;color:#dce7f5">'+e(x.factor_name)+' · v'+e(x.factor_version)+'</span><input type="number" class="v4-weight" min="1" max="100" value="50" title="权重百分比" style="width:72px" /></label></div>';
+const optionFactor=(x)=>'<div class="v4-factor-config"><label style="display:flex;gap:9px;align-items:center;cursor:pointer;margin:0"><input type="checkbox" class="v4-factor-pick" data-exp="'+e(x.id)+'" style="width:17px;height:17px"/><span style="flex:1;color:#dce7f5">'+e(x.factor_name)+' · v'+e(x.factor_version)+'</span></label><div class="v4-factor-controls"><select class="v4-factor-group" aria-label="'+e(x.factor_name)+' 因子组"><option value="A">A · 超跌程度</option><option value="B">B · 卖压衰竭</option><option value="C">C · 重新转强</option></select><input type="number" class="v4-weight" min="1" max="100" value="50" title="因子权重百分比" aria-label="'+e(x.factor_name)+' 权重" style="width:80px" /><span class="muted">%</span></div></div>';
 const runError=(x)=>'<div class="v4-message">'+e(x?.message||'缺少可用来源或研究资格')+'</div>';
 pages.lab=async()=>{
  const r=await settle('/api/v1/factor-lab/library');
@@ -143,7 +143,12 @@ pages.screen=async()=>{
       card('因子组合配置',
         '<div class="v4-form">'+field('策略名称','v4-strategy-name','text','','maxlength="80" placeholder="超跌衰竭多因子研究"')+
         select('研究持有期','v4-strategy-h',[['1','1日'],['3','3日'],['5','5日']],selected)+'</div>'+
-        '<div class="v4-muted-note" style="margin:12px 0">选择 2–8 个已完成的真实实验，权重之和必须为 100%。</div>'+
+        '<div class="v4-muted-note" style="margin:12px 0">选择 2–8 个已完成的真实实验，按超跌程度、卖压衰竭、重新转强分类，权重之和必须为 100%。组别是研究假设，不代表已验证贡献。</div>'+
+        '<div class="v4-factor-groups">'+
+        '<div>组 A · 超跌程度 <b data-v4-group-total="A">0%</b></div>'+
+        '<div>组 B · 卖压衰竭 <b data-v4-group-total="B">0%</b></div>'+
+        '<div>组 C · 重新转强 <b data-v4-group-total="C">0%</b></div>'+
+        '<div>已选总权重 <b data-v4-weight-total>0%</b></div></div>'+
         (experiments.length?'<div class="v4-table-scroll">'+experiments.map(optionFactor).join('')+'</div>':
            empty('暂无可组合的因子实验','请先在因子实验室完成真实样本研究。'))+
         '<div class="v4-actions" style="margin-top:15px">'+button('v4-save-strategy','保存不可变策略','primary')+
@@ -187,12 +192,31 @@ pages.screen=async()=>{
      '历史价格路径模拟，不是实际成交或已验证的投资回报')+'</div>';
  return {title:'因子组选股与模拟回测',html,mount(){
     $('#v4-strategy-h')?.addEventListener('change',x=>state.screenHorizon=Number(x.target.value));
+    const refreshGroupWeights=()=>{
+      const totals={A:0,B:0,C:0};
+      document.querySelectorAll('.v4-factor-config').forEach(node=>{
+        if(!node.querySelector('.v4-factor-pick')?.checked)return;
+        const group=node.querySelector('.v4-factor-group')?.value;
+        if(Object.hasOwn(totals,group))totals[group]+=Number(node.querySelector('.v4-weight')?.value)||0;
+      });
+      for(const group of ['A','B','C']){
+        const target=document.querySelector('[data-v4-group-total="'+group+'"]');
+        if(target)target.textContent=totals[group].toFixed(1)+'%';
+      }
+      const total=document.querySelector('[data-v4-weight-total]');
+      if(total)total.textContent=(totals.A+totals.B+totals.C).toFixed(1)+'%';
+    };
+    document.querySelectorAll('.v4-factor-config input,.v4-factor-config select')
+      .forEach(node=>node.addEventListener('change',refreshGroupWeights));
+    refreshGroupWeights();
     const action=async(fn)=>{try{await fn()}catch(error){toast(error.message||'请核对研究版本与数据资格')}};
     $('#v4-save-strategy')?.addEventListener('click',()=>action(async()=>{
         const name=$('#v4-strategy-name').value.trim();if(!name)throw Error('需要策略名称');
         const factors=[...document.querySelectorAll('.v4-factor-pick:checked')].map(x=>{
-          const parent=x.closest('label');
-          return {factor_experiment_id:x.dataset.exp,weight:Number(parent.querySelector('.v4-weight').value)/100};
+          const parent=x.closest('.v4-factor-config');
+          return {factor_experiment_id:x.dataset.exp,
+            group:parent.querySelector('.v4-factor-group').value,
+            weight:Number(parent.querySelector('.v4-weight').value)/100};
         });
         if(factors.length<2||factors.length>8)throw Error('必须选择2至8个已完成因子');
         if(factors.some(x=>!Number.isFinite(x.weight)||x.weight<=0)||
