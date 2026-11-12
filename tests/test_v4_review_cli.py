@@ -97,3 +97,34 @@ def test_explicit_research_budget_never_reads_a_real_paper_account(monkeypatch,t
     assert seen[0]['status']=='EXPLICIT_EMPTY_RESEARCH_BUDGET'
     assert seen[0]['has_actual_positions'] is False
     assert seen[0]['budget']==100000.
+
+
+def test_invalid_budget_and_missing_metadata_do_not_freeze_forecast(monkeypatch,tmp_path):
+    _setup(monkeypatch)
+    def forbidden(*args,**kwargs):
+        pytest.fail('Invalid review inputs must not create a model archive')
+    monkeypatch.setattr(workflow,'run_managed_forward',forbidden)
+    result=workflow.run_v4_review_day(tmp_path,bundle_id='test',
+                                       asof_session='2026-11-10',research_budget=-1)
+    assert result['status']=='RESEARCH_PLAN_BLOCKED'
+    assert result['code']=='INVALID_EXPLICIT_RESEARCH_BUDGET'
+    monkeypatch.setattr(workflow,'_checked_inputs',
+        lambda root,bundle_id:({}, {'source_snapshot_sha256':'a'*64}))
+    result=workflow.run_v4_review_day(tmp_path,bundle_id='test',
+                                       asof_session='2026-11-10',research_budget=100000)
+    assert result['code']=='SOURCE_HASHED_CANDIDATE_METADATA_MISSING'
+    assert not result['paper_ledger_advanced']
+
+
+def test_research_budget_archive_cannot_be_reused_as_reconciled_paper_plan(monkeypatch,tmp_path):
+    _setup(monkeypatch)
+    day=tmp_path/'outputs/v4_research_plans/2026-11-10'/'c'*16
+    day.mkdir(parents=True)
+    monkeypatch.setattr(workflow,'read_indicative_review',
+        lambda *args,**kwargs:{'source_forecast_identity':'b'*16,
+            'account_evidence':'EXPLICIT_EMPTY_RESEARCH_BUDGET_NOT_A_PAPER_ACCOUNT',
+            'account_budget':100000.,'plans':[],'evaluated':[]})
+    result=workflow.run_v4_review_day(tmp_path,bundle_id='test',
+                                        asof_session='2026-11-10')
+    assert result['status']=='RESEARCH_PLAN_BLOCKED'
+    assert result['code']=='ALREADY_FROZEN_WITH_DIFFERENT_ACCOUNT_OR_BUDGET'
