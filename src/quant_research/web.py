@@ -310,7 +310,22 @@ def handler(console):
             if path in {"/","/studio"}:
                 html = Path(__file__).with_name("v4_shell.html").read_text(encoding="utf-8").replace("__TOKEN__", console.token)
                 return self.send(200, html.encode("utf-8"), "text/html; charset=utf-8")
-            if path in {"/overview","/market","/styles","/factors","/strategies","/backtests","/signals","/paper","/data"}:
+            # Retired duplicate workspaces keep their old bookmarks, but no
+            # longer instantiate the separate legacy UI.
+            if path in {"/overview", "/market", "/styles"}:
+                target={"/overview":"overview", "/market":"market",
+                        "/styles":"style"}[path]
+                self.send_response(302)
+                self.send_header("Location", "/studio#" + target)
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            # Advanced workflows not yet migrated (factor version editing,
+            # strategy freeze/preflight, verified backtests, ledger and data
+            # maintenance) retain their actual tools until feature parity.
+            if path in {"/factors","/strategies","/backtests",
+                        "/signals","/paper","/data"}:
                 html = Path(__file__).with_name('app_shell.html').read_text(encoding='utf-8').replace('__TOKEN__', console.token)
                 return self.send(200, html.encode('utf-8'), 'text/html; charset=utf-8')
             if path in {'/assets/studio.css','/assets/studio.js',
