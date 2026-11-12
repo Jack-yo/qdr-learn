@@ -1,0 +1,61 @@
+{
+  "audited_at_utc": "2026-11-12T09:24:00Z",
+  "asof_session": "2026-11-11",
+  "knowledge_cutoff_utc": "2026-11-11T21:15:00Z",
+  "base_commit_sha": "22948b756e7ac0972ee35e6c6a610c6452a51700",
+  "code_commit_sha": "caa75005cc74e85a81d41c4ec6b24618da2f71b8",
+  "test_commit_sha": "e1cb4bc325b66b7bb4ec10aa19cf4a02975811cd",
+  "report_commit_sha": null,
+  "report_commit_note": "The report commit cannot contain its own SHA; use git log -1 after committing.",
+  "acceptance": {
+    "startup_and_basic_operations": "PASS",
+    "six_pages_complete_browser_acceptance": "PARTIAL",
+    "automatic_qualified_v4_bundle": "BLOCKED",
+    "four_layer_automatic_linkage": "BLOCKED",
+    "credible_oos_and_forward_probabilities": "BLOCKED",
+    "continuous_auditable_paper_research": "BLOCKED"
+  },
+  "tests": {
+    "pytest": {"passed": 371, "failed": 0, "skipped": 3, "seconds": 172.55},
+    "playwright_stub_contract": {"passed": 4, "failed": 0},
+    "real_browser": {"route_render_checks": 21, "failed_routes": 0, "widths": [1440, 1920, 375], "horizontal_overflows": 0, "complete_interaction_acceptance": "PARTIAL"},
+    "skip_reasons": ["Two tests require an accepted real Alpaca asset snapshot", "SPY 2026-11-06 historical cache has incomplete OHLCV"]
+  },
+  "data": {
+    "alpaca_sip_latest_session": "2026-11-11",
+    "alpaca_symbols": 20,
+    "alpaca_physical_rows": 99200,
+    "alpaca_distinct_security_sessions": 49580,
+    "current_observation_status": "CURRENT",
+    "current_observation_known_by_decision_cutoff": false,
+    "french_latest_session": "2026-09-30",
+    "historical_pit_qualified": false,
+    "qualified_forward_prediction_inputs": false,
+    "v4_input_bundle_exists": false
+  },
+  "layers": {
+    "L1": {"status": "BLOCKED", "reason": "No approved current market forecast; price arrived after decision cutoff"},
+    "L2": {"status": "HISTORICAL_ONLY", "reason": "French release lag and no admitted style forecast"},
+    "L3": {"status": "BLOCKED", "reason": "No PIT stock universe or current frozen Alpha"},
+    "L4": {"status": "BLOCKED", "reason": "No reconciled current holdings and cash"}
+  },
+  "p0_fixed_count": 2,
+  "remaining_p0": [
+    {"kind": "engineering", "item": "Build a source-gated V4 bundle producer and connect all stages to one decision context", "evidence": "src/quant_research/workflow/v4_bundle_contract.py"},
+    {"kind": "engineering", "item": "Resolve current Alpaca asset identity ambiguity and complete live UI interactions", "evidence": "src/quant_research/data/assets.py"},
+    {"kind": "external_evidence", "item": "Obtain historical PIT identities, universe, sectors, corporate-action coverage and real trade-return labels", "evidence": "outputs/local_acceptance/v4_diagnostics.json"},
+    {"kind": "external_evidence", "item": "Resolve strict split-reference price precision discrepancies without relaxing tolerance", "evidence": "outputs/feature_prices/037b8632-b194-4055-97d8-9b82589b42f0/comparison.json"}
+  ],
+  "evidence": {
+    "report": "docs/LOCAL_ACCEPTANCE_REPORT.md",
+    "database_audit": "outputs/local_acceptance/database_audit.json",
+    "freshness": "outputs/local_acceptance/freshness.json",
+    "readiness": "outputs/local_acceptance/readiness.json",
+    "daily": "outputs/local_acceptance/v4_daily.json",
+    "pytest": "outputs/local_acceptance/pytest_final.txt",
+    "browser_desktop": "outputs/local_acceptance/browser/summary_1440-1920.json",
+    "browser_mobile": "outputs/local_acceptance/browser/summary.json",
+    "factor_experiment": "outputs/factor_lab/525060a0-9fb9-46ff-abe8-5581f09a4f2f/manifest.json"
+  },
+  "real_orders_enabled": false
+}
