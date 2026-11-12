@@ -287,31 +287,51 @@ async function lab(original){
  const completed=exp.filter(x=>x.status==='COMPLETED');
  const selected=completed[0]||null;
  const detail=selected?await settle('/api/v1/factor-lab/experiments/'+encodeURIComponent(selected.id)):null;
- const metrics=detail?.ok?detail.data.metrics:null;
- const metricRows=metrics&&typeof metrics==='object'?
-  Object.entries(metrics).slice(0,24).map(([k,v])=>[e(k),typeof v==='number'?n(v,5):e(JSON.stringify(v).slice(0,100))]):[];
- const analysis=box('因子有效性 · 真实研究度量',
-   metricRows.length?table(['研究指标','实际结果'],metricRows):
-    empty('尚无可审查的因子有效性报告','完成真实因子实验后展示 Rank IC、ICIR、收益分组和时间外稳定性。'),
+ const report=detail?.ok?detail.data.result:null;
+ const validation=Array.isArray(report?.summary)?report.summary.filter(x=>x.partition==='validation'):[];
+ const metricRows=validation.map(x=>[
+  'H'+e(x.horizon),numeric(x.rank_ic_mean,4),numeric(x.icir_unannualized,3),
+  numeric(x.daily_ic_count,0),actual(x.label_pair_coverage)?pct(x.label_pair_coverage):'—',
+  actual(x.ic_mean_ci95_low)&&actual(x.ic_mean_ci95_high)?
+    numeric(x.ic_mean_ci95_low)+' ～ '+numeric(x.ic_mean_ci95_high):'—'
+ ]);
+ const analysis=box('因子有效性 · 历史验证期研究指标',
+   metricRows.length?table(['持有期','Rank IC','ICIR','有效日期','配对覆盖','区块置信区间'],metricRows):
+    empty('尚无可审查的因子有效性报告','完成真实因子实验后展示 Rank IC、ICIR、收益分组和时间外稳定性。')+
+   note('仅用于现存版本的历史探索；不是未来 Alpha 盈利能力已被证实。'),
    selected?'已完成实验 '+short(selected.id):'不填造假的 Rank IC');
- const outcome=box('分组未来收益 · H1 / H3 / H5',
-   empty('暂无可比较的真实收益分组',
-    'Q1–Q5 的未来回报需来自符合当时时点的历史股票池和经核验交易标签；暂不绘制演示曲线。'));
- const stability=box('滚动 IC 与跨市场稳定性',
-   empty('缺少逐期样本外 IC 序列',
-    '因子报告应保留每个评价期的 Rank IC、有效样本量与回测版本。'));
- const left=fac.filter(x=>x.id!==view.labLeft);
- const right=fac.filter(x=>x.id!==view.labRight);
+ const h3=validation.find(x=>Number(x.horizon)===3)||null;
+ const quintiles=h3?[1,2,3,4,5].map(i=>({bucket:i,
+  value:h3['q'+i+'_mean_forward_price_return']})):[];
+ const outcome=box('历史价格代理 · 未来 3 日因子分组收益',
+   quintiles.some(x=>actual(x.value))?
+    table(['因子组','事后价格代理收益'],quintiles.map(x=>[
+      'Q'+x.bucket,actual(x.value)?signed(x.value):'—']))+
+    row('Q5 − Q1 价格收益差',actual(h3.q5_minus_q1_price_return_spread)?
+      signed(h3.q5_minus_q1_price_return_spread):'—')+
+    note('当前版本标签是价格代理，不等于可执行收益或真实手续费后收益。'):
+    empty('暂无可比较的真实历史分组','Q1–Q5 收益必须来源已完成的因子实验报告，不能生成演示曲线。'));
+ const stability=box('因子稳定性与多时段检验',
+   metricRows.length?table(['H','IC 5%分位','IC 中位数','IC 95%分位','平均证券数'],
+     validation.map(x=>['H'+e(x.horizon),numeric(x.ic_p05),numeric(x.ic_median),
+       numeric(x.ic_p95),numeric(x.mean_covered_securities,0)])):
+    empty('缺少逐期样本外 IC 统计','至少需要完整的历史日期分组研究报告。'),
+   '需进一步加入真正前向的滚动 IC 曲线');
+ const strategyResponse=await settle('/api/v1/strategies');
+ const strategies=strategyResponse.ok?(strategyResponse.data.strategies||[]):[];
+ const multi=strategies.find(x=>Array.isArray(x.config?.strategy?.factors)&&x.config.strategy.factors.length>=2)||null;
+ const composite=multi?await settle('/api/v1/strategies/'+encodeURIComponent(multi.id)+'/composite'):null;
+ const correlations=composite?.ok?(composite.data.factor_correlations||[]):[];
  const choice=(id,items,selectedValue)=>'<select id="'+id+'" aria-label="选择比较因子版本">'+
   '<option value="">请选择版本</option>'+items.map(x=>'<option value="'+e(x.id)+'"'+
    (String(x.id)===String(selectedValue)?' selected':'')+'>'+e(x.name)+' · v'+e(x.version)+'</option>').join('')+'</select>';
- const corr=box('因子冗余与相关性检验 · 两版本比较',
+ const corr=box('因子版本 · 预测增量对照',
   '<div class="v4-compare-factors">'+choice('v4-compare-left',fac,view.labLeft)+
   choice('v4-compare-right',fac,view.labRight)+
   button('v4-compare-run','比较真实因子','primary')+'</div>'+
   '<div id="v4-compare-output">'+empty('请选择两个因子版本',
    '比较必须来自双方共同覆盖的真实股票 / 日期，不根据因子名称推断相关性。')+'</div>',
-  '共同样本 Pearson / Spearman 由服务端报告');
+  '相同数据快照与验证协议下的 Rank IC 差异');
  const versions=box('不可变因子版本与实验记录',
    fac.length?table(['因子','版本','研究定义'],fac.slice(0,30).map(x=>[e(x.name),'v'+e(x.version),
     e(x.config?.template||'自定义')])):empty('暂无已定义因子','在因子实验室新增并保存。'));
@@ -322,7 +342,14 @@ async function lab(original){
  const panels=[
    stack(aside(a.take('已保存因子'),stack(a.take('创建因子'),a.take('真实数据预览'))),a.take('最近因子实验')),
    stack(layout(analysis,outcome),stability),
-   layout(corr,box('如何解释相关性',studyNote('高相关可能导致多因子冗余；仅在相同样本、相同可用日期上计算，且需要检查标签独立性。'))),
+   layout(corr,box('因子相关性 · 历史同日横截面',
+     correlations.length?table(['因子A','因子B','Spearman 中位数','有效日','冗余风险'],
+       correlations.map(x=>[short(x.factor_a,12),short(x.factor_b,12),
+        numeric(x.median_daily_spearman),numeric(x.valid_sessions,0),
+        x.redundancy_warning?badge('高相关','amber'):badge('未触发','blue')])):
+       empty('暂无可审核的因子相关性矩阵',
+       '需要至少两个同源真实因子以及策略版本，形成逐日共同股票样本。'),
+     '相关性来自历史策略共同股票横截面')),
    stack(layout(versions,experiments))
  ];
  return {html:panelHtml('lab',a.heading+a.steps+a.hero,panels),
@@ -338,9 +365,14 @@ async function lab(original){
     const q=await settle('/api/v1/factor-lab/compare?left='+encodeURIComponent(l)+'&right='+encodeURIComponent(r));
     const d=q.ok?q.data:null;
     if(!d){out.innerHTML=empty('比较受阻',String(q.error?.message||'来源/共同样本尚未合格'));return;}
-    const stats=Object.entries(d).filter(([,v])=>v!==null&&typeof v!=='object');
-    out.innerHTML=stats.length?table(['统计字段','实际结果'],stats.map(([k,v])=>[e(k),e(v)])):
+    const comparisons=Array.isArray(d.rows)?d.rows:[];
+    out.innerHTML=comparisons.length?table(
+      ['样本段','预测H','左侧 Rank IC','右侧 Rank IC','IC增量','共同样本覆盖'],
+      comparisons.map(x=>[e(x.partition),e(x.horizon),
+        numeric(x.rank_ic_mean_left),numeric(x.rank_ic_mean_right),
+        numeric(x.delta_rank_ic),numeric(x.label_pair_coverage_left)])):
       empty('比较无可用统计','共同样本数量或数据资格不足。');
+    out.innerHTML+=note('这里对照的是历史验证期的 IC 差异，而不是因子之间的相关系数。');
    });
  }};
 }
