@@ -298,7 +298,8 @@ def handler(console):
                 return self.send(200, html.encode('utf-8'), 'text/html; charset=utf-8')
             if path in {'/assets/studio.css','/assets/studio.js',
                         '/assets/v4_ui_core.js','/assets/v4_ui_pages_a.js',
-                        '/assets/v4_ui_pages_b.js','/assets/v4_ui_pages_c.js'}:
+                        '/assets/v4_ui_pages_b.js','/assets/v4_ui_pages_c.js',
+                        '/assets/v4_ui_fidelity.js'}:
                 asset = Path(__file__).with_name('assets') / path.rsplit('/',1)[1]
                 content_type = 'text/css; charset=utf-8' if path.endswith('.css') else 'text/javascript; charset=utf-8'
                 return self.send(200, asset.read_bytes(), content_type)
