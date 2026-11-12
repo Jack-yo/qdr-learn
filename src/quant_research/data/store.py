@@ -117,6 +117,17 @@ CREATE TABLE IF NOT EXISTS decision_attestations (
  source_snapshot_sha256 VARCHAR NOT NULL,frozen_at TIMESTAMPTZ NOT NULL,
  status VARCHAR NOT NULL);
 INSERT INTO schema_version VALUES (4) ON CONFLICT DO NOTHING;
+-- Source-vintaged effective-dated sector classification. No row is certified
+-- merely because it exists: V4 separately verifies the raw object bytes,
+-- historical effective range, actual observation time, and cohort identity.
+CREATE TABLE IF NOT EXISTS sector_classification_pit (
+ security_id VARCHAR NOT NULL, sector VARCHAR NOT NULL,
+ valid_from DATE NOT NULL, valid_to DATE,
+ available_at TIMESTAMPTZ NOT NULL, raw_sha256 VARCHAR NOT NULL,
+ source VARCHAR NOT NULL, quality_flag VARCHAR NOT NULL,
+ PRIMARY KEY (security_id, valid_from, raw_sha256),
+ CHECK(valid_to IS NULL OR valid_to>valid_from));
+INSERT INTO schema_version VALUES (5) ON CONFLICT DO NOTHING;
 """
 
 
