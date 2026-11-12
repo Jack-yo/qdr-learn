@@ -40,10 +40,26 @@ def test_console_single_writer_and_http_boundaries(tmp_path):
     thread.start()
     base = f"http://127.0.0.1:{server.server_port}"
     try:
-        for route in ('overview','market','styles','factors','strategies','backtests','signals','paper','data'):
+        # Legacy duplicate workspaces now resolve to the V4 page shell.
+        # The URL fragment selects the relevant tab client-side.
+        for route in ('overview','market','styles'):
             with urlopen(base+'/'+route) as response:
                 page=response.read().decode('utf-8')
-                assert response.status==200 and 'REAL_ONLY' in page and 'blocked-view' in page
+                assert response.status == 200
+                assert '/studio' in response.url
+                assert 'QDR Quant Studio' in page
+                assert 'v4_ui_fidelity.js' in page
+        # Specialized legacy tools are intentionally not removed until the
+        # V4 equivalents cover their full write/preflight workflows.
+        for route in ('factors','strategies','backtests','signals','paper','data'):
+            with urlopen(base+'/'+route) as response:
+                page=response.read().decode('utf-8')
+                assert response.status == 200 and 'REAL_ONLY' in page and 'blocked-view' in page
+        for stale in ('/market.html','/styles.html','/factor_lab.html',
+                      '/web.html','/backtests.html','/daily_observation.html'):
+            with pytest.raises(HTTPError) as error:
+                urlopen(base+stale)
+            assert error.value.code==404
         with urlopen(base + "/api/status") as response:
             assert json.load(response)["busy"]
         with urlopen(base + "/api/v1/paper") as response:
