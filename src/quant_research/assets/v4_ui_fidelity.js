@@ -140,9 +140,17 @@ function historicalTransitions(history){
   }).join('')+'</tbody></table></div>'+note('这是历史经验转移频率，分母为该起始状态有效样本；不是经验证的未来状态转移概率。');
 }
 
-function overview(original){
+async function overview(original){
  const a=unwrap(original.html);
- const market=a.take('市场状态预测');
+ const historical=await settle('/api/v1/market/research?horizon=3');
+ const history=historical.ok&&Array.isArray(historical.data.state_history)?
+   historical.data.state_history.filter(x=>actual(x.market_return_20)):[];
+ const chart=history.length>=2?
+   '<div class="v4-overview-trend"><div class="v4-chart-caption">SPY 20日历史收益趋势 · '+date(history[0].date)+' 至 '+date(history.at(-1).date)+'</div>'+
+    svgLine(history.map(x=>x.market_return_20),'#50cab1',192)+
+    note('真实历史观察趋势，不属于最新 H1/H3/H5 前向概率预测。')+'</div>':'';
+ const baseMarket=a.take('市场状态预测');
+ const market=chart?baseMarket.replace(/<\/section>\s*$/,chart+'</section>'):baseMarket;
  const style=a.take('经典因子');
  const alpha=a.take('Alpha 研究');
  const risk=a.take('组合持仓');
