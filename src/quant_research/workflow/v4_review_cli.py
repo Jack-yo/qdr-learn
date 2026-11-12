@@ -24,6 +24,22 @@ def run_v4_review_day(root: Path, *, bundle_id: str, asof_session: str,
     """Run only research-stage inference and freeze a non-executing decision."""
     root=Path(root).resolve()
     frames,manifest=_checked_inputs(root,bundle_id)
+    # Reject invalid risk/account arguments before freezing a valid-looking
+    # prediction. A rejected plan must not produce irreversible forecast side effects.
+    if 'candidate_meta' not in frames:
+        return {'status':'RESEARCH_PLAN_BLOCKED',
+                'code':'SOURCE_HASHED_CANDIDATE_METADATA_MISSING',
+                'session_date_et':asof_session,'real_orders_enabled':False,
+                'paper_ledger_advanced':False,'research_plan_count':0}
+    if research_budget is not None and (
+            isinstance(research_budget,bool)
+            or not isinstance(research_budget,(int,float))
+            or not math.isfinite(research_budget)
+            or not 1<=research_budget<=1_000_000_000):
+        return {'status':'RESEARCH_PLAN_BLOCKED',
+                'code':'INVALID_EXPLICIT_RESEARCH_BUDGET',
+                'session_date_et':asof_session,'real_orders_enabled':False,
+                'paper_ledger_advanced':False,'research_plan_count':0}
     forward=run_managed_forward(root,bundle_id=bundle_id,asof_session=asof_session)
     status=forward.get('status','BLOCKED')
     safe={'session_date_et':asof_session,
@@ -45,10 +61,12 @@ def run_v4_review_day(root: Path, *, bundle_id: str, asof_session: str,
                 continue
             recorded=read_indicative_review(root,asof_session,child.name)
             if recorded.get('source_forecast_identity')==identity:
-                if (research_budget is not None and
-                    (recorded.get('account_evidence') !=
-                     'EXPLICIT_EMPTY_RESEARCH_BUDGET_NOT_A_PAPER_ACCOUNT'
-                     or recorded.get('account_budget') != float(research_budget))):
+                if ((research_budget is not None and
+                     (recorded.get('account_evidence') !=
+                      'EXPLICIT_EMPTY_RESEARCH_BUDGET_NOT_A_PAPER_ACCOUNT'
+                      or recorded.get('account_budget') != float(research_budget)))
+                    or (research_budget is None and
+                        recorded.get('account_evidence') != 'INTERNALLY_RECONCILED_PAPER_ONLY')):
                     return {**safe,'status':'RESEARCH_PLAN_BLOCKED',
                             'code':'ALREADY_FROZEN_WITH_DIFFERENT_ACCOUNT_OR_BUDGET',
                             'research_plan_count':0}
