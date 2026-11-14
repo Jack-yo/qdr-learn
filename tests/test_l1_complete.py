@@ -14,7 +14,8 @@ from quant_research.workflow.l1_runtime import (build_l1_research,market_overvie
 
 
 def fixture(n=390):
-    dates=pd.bdate_range('2022-01-03',periods=n)
+    import exchange_calendars as xcals
+    dates=xcals.get_calendar('XNYS',start='2022-01-03',end='2025-12-31').sessions[:n]
     rng=np.random.default_rng(44)
     daily=rng.normal(.0005,.012,n)
     daily[::11]=rng.normal(0,.025,len(daily[::11]))
@@ -70,6 +71,34 @@ def test_l1_feature_registry_and_optional_lateness():
     assert out.iloc[-1].vix_30d==25
 
 
+def test_naive_availability_and_cutoff_are_rejected():
+    bars,clock=fixture(30)
+    bad=bars.copy()
+    bad.loc[bad.index[0],'available_at']='2022-01-03 21:00:00'
+    with pytest.raises(ValueError,match='timezone-aware'):
+        compute_l1_observations(bad,clock)
+    bad_clock=clock.copy()
+    bad_clock.loc[bad_clock.index[0],'decision_cutoff_utc']='2022-01-03 22:00:00'
+    with pytest.raises(ValueError,match='timezone-aware'):
+        compute_l1_observations(bars,bad_clock)
+
+
+def test_research_calendar_rejects_holidays_gaps_and_late_cutoffs():
+    from quant_research.workflow.l1_runtime import validate_research_calendar
+    _,clock=fixture(30)
+    validate_research_calendar(clock)
+    with pytest.raises(ValueError,match='INCOMPLETE'):
+        validate_research_calendar(clock.drop(index=clock.index[5]))
+    invalid=clock.copy()
+    invalid.loc[invalid.index[0],'date']=pd.Timestamp('2022-01-01')
+    with pytest.raises(ValueError):
+        validate_research_calendar(invalid)
+    late=clock.copy()
+    late.loc[late.index[0],'decision_cutoff_utc']='2022-01-04T15:00:00Z'
+    with pytest.raises(ValueError,match='CUTOFF_OUTSIDE'):
+        validate_research_calendar(late)
+
+
 def test_stock_dispersion_uses_daily_members_and_requires_consecutive_bars():
     bars, clock = fixture(30)
     stocks = []
@@ -99,6 +128,16 @@ def test_sector_five_day_dispersion_does_not_require_twenty_days():
     assert features.sector_dispersion_5.iloc[:5].isna().all()
     assert features.sector_dispersion_5.iloc[5:].notna().all()
     assert features.sector_corr_20.isna().all()
+
+
+def test_zero_previous_volatility_does_not_create_infinite_observation():
+    bars,clock=fixture(30)
+    base,_=compute_l1_observations(bars,clock)
+    base.loc[24,'market_vol_20']=0.0
+    base.loc[29,'market_vol_20']=.2
+    features,audit=add_l1_features(base,bars,clock)
+    assert pd.isna(features.loc[29,'market_vol_change_5'])
+    assert audit.loc[(audit.date==clock.date.iloc[29]) & (audit.feature=='market_vol_change_5'),'status'].iloc[0]=='MISSING'
 
 
 def test_single_snapshot_audit_never_claims_history_or_model(tmp_path, monkeypatch):

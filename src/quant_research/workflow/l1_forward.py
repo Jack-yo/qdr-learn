@@ -29,9 +29,12 @@ def freeze_l1_research(*,bars,observations,cutoffs,output_root,
     """
     if not isinstance(source_snapshot_sha256,str) or not _SHA.fullmatch(source_snapshot_sha256):
         raise ValueError('Verified-format source SHA256 required')
+    from quant_research.clock import TradingClock
     if clock is None:
-        from quant_research.clock import TradingClock
         clock=TradingClock()
+    if isinstance(clock,TradingClock):
+        from quant_research.workflow.l1_runtime import validate_research_calendar
+        validate_research_calendar(cutoffs)
     day=pd.Timestamp(asof).date().isoformat()
     signal=pd.Timestamp(clock.signal(day)).tz_convert('UTC')
     first_entry=pd.Timestamp(clock.window(day,1).entry_time).tz_convert('UTC')

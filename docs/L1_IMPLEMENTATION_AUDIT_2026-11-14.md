@@ -38,6 +38,10 @@ The E01 comparison now uses a recursive daily-return EWMA on the purged
 training window and reports its MSE; its deliberate embargo lag must be
 considered when interpreting comparisons. The research runner defaults to
 evaluating every eligible session. Neither change establishes model advantage.
+The historical research entry point requires consecutive XNYS sessions,
+timezone-aware source and cutoff timestamps, and a decision cutoff after the
+session close and before the following open. This rejects invalid input; it
+does not itself authenticate a vendor's claimed historical publication time.
 
 On the current Windows workstation, `QDR-L1-Daily-Observation` is registered
 for 06:30 China time on Tuesday through Saturday, using `scripts/run_daily.ps1`.
@@ -50,3 +54,16 @@ The data diagnostic run for 2026-11-12 reported six blocked checks: historical
 factors, verified labels, unknown future labels, historical universe, action
 coverage and PIT sector classification. Historical adjusted data and current
 vendor snapshots must not be backdated to satisfy those checks.
+
+## Candidate sources requiring separate qualification
+
+- [FRED / ALFRED real-time periods](https://fred.stlouisfed.org/docs/api/fred/realtime_period.html)
+  support date-based historical vintages. The [API terms](https://fred.stlouisfed.org/docs/api/terms_of_use.html)
+  require a registered API key; this project must not register an account or
+  solicit a key automatically. Date-level vintages alone do not establish an
+  intraday release timestamp, underlying series license, coverage, or entitlement.
+- Alpaca documents [corporate-action data](https://docs.alpaca.markets/us/reference/corporateactions-1)
+  and [historical option data](https://docs.alpaca.markets/us/docs/historical-option-data).
+  Existing local SIP ETF access does not establish the account's option-data
+  entitlement, full history, all-event coverage, dealer positions, or cost.
+  Each separately supplied dataset requires its own receipt and permission review.

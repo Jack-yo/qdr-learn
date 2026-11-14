@@ -8,6 +8,7 @@ from __future__ import annotations
 from hashlib import sha256
 import numpy as np
 import pandas as pd
+from quant_research.research.l1_observatory import aware_utc
 
 
 def _safe_div(a,b):
@@ -81,8 +82,8 @@ def validate_event_calendar(events:pd.DataFrame,cutoff:pd.Timestamp)->pd.DataFra
     """Keep events known before cutoff; preserve future event dates, not future outcomes."""
     req={'event_id','scheduled_at','schedule_known_at','event_type'}
     if req-set(events):raise ValueError('Missing dated calendar evidence')
-    x=events.copy();x['scheduled_at']=pd.to_datetime(x.scheduled_at,utc=True)
-    x['schedule_known_at']=pd.to_datetime(x.schedule_known_at,utc=True)
+    x=events.copy();x['scheduled_at']=aware_utc(x.scheduled_at,'event scheduled_at')
+    x['schedule_known_at']=aware_utc(x.schedule_known_at,'event schedule_known_at')
     now=pd.Timestamp(cutoff)
     if now.tz is None:raise ValueError('UTC-aware cutoff required')
     return x.loc[x.schedule_known_at.le(now)].sort_values('scheduled_at').reset_index(drop=True)
@@ -99,10 +100,10 @@ def raw_packets_to_optional(raw:pd.DataFrame,cutoffs:pd.DataFrame,
     need={'date','metric_name','value','available_at','source','source_snapshot_sha256','source_attested'}
     if missing:=need-set(raw):raise ValueError(f'Raw measurement packet missing {sorted(missing)}')
     x=raw.copy();x.date=pd.to_datetime(x.date)
-    x.available_at=pd.to_datetime(x.available_at,utc=True)
+    x.available_at=aware_utc(x.available_at,'raw measurement available_at')
     if x.duplicated(['date','metric_name']).any():raise ValueError('Duplicate measurement')
     c=cutoffs[['date','decision_cutoff_utc']].copy();c.date=pd.to_datetime(c.date)
-    c.decision_cutoff_utc=pd.to_datetime(c.decision_cutoff_utc,utc=True)
+    c.decision_cutoff_utc=aware_utc(c.decision_cutoff_utc,'decision cutoff')
     x=x.merge(c,on='date',how='left',validate='many_to_one')
     if x.decision_cutoff_utc.isna().any():raise ValueError('Measurement outside calendar')
     x.value=pd.to_numeric(x.value,errors='coerce')

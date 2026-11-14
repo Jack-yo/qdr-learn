@@ -12,7 +12,7 @@ from pathlib import Path
 import re
 import pandas as pd
 import numpy as np
-from quant_research.research.l1_observatory import compute_l1_observations,scan_l1_anomalies
+from quant_research.research.l1_observatory import compute_l1_observations,scan_l1_anomalies,aware_utc
 from quant_research.research.l1_features import add_l1_features,domain_status,REGISTRY,scan_all_l1_anomalies
 from quant_research.research.l1_models import (L1Protocol,run_l1_oos,score_l1_oos,
     forecast_l1_research,HORIZONS)
@@ -73,6 +73,31 @@ def feature_coverage_report(audit):
     return pd.DataFrame(records)
 
 
+def validate_research_calendar(cutoffs):
+    """Require consecutive XNYS sessions and actual close-to-entry cutoffs."""
+    from quant_research.clock import TradingClock
+    if {'date','decision_cutoff_utc'}-set(cutoffs) or cutoffs.empty:
+        raise ValueError('L1_CALENDAR_MISSING')
+    dates=pd.to_datetime(cutoffs.date,errors='raise')
+    if (dates.isna().any() or dates.dt.tz is not None or not dates.eq(dates.dt.normalize()).all()
+            or dates.duplicated().any() or not dates.is_monotonic_increasing):
+        raise ValueError('L1_CALENDAR_INVALID')
+    clock=TradingClock()
+    sessions=pd.DatetimeIndex([clock.session(str(day.date())) for day in dates])
+    expected=clock.calendar.sessions_in_range(sessions[0],sessions[-1])
+    if not sessions.equals(expected):
+        raise ValueError('L1_CALENDAR_INCOMPLETE')
+    times=aware_utc(cutoffs.decision_cutoff_utc,'decision cutoff')
+    now=pd.Timestamp.now(tz='UTC')
+    for day,cutoff in zip(sessions,times):
+        position=clock.calendar.sessions.get_loc(day)
+        if position+1>=len(clock.calendar.sessions):
+            raise ValueError('L1_CALENDAR_NEXT_SESSION_MISSING')
+        next_open=clock.calendar.session_open(clock.calendar.sessions[position+1])
+        if not pd.Timestamp(clock.close(day))<=cutoff<next_open or cutoff>now:
+            raise ValueError('L1_CUTOFF_OUTSIDE_SESSION_WINDOW')
+
+
 def build_l1_research(*,bars,cutoffs,output,universe=None,optional=None,raw_measurements=None,
                       protocol:L1Protocol=L1Protocol(),evaluation_start=None):
     """Implement all three research experiments; fail closed if no valid data."""
@@ -81,6 +106,7 @@ def build_l1_research(*,bars,cutoffs,output,universe=None,optional=None,raw_meas
     if optional:paths['optional']=Path(optional)
     if raw_measurements:paths['raw_measurements']=Path(raw_measurements)
     raw={k:_read(v) for k,v in paths.items()}
+    validate_research_calendar(raw['cutoffs'])
     obs,coverage=compute_l1_observations(raw['bars'],raw['cutoffs'],raw.get('universe'))
     additional=raw.get('optional')
     if 'raw_measurements' in raw:

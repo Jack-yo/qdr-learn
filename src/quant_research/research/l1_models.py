@@ -17,6 +17,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import brier_score_loss, mean_squared_error
 from scipy.special import softmax
 from scipy.optimize import minimize_scalar
+from quant_research.research.l1_observatory import aware_utc
 
 HORIZONS=(1,3,5)
 QUANTILES=np.array([.10,.25,.50,.75,.90])
@@ -49,11 +50,11 @@ def _validate(bars, observations, cutoffs):
     if req-set(bars):raise ValueError('Missing benchmark OHLCV')
     if {'date','decision_cutoff_utc'}-set(cutoffs):raise ValueError('Missing decision clock')
     if {'date'}-set(observations):raise ValueError('Missing observation dates')
-    c=cutoffs.copy();c.date=pd.to_datetime(c.date);c.decision_cutoff_utc=pd.to_datetime(c.decision_cutoff_utc,utc=True)
+    c=cutoffs.copy();c.date=pd.to_datetime(c.date);c.decision_cutoff_utc=aware_utc(c.decision_cutoff_utc,'decision cutoff')
     if c.date.duplicated().any() or not c.date.is_monotonic_increasing or c.decision_cutoff_utc.isna().any():raise ValueError('Invalid trading calendar')
     o=observations.copy();o.date=pd.to_datetime(o.date)
     if o.date.duplicated().any():raise ValueError('Duplicate observations')
-    b=bars.loc[bars.symbol.eq('SPY')].copy();b.date=pd.to_datetime(b.date);b.available_at=pd.to_datetime(b.available_at,utc=True)
+    b=bars.loc[bars.symbol.eq('SPY')].copy();b.date=pd.to_datetime(b.date);b.available_at=aware_utc(b.available_at,'bar available_at')
     if b.date.duplicated().any():raise ValueError('Duplicate SPY session')
     b=c.merge(b,on='date',how='left',validate='one_to_one')
     if b[['open','high','low','close']].isna().any().any() or b.available_at.isna().any():raise ValueError('Incomplete SPY calendar')

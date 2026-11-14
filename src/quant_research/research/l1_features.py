@@ -7,6 +7,7 @@ from __future__ import annotations
 import re
 import numpy as np
 import pandas as pd
+from quant_research.research.l1_observatory import aware_utc
 
 DOMAINS = {
  'price':'价格与趋势','breadth':'市场广度','volatility':'波动结构',
@@ -54,7 +55,7 @@ def add_l1_features(base:pd.DataFrame, bars:pd.DataFrame, cutoffs:pd.DataFrame,
     dates=pd.to_datetime(out.date)
     if dates.duplicated().any():raise ValueError('Duplicate observation session')
     out['market_return_acceleration']=out.market_return_5.div(5)-out.market_return_20.div(20)
-    out['market_vol_change_5']=out.market_vol_20.div(out.market_vol_20.shift(5))-1
+    out['market_vol_change_5']=out.market_vol_20.div(out.market_vol_20.shift(5).replace(0,np.nan))-1
     out['breadth_impulse_5']=out.breadth_up_share-out.breadth_up_share.shift(5)
     out['breadth_price_divergence']=out.breadth_impulse_5-out.market_return_5
     bars=bars.copy();bars['date']=pd.to_datetime(bars.date)
@@ -100,13 +101,13 @@ def add_l1_features(base:pd.DataFrame, bars:pd.DataFrame, cutoffs:pd.DataFrame,
                 triangle=corr[np.triu_indices_from(corr,1)]
                 if np.isfinite(triangle).all():out.loc[i,'sector_corr_20']=triangle.mean()
     clock=cutoffs[['date','decision_cutoff_utc']].copy();clock.date=pd.to_datetime(clock.date)
-    clock.decision_cutoff_utc=pd.to_datetime(clock.decision_cutoff_utc,utc=True)
+    clock.decision_cutoff_utc=aware_utc(clock.decision_cutoff_utc,'decision cutoff')
     audits=[]
     if optional is not None:
         fields={'date','feature_id','value','available_at','source','source_snapshot_sha256','source_attested'}
         if missing:=fields-set(optional):raise ValueError(f'Optional measurement missing {sorted(missing)}')
         extra=optional.copy();extra.date=pd.to_datetime(extra.date)
-        extra.available_at=pd.to_datetime(extra.available_at,utc=True)
+        extra.available_at=aware_utc(extra.available_at,'optional available_at')
         if extra.duplicated(['date','feature_id']).any():raise ValueError('Duplicate optional feature')
         if not extra.feature_id.isin(OPTIONAL_NAMES).all():raise ValueError('Unknown optional feature')
         if not extra.source_attested.isin([True,False]).all():raise ValueError('Invalid attestation flag')
