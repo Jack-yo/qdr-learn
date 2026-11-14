@@ -42,6 +42,13 @@ E03 reporting includes mean squared error, quantile hit rates, and explicitly
 uncalibrated Brier scores versus historical-frequency baselines; E02 reports
 multiclass log loss. `oos_metrics_by_year.csv` splits those results by year.
 These are implemented metrics, not results from a qualified real-data run.
+The L1 research CLI's `--ablation` option records base-only and extended
+feature predictions, pairs the same session and label, and reports paired
+loss differences. This is one predeclared feature-set comparison, not a
+complete multiple-testing correction or proof of predictive improvement.
+First-touch labels also record the trading-session offset; the mean offset for
+correctly classified UP/DOWN events is descriptive and does not prove an
+operational or intraday lead time.
 The historical research entry point requires consecutive XNYS sessions,
 timezone-aware source and cutoff timestamps, and a decision cutoff after the
 session close and before the following open. This rejects invalid input; it

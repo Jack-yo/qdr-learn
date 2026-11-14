@@ -35,10 +35,12 @@ def fixture(n=390):
 
 
 def test_first_touch_labels_and_intrabar_ambiguity():
+    from quant_research.research.l1_models import first_touch_event
     bar=pd.DataFrame([{'open':100,'high':101,'low':99,'close':100},
                       {'open':100,'high':103,'low':97,'close':101},
                       {'open':101,'high':101.5,'low':100,'close':101}])
     assert first_touch_label(bar,0,2,.02,.02)=='AMBIGUOUS'
+    assert first_touch_event(bar,0,2,.02,.02)==('AMBIGUOUS',1)
     bar.loc[1,'low']=99
     assert first_touch_label(bar,0,2,.02,.02)=='UP'
     bar.loc[1,'high']=101
@@ -74,6 +76,10 @@ def test_distribution_scores_use_realized_returns_and_label_uncalibrated_probabi
     assert event.e02_event_counts['UP']['false_positives']==1
     assert event.e02_event_counts['DOWN']['false_negatives']==1
     assert event.e02_log_loss==pytest.approx(-np.log(.2))
+    row['e02_probs']={'UP':.1,'DOWN':.8,'NEITHER':.1}
+    row['target_first_touch_step']=2
+    event=score_l1_oos(pd.DataFrame([row])).iloc[0]
+    assert event.e02_correct_event_mean_lead_sessions==2
 
 
 def test_l1_feature_registry_and_optional_lateness():
@@ -212,6 +218,18 @@ def test_default_oos_evaluates_each_eligible_session():
     assert list(h1)==list(clock.date.iloc[-8:-1])
 
 
+def test_ablation_rejects_unmatched_samples_and_labels():
+    from quant_research.research.l1_models import compare_l1_ablation
+    base=pd.DataFrame([{'date':pd.Timestamp('2023-01-03'),'horizon':1,
+                        'target_return':.01,'target_forward_rv':.2,'target_first_touch':'UP'}])
+    different=base.copy();different.loc[0,'target_return']=.02
+    with pytest.raises(ValueError,match='labels do not match'):
+        compare_l1_ablation(base,different,L1Protocol())
+    different=base.copy();different.loc[0,'date']=pd.Timestamp('2023-01-04')
+    with pytest.raises(ValueError,match='samples do not match'):
+        compare_l1_ablation(base,different,L1Protocol())
+
+
 def test_archive_api_and_tamper_block(tmp_path):
     bars,clock=fixture()
     bars_file=tmp_path/'bars.csv';clock_file=tmp_path/'clock.csv'
@@ -219,7 +237,7 @@ def test_archive_api_and_tamper_block(tmp_path):
     out=tmp_path/'outputs'/'l1_research'/'synthetic-01'
     proto=L1Protocol(min_train_sessions=80,calibration_sessions=25,refit_every=60)
     manifest=build_l1_research(bars=bars_file,cutoffs=clock_file,output=out,
-                               protocol=proto,evaluation_start='2023-01-03')
+                               protocol=proto,evaluation_start='2023-01-03',run_ablation=True)
     assert manifest['status']=='RETROSPECTIVE_RESEARCH_ONLY'
     coverage=pd.read_csv(out/'feature_coverage.csv')
     assert len(coverage)==len(REGISTRY)
@@ -234,6 +252,7 @@ def test_archive_api_and_tamper_block(tmp_path):
     assert all(x['research_only'] for x in response['features'])
     validation=validation_for_api(tmp_path)
     assert validation['model_admitted'] is False and len(validation['yearly_metrics'])==len(yearly)
+    assert len(validation['ablation_metrics'])==3 and manifest['ablation_requested'] is True
     assert replay_for_api(tmp_path,clock.date.iloc[-1],3)['status']=='NO_OOS_PREDICTION'
     (out/'features.csv').write_text('bad',encoding='utf8')
     with pytest.raises(L1Blocked,match='HASH_MISMATCH'):

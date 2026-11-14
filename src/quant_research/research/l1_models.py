@@ -40,8 +40,9 @@ class L1Protocol:
     upper_barrier:float=.02
     lower_barrier:float=.02
     seed:int=42
+    include_extended:bool=True
     def __post_init__(self):
-        if not 30<=self.min_train_sessions<=self.train_window_sessions or self.embargo_sessions<5 or self.calibration_sessions<15 or self.refit_every<1 or not 0<self.upper_barrier<.5 or not 0<self.lower_barrier<.5:
+        if not 30<=self.min_train_sessions<=self.train_window_sessions or self.embargo_sessions<5 or self.calibration_sessions<15 or self.refit_every<1 or not 0<self.upper_barrier<.5 or not 0<self.lower_barrier<.5 or type(self.include_extended) is not bool:
             raise ValueError('Unsafe L1 protocol')
 
 
@@ -67,18 +68,23 @@ def _validate(bars, observations, cutoffs):
     return b,f,c
 
 
-def first_touch_label(bars, origin_index:int, horizon:int, up:float, down:float):
-    """OHLC touch relative to T+1 open; same-bar dual hit is UNKNOWN."""
-    if origin_index+1>=len(bars) or origin_index+horizon>=len(bars):return None
+def first_touch_event(bars, origin_index:int, horizon:int, up:float, down:float):
+    """Return the label and session offset; same-bar dual hits stay ambiguous."""
+    if origin_index+1>=len(bars) or origin_index+horizon>=len(bars):return None,None
     path=bars.iloc[origin_index+1:origin_index+horizon+1]
     entry=float(path.open.iloc[0]);high=entry*(1+up);low=entry*(1-down)
-    for day in path.itertuples():
+    for step,day in enumerate(path.itertuples(),start=1):
         hit_up=day.high>=high
         hit_down=day.low<=low
-        if hit_up and hit_down:return 'AMBIGUOUS'
-        if hit_up:return 'UP'
-        if hit_down:return 'DOWN'
-    return 'NEITHER'
+        if hit_up and hit_down:return 'AMBIGUOUS',step
+        if hit_up:return 'UP',step
+        if hit_down:return 'DOWN',step
+    return 'NEITHER',None
+
+
+def first_touch_label(bars, origin_index:int, horizon:int, up:float, down:float):
+    """OHLC touch relative to T+1 open; same-bar dual hit is UNKNOWN."""
+    return first_touch_event(bars,origin_index,horizon,up,down)[0]
 
 
 def make_l1_labels(bars:pd.DataFrame,observations:pd.DataFrame,cutoffs:pd.DataFrame,
@@ -94,8 +100,9 @@ def make_l1_labels(bars:pd.DataFrame,observations:pd.DataFrame,cutoffs:pd.DataFr
             entry=float(future.open.iloc[0]);exit_close=float(future.close.iloc[-1])
             target=exit_close/entry-1
             rv=float(np.sqrt(252*np.mean(np.square(daily[i+1:i+h+1])))) if np.isfinite(daily[i+1:i+h+1]).all() else np.nan
+            touch,touch_step=first_touch_event(b,i,h,protocol.upper_barrier,protocol.lower_barrier)
             result.append({'date':b.date.iloc[i],'horizon':h,'gross_price_return':target,
-                           'forward_rv':rv,'first_touch':first_touch_label(b,i,h,protocol.upper_barrier,protocol.lower_barrier),
+                           'forward_rv':rv,'first_touch':touch,'first_touch_step':touch_step,
                            'label_available_at':future.available_at.iloc[-1],
                            'exit_date':future.date.iloc[-1],
                            'entry_open':entry,'exit_close':exit_close})
@@ -150,7 +157,7 @@ def _fit_predict(train:pd.DataFrame,test:pd.DataFrame,protocol:L1Protocol)->dict
     additions=[c for c in EXTENDED_CANDIDATES
                if c in train and c in test and pd.notna(test[c].iloc[0])
                and pd.to_numeric(train[c],errors='coerce').notna().mean()>=.85
-               and pd.to_numeric(train[c],errors='coerce').std(skipna=True)>1e-12]
+               and pd.to_numeric(train[c],errors='coerce').std(skipna=True)>1e-12] if protocol.include_extended else []
     cols+=additions[:12]
     x,tx=_features(train,test,cols)
     result={'features_used':cols,'extra_features_used':additions[:12]}
@@ -262,6 +269,7 @@ def run_l1_oos(bars:pd.DataFrame,observations:pd.DataFrame,cutoffs:pd.DataFrame,
                 'target_return':float(actual.gross_price_return),
                 'target_forward_rv':float(actual.forward_rv),
                 'target_first_touch':actual.first_touch,
+                'target_first_touch_step':actual.first_touch_step,
                 **model})
     return pd.DataFrame(outputs)
 
@@ -276,7 +284,7 @@ def score_l1_oos(predictions:pd.DataFrame,protocol:L1Protocol=L1Protocol())->pd.
         qloss=np.array([_distribution_loss(p,v) for p,v in zip(group.e03_quantiles,y)])
         baseline=np.array([_distribution_loss(p,v) for p,v in zip(group.e03_baseline_quantiles,y)])
         eligible=group[group.e02_probs.map(lambda x:isinstance(x,dict)) & group.target_first_touch.isin(['UP','DOWN','NEITHER'])]
-        brier=brier0=event_logloss=None; event_n=0; event_counts={}
+        brier=brier0=event_logloss=event_lead=None; event_n=0; event_counts={}
         if len(eligible):
             labels=['UP','DOWN','NEITHER'];obs=np.array([[float(x==actual) for x in labels] for actual in eligible.target_first_touch])
             pred=np.array([[p[k] for k in labels] for p in eligible.e02_probs]); prior=np.array([[p[k] for k in labels] for p in eligible.e02_baseline])
@@ -288,6 +296,11 @@ def score_l1_oos(predictions:pd.DataFrame,protocol:L1Protocol=L1Protocol())->pd.
                 event_counts[label]={'actual':int(positive.sum()),
                     'false_positives':int((predicted & ~positive).sum()),
                     'false_negatives':int((~predicted & positive).sum())}
+            if 'target_first_touch_step' in eligible:
+                correct_event=(np.asarray(labels)[chosen]==eligible.target_first_touch.to_numpy()) & eligible.target_first_touch.isin(['UP','DOWN']).to_numpy()
+                steps=pd.to_numeric(eligible.target_first_touch_step,errors='coerce').to_numpy(float)
+                valid=correct_event & np.isfinite(steps)
+                if valid.any():event_lead=float(steps[valid].mean())
         mean_pred=group.e03_expected_return.to_numpy(float)
         mean_base=group.e03_baseline_mean.to_numpy(float)
         up=(y>0).astype(float);down=(y<=-protocol.lower_barrier).astype(float)
@@ -314,8 +327,45 @@ def score_l1_oos(predictions:pd.DataFrame,protocol:L1Protocol=L1Protocol())->pd.
           'e02_log_loss':event_logloss,
           'e02_event_counts':event_counts,
           'e02_ambiguous_samples':int(group.target_first_touch.eq('AMBIGUOUS').sum()),
+          'e02_correct_event_mean_lead_sessions':event_lead,
           'research_only':True,'model_admitted':False})
     return pd.DataFrame(report)
+
+
+def compare_l1_ablation(base:pd.DataFrame,extended:pd.DataFrame,protocol:L1Protocol)->pd.DataFrame:
+    """Pair preselected feature-set experiments on exactly the same dated labels."""
+    if base.empty and extended.empty:
+        return pd.DataFrame(columns=['horizon','samples'])
+    if base.empty or extended.empty:
+        raise ValueError('Ablation samples do not match')
+    keys=['date','horizon']
+    if base.duplicated(keys).any() or extended.duplicated(keys).any():
+        raise ValueError('Duplicate ablation prediction keys')
+    paired=base.merge(extended,on=keys,how='outer',suffixes=('_base','_extended'),
+                      indicator=True,validate='one_to_one')
+    if not paired['_merge'].eq('both').all():
+        raise ValueError('Ablation samples do not match')
+    for target in ('target_return','target_forward_rv','target_first_touch','target_first_touch_step'):
+        a=paired[target+'_base']; b=paired[target+'_extended']
+        if not (a.eq(b) | (a.isna() & b.isna())).all():
+            raise ValueError('Ablation labels do not match')
+    output=[]
+    for horizon,group in paired.sort_values('date').groupby('horizon'):
+        y=group.target_return_base.to_numpy(float)
+        rv=group.target_forward_rv_base.to_numpy(float)
+        base_rv=group.e01_rv_model_base.to_numpy(float)
+        ext_rv=group.e01_rv_model_extended.to_numpy(float)
+        rv_delta=(ext_rv-rv)**2-(base_rv-rv)**2
+        dist_delta=np.array([_distribution_loss(e,v)-_distribution_loss(b,v)
+                             for b,e,v in zip(group.e03_quantiles_base,group.e03_quantiles_extended,y)])
+        output.append({'horizon':int(horizon),'samples':len(group),
+            'e01_extended_minus_base_mse':float(rv_delta.mean()),
+            'e01_paired_delta_95ci':_bootstrap_delta(rv_delta,seed=protocol.seed),
+            'e03_extended_minus_base_pinball':float(dist_delta.mean()),
+            'e03_paired_delta_95ci':_bootstrap_delta(dist_delta,seed=protocol.seed),
+            'bootstrap_unit':'evaluation_rows', 'evaluation_step_sessions':protocol.refit_every,
+            'research_only':True,'model_admitted':False})
+    return pd.DataFrame(output)
 
 
 def forecast_l1_research(bars:pd.DataFrame,observations:pd.DataFrame,
@@ -340,5 +390,5 @@ def forecast_l1_research(bars:pd.DataFrame,observations:pd.DataFrame,
                     'train_last_label_available_at':past.label_available_at.max().isoformat(),
                     'train_sessions':len(past)})
     return {'asof_session':str(day.date()),'status':'RETROSPECTIVE_RESEARCH_ONLY',
-            'model_version':'l1-e01e02e03-v3-'+hashlib.sha256(json.dumps(protocol.__dict__,sort_keys=True).encode()).hexdigest()[:16],
+            'model_version':'l1-e01e02e03-v4-'+hashlib.sha256(json.dumps(protocol.__dict__,sort_keys=True).encode()).hexdigest()[:16],
             'research_only':True,'trade_eligible':False,'horizons':out}

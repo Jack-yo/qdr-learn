@@ -10,12 +10,13 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import re
+from dataclasses import asdict, replace
 import pandas as pd
 import numpy as np
 from quant_research.research.l1_observatory import compute_l1_observations,scan_l1_anomalies,aware_utc
 from quant_research.research.l1_features import add_l1_features,domain_status,REGISTRY,scan_all_l1_anomalies
 from quant_research.research.l1_models import (L1Protocol,run_l1_oos,score_l1_oos,
-    forecast_l1_research,HORIZONS)
+    forecast_l1_research,compare_l1_ablation,HORIZONS)
 
 _DIGEST=re.compile('[a-f0-9]{64}\\Z')
 
@@ -99,7 +100,7 @@ def validate_research_calendar(cutoffs):
 
 
 def build_l1_research(*,bars,cutoffs,output,universe=None,optional=None,raw_measurements=None,
-                      protocol:L1Protocol=L1Protocol(),evaluation_start=None):
+                      protocol:L1Protocol=L1Protocol(),evaluation_start=None,run_ablation=False):
     """Implement all three research experiments; fail closed if no valid data."""
     paths={'bars':Path(bars),'cutoffs':Path(cutoffs)}
     if universe:paths['universe']=Path(universe)
@@ -125,6 +126,15 @@ def build_l1_research(*,bars,cutoffs,output,universe=None,optional=None,raw_meas
             yearly.insert(0,'year',int(year))
             annual.append(yearly)
     annual_metrics=pd.concat(annual,ignore_index=True) if annual else pd.DataFrame(columns=['year','horizon','samples'])
+    if run_ablation:
+        if not protocol.include_extended:
+            raise ValueError('Ablation requires the extended feature protocol')
+        base=run_l1_oos(raw['bars'],feat,raw['cutoffs'],replace(protocol,include_extended=False),
+                        evaluation_start=evaluation_start)
+        ablation=compare_l1_ablation(base,oos,protocol)
+    else:
+        base=None
+        ablation=None
     # Fitting at the most recent as-of is RETROSPECTIVE_RESEARCH_ONLY,
     # explicitly not a frozen real-time forecast.
     inferred=forecast_l1_research(raw['bars'],feat,raw['cutoffs'],protocol)
@@ -135,6 +145,9 @@ def build_l1_research(*,bars,cutoffs,output,universe=None,optional=None,raw_meas
              'feature_coverage.csv':feature_coverage_report(audit),
              'feature_audit.csv':audit,'anomalies.csv':anomalies,
              'oos_predictions.csv':oos,'oos_metrics.csv':metrics,'oos_metrics_by_year.csv':annual_metrics}
+    if run_ablation:
+        outputs['ablation_base_predictions.csv']=base
+        outputs['ablation_metrics.csv']=ablation
     hashes={}
     for name,frame in outputs.items():
         path=root/name; _serializable(frame).to_csv(path,index=False)
@@ -147,6 +160,8 @@ def build_l1_research(*,bars,cutoffs,output,universe=None,optional=None,raw_meas
         'asof_session':str(pd.Timestamp(feat.date.max()).date()),
         'model_version':inferred['model_version'],
         'registered_dimensions':12,'registered_features':len(REGISTRY),
+        'protocol':asdict(protocol),'evaluation_start':str(evaluation_start) if evaluation_start else None,
+        'ablation_requested':bool(run_ablation),
         'observed_rows':len(obs),'oos_rows':len(oos),'oos_horizons':sorted(set(oos.horizon.astype(int))) if len(oos) else [],
         'source_snapshot_sha256':sha256(_json({k:sha256(v.read_bytes()).hexdigest() for k,v in paths.items()}).encode()).hexdigest(),
         'inputs_sha256':{k:sha256(v.read_bytes()).hexdigest() for k,v in paths.items()},
@@ -255,8 +270,13 @@ def validation_for_api(root):
     if 'oos_metrics_by_year.csv' in m.get('outputs_sha256',{}):
         for v in pd.read_csv(folder/'oos_metrics_by_year.csv').to_dict(orient='records'):
             yearly.append({k:(None if isinstance(x,float) and not np.isfinite(x) else x) for k,x in v.items()})
+    ablation=[]
+    if 'ablation_metrics.csv' in m.get('outputs_sha256',{}):
+        for v in pd.read_csv(folder/'ablation_metrics.csv').to_dict(orient='records'):
+            ablation.append({k:(None if isinstance(x,float) and not np.isfinite(x) else x) for k,x in v.items()})
     return {'status':'RETROSPECTIVE_RESEARCH_ONLY','model_version':m['model_version'],
-            'dataset_pit_attested':False,'model_admitted':False,'metrics':rows,'yearly_metrics':yearly}
+            'dataset_pit_attested':False,'model_admitted':False,'metrics':rows,
+            'yearly_metrics':yearly,'ablation_metrics':ablation}
 
 
 def replay_for_api(root,asof,horizon):
@@ -307,12 +327,13 @@ def main(argv=None):
     p.add_argument('--calibration-sessions',type=int,default=84)
     p.add_argument('--refit-every',type=int,default=1,
                    help='Evaluate every Nth session; default 1 evaluates each eligible session')
+    p.add_argument('--ablation',action='store_true',help='Compare base and extended features on matched sessions')
     args=p.parse_args(argv)
     protocol=L1Protocol(min_train_sessions=args.minimum_training_sessions,
         calibration_sessions=args.calibration_sessions,refit_every=args.refit_every)
     result=build_l1_research(bars=args.bars,cutoffs=args.cutoffs,universe=args.universe,
         optional=args.optional,raw_measurements=args.raw_measurements,output=args.output,protocol=protocol,
-        evaluation_start=args.evaluation_start)
+        evaluation_start=args.evaluation_start,run_ablation=args.ablation)
     print(_json({'status':result['status'],'observed_rows':result['observed_rows'],
         'oos_rows':result['oos_rows'],'predictive_evidence_admitted':False}))
 
