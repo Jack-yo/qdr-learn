@@ -78,3 +78,17 @@ vendor snapshots must not be backdated to satisfy those checks.
   Existing local SIP ETF access does not establish the account's option-data
   entitlement, full history, all-event coverage, dealer positions, or cost.
   Each separately supplied dataset requires its own receipt and permission review.
+  Alpaca states that historical options data starts in February 2024 and
+  distinguishes indicative quotes from OPRA; indicative quotes are not OPRA.
+  Its [published plan page](https://alpaca.markets/data) listed a $0 tier and
+  Algo Trader Plus at $99/month when checked on 2026-11-14; account-specific
+  eligibility, historical endpoints, redistribution and current prices must
+  be checked independently. This is not an instruction to subscribe.
+- FRED lists the [10-year Treasury yield](https://fred.stlouisfed.org/series/DGS10)
+  as daily, while [ICE BofA US high-yield OAS](https://fred.stlouisfed.org/series/BAMLH0A0HYM2)
+  is copyrighted and its FRED history is restricted to three years starting
+  April 2026. Neither listing proves the intraday time the value became
+  available to this system. Check series-specific usage and vintage evidence.
+- [Cboe historical data services](https://datashop.cboe.com/data-policies)
+  offer licensed alternatives; product-specific scope and costs remain
+  unverified. No subscription or purchase has been made.
