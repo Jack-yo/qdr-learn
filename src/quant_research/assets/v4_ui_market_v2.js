@@ -7,7 +7,7 @@
   const V = window.V4;
   if (!V) throw Error('QDR L1 must load after the V4 UI core');
   const {pages, state, e, n, pct, date, settle, show} = V;
-  const S = { horizon: state.marketHorizon || 3, dimension: 'all', selectedDomain: null, view: 'distribution', expanded: false, replayDate: '' };
+  const S = { horizon: state.marketHorizon || 3, dimension: 'all', selectedDomain: null, view: 'distribution', expanded: false, replayDate: '', legacyOpen: false, refreshRequested: false };
   const DOMAINS = [
     ['price', '价格与趋势', '走势、速度、隔夜与盘中结构', '价格'],
     ['breadth', '真实市场广度', '上涨参与率、创新高低、广度背离', '内部结构'],
@@ -220,14 +220,18 @@
   pages.market=async()=>{
     const horizon=Number(state.marketHorizon||S.horizon||3);
     S.horizon=[1,3,5].includes(horizon)?horizon:3;
-    const force=S.forceRefresh===true;S.forceRefresh=false;
+    if(S.forceRefresh===true){S.refreshRequested=true;S.forceRefresh=false;}
+    const deferred={ok:false,deferred:true};
+    const whenExpanded=(url)=>S.legacyOpen?settle(url):Promise.resolve(deferred);
+    // One scanned dataset serves H1/H3/H5, so switching horizons does not re-fetch.
+    // Research-only panels are not requested until the user expands their section.
     const [v2Raw,forecast,freshRaw,statusRaw,oldRaw,anomalyRaw,validationRaw,replayRaw] = await Promise.all([
-      settle('/api/v1/l1/v2/overview?horizon='+S.horizon+(force?'&refresh=1':'')),
-      settle('/api/v1/l1/market/overview?horizon='+S.horizon),
-      settle('/api/v1/v4/freshness'), settle('/api/status'),
-      settle('/api/v1/market/research?horizon='+S.horizon),
-      settle('/api/v1/l1/anomalies'),settle('/api/v1/l1/validation'),
-      S.replayDate?settle('/api/v1/l1/replay?asof='+encodeURIComponent(S.replayDate)+'&horizon='+S.horizon):Promise.resolve(null)
+      settle('/api/v1/l1/v2/overview?horizon=3'+(S.refreshRequested?'&refresh=1':'')),
+      whenExpanded('/api/v1/l1/market/overview?horizon='+S.horizon),
+      whenExpanded('/api/v1/v4/freshness'),whenExpanded('/api/status'),
+      whenExpanded('/api/v1/market/research?horizon='+S.horizon),
+      whenExpanded('/api/v1/l1/anomalies'),whenExpanded('/api/v1/l1/validation'),
+      S.replayDate&&S.legacyOpen?settle('/api/v1/l1/replay?asof='+encodeURIComponent(S.replayDate)+'&horizon='+S.horizon):Promise.resolve(deferred)
     ]);
     const fresh=freshRaw.ok?freshRaw.data:null, system=statusRaw.ok?statusRaw.data:null;
     const v2=v2Raw?.ok&&v2Raw.data?.schema==='qdr.l1.v2'?v2Raw.data:null;
@@ -239,8 +243,8 @@
     const html=`<div class="l1-cockpit">
       <div class="l1-head"><div><div class="l1-breadcrumb">L1 / MARKET FORECAST <span>· 01</span></div><h1>市场未来展望 <span class="l1-beta">RESEARCH</span></h1><p>从市场内部变化推断未来收益与风险分布；对每个预测提供真实证据，不把过去行情包装成未来信号。</p></div>
       <div class="l1-head-actions"><span class="l1-access ${rec?'good':''}"><i></i>${rec?'已读取冻结预测':v2?'已更新市场观察 · 预测待验收':'数据源待检查'}</span><button class="l1-refresh" type="button" data-l1-refresh>↻ 重新核查</button></div></div>
-      ${v2Cockpit(v2,S.horizon,v2Raw)}
-      <details class="l1-v2-legacy"><summary>展开完整研究视图：收益分布、路径模型与验证</summary>
+      ${v2Raw?.pending?panel('l1-v2-lead l1-v2-loading',header('L1 V2 / AUTOMATED MARKET SCAN','市场自动扫描与综合研判','<span class="l1-kicker">数据正在获取</span>')+'<div class="l1-loading-score"><span></span><span></span><span></span></div><p class="l1-v2-muted">独立获取市场行情、计算综合指标；无需等待其他模块。</p>'):v2Cockpit(v2,S.horizon,v2Raw)}
+      <details class="l1-v2-legacy" ${S.legacyOpen?'open':''}><summary>展开完整研究视图：收益分布、路径模型与验证</summary>
       ${indicatorCards(fresh,system,observationStatus)}
       <div class="l1-top-grid">${currentForecast(rec,S.horizon)}${firstPassage(rec)}</div>
       ${driversAndSignals(typed)}${validation(old,rec)}${researchTools(anomalyRaw?.ok?anomalyRaw.data:null, validationRaw?.ok?validationRaw.data:null, replayRaw?.ok?replayRaw.data:null)}
@@ -260,6 +264,9 @@
         const d=btn.dataset.l1OpenDomain;
         S.selectedDomain=S.selectedDomain===d?null:d;show('market');
       }));
+      document.querySelector('.l1-v2-legacy')?.addEventListener('toggle',event=>{
+        if(event.target.open!==S.legacyOpen){S.legacyOpen=event.target.open;if(S.legacyOpen)show('market');}
+      });
       document.querySelector('[data-l1-refresh]')?.addEventListener('click',()=>{S.forceRefresh=true;show('market')});
       document.querySelector('[data-l1-replay]')?.addEventListener('click',()=>{
         S.replayDate=document.querySelector('#l1-replay-date')?.value||'';
