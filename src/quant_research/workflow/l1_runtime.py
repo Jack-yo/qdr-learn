@@ -268,7 +268,8 @@ def main(argv=None):
     p.add_argument('--evaluation-start')
     p.add_argument('--minimum-training-sessions',type=int,default=252)
     p.add_argument('--calibration-sessions',type=int,default=84)
-    p.add_argument('--refit-every',type=int,default=21)
+    p.add_argument('--refit-every',type=int,default=1,
+                   help='Evaluate every Nth session; default 1 evaluates each eligible session')
     args=p.parse_args(argv)
     protocol=L1Protocol(min_train_sessions=args.minimum_training_sessions,
         calibration_sessions=args.calibration_sessions,refit_every=args.refit_every)

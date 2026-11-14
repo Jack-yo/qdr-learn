@@ -44,6 +44,13 @@ def test_first_touch_labels_and_intrabar_ambiguity():
     assert first_touch_label(bar,0,2,.02,.02)=='NEITHER'
 
 
+def test_ewma_benchmark_is_recursive_daily_return_variance():
+    from quant_research.research.l1_models import _ewma_rv
+    values=pd.Series([.01,.02,0.0])
+    expected=252*(.94*(.94*.01**2+.06*.02**2)+.06*0.0)
+    assert _ewma_rv(values)==pytest.approx(expected**.5)
+
+
 def test_l1_feature_registry_and_optional_lateness():
     bars,clock=fixture(50)
     base,_=compute_l1_observations(bars,clock)
@@ -127,6 +134,16 @@ def test_l1_models_purge_forecast_and_metric_contract():
     assert not metrics.model_admitted.any()
     f=forecast_l1_research(bars,features,clock,protocol)
     assert f['trade_eligible'] is False and len(f['horizons'])==3
+
+
+def test_default_oos_evaluates_each_eligible_session():
+    bars,clock=fixture(115)
+    base,_=compute_l1_observations(bars,clock)
+    features,_=add_l1_features(base,bars,clock)
+    protocol=L1Protocol(min_train_sessions=80,calibration_sessions=25)
+    result=run_l1_oos(bars,features,clock,protocol,evaluation_start=clock.date.iloc[-8])
+    h1=result.loc[result.horizon.eq(1),'date']
+    assert list(h1)==list(clock.date.iloc[-8:-1])
 
 
 def test_archive_api_and_tamper_block(tmp_path):

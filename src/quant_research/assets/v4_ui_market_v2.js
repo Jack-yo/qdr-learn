@@ -29,6 +29,7 @@
   const asText = v => v === undefined || v === null || v === '' ? '—' : e(v);
   const num = (v, unit='', digits=2) => isNum(v) ? n(v,digits)+e(unit) : '—';
   const label = (status) => ({'OBSERVED':'已观测','PARTIAL':'部分覆盖','MISSING':'待接入','BLOCKED':'不可用','STALE':'已过期'}[status] || '待接入');
+  const reason = v => ({HISTORICAL_PIT_UNIVERSE_NOT_VERIFIED:'历史时点股票池未核验',OPTION_PRICING_HISTORY_NOT_CONNECTED:'期权定价历史未接入',OPTION_POSITION_HISTORY_NOT_CONNECTED:'期权持仓历史未接入',ORDER_BOOK_HISTORY_NOT_CONNECTED:'订单簿历史未接入',POSITION_FLOW_HISTORY_NOT_CONNECTED:'资金与持仓历史未接入',POINT_IN_TIME_EVENT_HISTORY_NOT_CONNECTED:'宏观事件时点历史未接入',POINT_IN_TIME_FUNDING_HISTORY_NOT_CONNECTED:'融资数据时点历史未接入',EXTERNAL_SERIES_NOT_CONNECTED:'外部数据序列未接入',CORPORATE_ACTION_CONSISTENT_HISTORY_NOT_VERIFIED:'公司行为一致的历史价格未核验'}[v]||v||'');
   const stamp = v => v && typeof v === 'string' ? e(v.replace('T',' ').slice(0,19)) : '—';
   const small = (key, value, hint) => `<div class="l1-mini"><span>${e(key)}</span><strong>${value}</strong><small>${e(hint)}</small></div>`;
   const empty = (name, detail, kind='no-data') => `<div class="l1-empty" data-empty-kind="${e(kind)}"><div class="l1-empty-icon">◇</div><strong>${e(name)}</strong><p>${e(detail)}</p></div>`;
@@ -142,7 +143,7 @@
         const val=['OBSERVED','PARTIAL'].includes(status)&&isNum(item.value)?(item.unit==='fraction'?pct(item.value):num(item.value,item.unit||'',item.precision??2)):'—';
         return `<button type="button" class="l1-domain" data-l1-open-domain="${e(id)}" aria-pressed="${S.selectedDomain===id}"><div class="l1-domain-h"><span class="l1-domain-icon">${String(DOMAINS.findIndex(x=>x[0]===id)+1).padStart(2,'0')}</span><span class="l1-domain-state ${e(status.toLowerCase())}">${label(status)}</span></div><strong>${e(name)}</strong><p>${e(desc)}</p><div class="l1-domain-number">${val}</div><small>${status==='OBSERVED'?asText(item.label||'已到达的数据观察值') : status==='PARTIAL'?'部分覆盖：仅显示已取得的实际数值': '数据或计算尚未完成'}<span class="l1-domain-coverage">${item?.coverage?e(item.coverage.available+' / '+item.coverage.registered+' 项特征'):''}</span></small></button>`;
       }).join('')}</div>
-      ${S.selectedDomain ? `<div class="l1-domain-details"><h3>${e((DOMAINS.find(x=>x[0]===S.selectedDomain)||[])[1]||'指标明细')}</h3><p>数据、来源及可得时点，研究观察不代表领先预测有效。</p><div class="l1-domain-details-list">${(Array.isArray(data?.features)?data.features:[]).filter(x=>x.domain===S.selectedDomain).map(x=>`<div class="l1-research-row"><span>${e(x.id)} <small>${asText(x.status)} · ${asText(x.source)}</small></span><strong>${isNum(x.value)?n(x.value,4):'—'} <small>${asText(x.available_at)}</small></strong></div>`).join('')||'<p class="l1-no-features">该维度尚未取得可核验的指标明细</p>'}</div></div>` : ''}`);
+      ${S.selectedDomain ? `<div class="l1-domain-details"><h3>${e((DOMAINS.find(x=>x[0]===S.selectedDomain)||[])[1]||'指标明细')}</h3><p>数据、来源及可得时点，研究观察不代表领先预测有效。</p><div class="l1-domain-details-list">${(Array.isArray(data?.features)?data.features:[]).filter(x=>x.domain===S.selectedDomain).map(x=>`<div class="l1-research-row"><span>${e(x.id)} <small>${asText(x.status)} · ${x.status==='OBSERVED'?asText(x.source):e(reason(x.reason))}</small></span><strong>${isNum(x.value)?n(x.value,4):'—'} <small>${asText(x.available_at)}</small></strong></div>`).join('')||'<p class="l1-no-features">该维度尚未取得可核验的指标明细</p>'}</div></div>` : ''}`);
   }
   function validation(oldStudy, rec) {
     const rows=Array.isArray(oldStudy?.summary?.direction)?oldStudy.summary.direction:[];
@@ -161,7 +162,7 @@
     const replay=replayData?.prediction;
     const alertsHTML=alerts.length?alerts.slice(-8).reverse().map(x=>`<div class="l1-research-row"><span>${asText(x.date)} · ${asText(x.feature)}</span><strong>${isNum(x.z_score)?signed(x.z_score)+'σ':'—'}</strong></div>`).join(''):
       empty('无已归档的异常发现','缺少历史特征或过去窗口的异常扫描证据。');
-    const metricsHTML=metrics.length?`<div class="l1-metrics-table"><div class="l1-metrics-header">期限　波动 MSE / 基准　分位损失 / 基准　事件 Brier / 基准</div>${metrics.map(x=>`<div class="l1-research-row"><span>H${e(x.horizon)} · ${num(x.e01_rv_mse,'',4)} / ${num(x.e01_baseline_mse,'',4)} · ${num(x.e03_pinball_loss,'',4)} / ${num(x.e03_baseline_pinball_loss,'',4)}</span><strong>${num(x.e02_brier,'',4)} / ${num(x.e02_baseline_brier,'',4)}</strong></div>`).join('')}</div>`:
+    const metricsHTML=metrics.length?`<div class="l1-metrics-table"><div class="l1-metrics-header">期限　波动 MSE / 基准 / EWMA　分位损失 / 基准　事件 Brier / 基准</div>${metrics.map(x=>`<div class="l1-research-row"><span>H${e(x.horizon)} · ${num(x.e01_rv_mse,'',4)} / ${num(x.e01_baseline_mse,'',4)} / ${num(x.e01_ewma_mse,'',4)} · ${num(x.e03_pinball_loss,'',4)} / ${num(x.e03_baseline_pinball_loss,'',4)}</span><strong>${num(x.e02_brier,'',4)} / ${num(x.e02_baseline_brier,'',4)}</strong></div>`).join('')}</div>`:
       empty('暂无新版 L1 样本外研究指标','必须先运行 E01 / E02 / E03 的完整时间外实验，不能借旧实验冒充。');
     return panel('l1-research',`${header('06 / RESEARCH WORKBENCH', '历史验证与回放', '<span class="l1-kicker">RESEARCH-ONLY</span>')}
       <div class="l1-research-columns"><div><h3>市场异常扫描</h3>${alertsHTML}</div><div><h3>模型与基准对照</h3>${metricsHTML}</div></div>

@@ -44,6 +44,7 @@ def test_current_observation_has_all_57_features_and_12_domains():
                if item["id"] not in {"market_intraday_return", "market_close_location"})
     assert not any(item["id"].startswith("breadth_") and item["status"] == "OBSERVED"
                     for item in result["features"])
+    assert next(item for item in result['features'] if item['id']=='breadth_up_share')['reason']=='HISTORICAL_PIT_UNIVERSE_NOT_VERIFIED'
 
 
 def test_same_session_values_are_descriptive_only():

@@ -15,11 +15,28 @@ import numpy as np
 import pandas as pd
 
 from quant_research.data.bundle import load_real_bundle
-from quant_research.research.l1_features import DOMAINS, REGISTRY
+from quant_research.research.l1_features import DOMAINS, REGISTRY, OPTIONAL_NAMES
 
 
 STATUS = "CURRENT_VINTAGE_RETROSPECTIVE_OBSERVATION"
 _SAFE_FEATURES = ("market_intraday_return", "market_close_location")
+_MISSING_REASONS = {
+    'breadth':'HISTORICAL_PIT_UNIVERSE_NOT_VERIFIED',
+    'options_pricing':'OPTION_PRICING_HISTORY_NOT_CONNECTED',
+    'options_positioning':'OPTION_POSITION_HISTORY_NOT_CONNECTED',
+    'microstructure':'ORDER_BOOK_HISTORY_NOT_CONNECTED',
+    'positioning':'POSITION_FLOW_HISTORY_NOT_CONNECTED',
+    'events':'POINT_IN_TIME_EVENT_HISTORY_NOT_CONNECTED',
+    'funding':'POINT_IN_TIME_FUNDING_HISTORY_NOT_CONNECTED',
+}
+
+
+def _missing_reason(feature: str, domain: str) -> str:
+    if domain in _MISSING_REASONS:
+        return _MISSING_REASONS[domain]
+    if feature in OPTIONAL_NAMES:
+        return 'EXTERNAL_SERIES_NOT_CONNECTED'
+    return 'CORPORATE_ACTION_CONSISTENT_HISTORY_NOT_VERIFIED'
 
 
 def _iso(value: Any) -> str | None:
@@ -122,7 +139,7 @@ def build_current_observation(bundle, *, benchmark: str = "SPY", asof: str | Non
             "value": value,
             "source": source if observed else None,
             "available_at": available_at if observed else None,
-            "reason": "SAME_SESSION_WITHIN_BAR" if observed else "NOT_AVAILABLE_OR_NOT_SAFE_FOR_RAW_ETF_HISTORY",
+            "reason": "SAME_SESSION_WITHIN_BAR" if observed else _missing_reason(feature, domain),
             "research_only": True,
         })
     drivers = [{"label": name, "value": values[name], "unit": "fraction", "status": "OBSERVED",

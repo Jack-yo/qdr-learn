@@ -35,7 +35,7 @@ class L1Protocol:
     train_window_sessions:int=1260
     embargo_sessions:int=5
     calibration_sessions:int=84
-    refit_every:int=21
+    refit_every:int=1
     upper_barrier:float=.02
     lower_barrier:float=.02
     seed:int=42
@@ -108,9 +108,19 @@ def _features(train,test,columns):
             test[list(columns)].fillna(med).replace([np.inf,-np.inf],0))
 
 
-def _ewma_rv(rv_series,decay=.94):
-    # Previous date's volatility is known. This is a conservative daily decay proxy.
-    return float(np.sqrt(max(1e-12,decay*rv_series.iloc[-1]**2+(1-decay)*np.mean(rv_series.tail(20)**2))))
+def _ewma_rv(returns,decay=.94):
+    """Annualized recursive EWMA of squared observed daily returns.
+
+    The caller provides the purged training window, so this benchmark is
+    deliberately lagged and never uses observations from the embargo gap.
+    """
+    if not 0 < decay < 1 or len(returns)==0:
+        raise ValueError('EWMA requires returns and a decay between zero and one')
+    squared=pd.to_numeric(returns,errors='coerce').dropna().pow(2)
+    if squared.empty or not np.isfinite(squared).all():
+        raise ValueError('EWMA requires finite returns')
+    variance=squared.ewm(alpha=1-decay,adjust=False).mean().iloc[-1]
+    return float(np.sqrt(252*max(0.0,variance)))
 
 
 def _calibrate_multiclass(train_x,train_y,cal_x,cal_y,test_x,seed):
@@ -147,7 +157,7 @@ def _fit_predict(train:pd.DataFrame,test:pd.DataFrame,protocol:L1Protocol)->dict
     rvtrain=train.dropna(subset=['forward_rv'])
     if len(rvtrain)<protocol.min_train_sessions:raise ValueError('Insufficient E01 labels')
     base_rv=float(rvtrain.forward_rv.tail(20).mean())
-    ewma_rv=_ewma_rv(train.market_vol_20.dropna()) if train.market_vol_20.notna().sum()>=20 else base_rv
+    ewma_rv=_ewma_rv(train.market_return_1.dropna()) if train.market_return_1.notna().sum()>=20 else base_rv
     reg=make_pipeline(StandardScaler(),Ridge(alpha=10))
     reg.fit(x.loc[rvtrain.index],np.log(np.maximum(rvtrain.forward_rv,1e-6)))
     pred_rv=float(np.exp(np.clip(reg.predict(tx)[0],-10,3)))
@@ -270,6 +280,7 @@ def score_l1_oos(predictions:pd.DataFrame,protocol:L1Protocol=L1Protocol())->pd.
             brier=float(((pred-obs)**2).sum(axis=1).mean());brier0=float(((prior-obs)**2).sum(axis=1).mean());event_n=len(eligible)
         report.append({'horizon':int(h),'samples':len(group),
           'e01_rv_mse':float(np.mean((r1-rv)**2)),'e01_baseline_mse':float(np.mean((r0-rv)**2)),
+          'e01_ewma_mse':float(np.mean((group.e01_rv_ewma.to_numpy(float)-rv)**2)),
           'e01_paired_delta_95ci':_bootstrap_delta((r1-rv)**2-(r0-rv)**2,seed=protocol.seed),
           'e03_pinball_loss':float(qloss.mean()),'e03_baseline_pinball_loss':float(baseline.mean()),
           'e03_paired_delta_95ci':_bootstrap_delta(qloss-baseline,seed=protocol.seed),
@@ -301,5 +312,5 @@ def forecast_l1_research(bars:pd.DataFrame,observations:pd.DataFrame,
                     'train_last_label_available_at':past.label_available_at.max().isoformat(),
                     'train_sessions':len(past)})
     return {'asof_session':str(day.date()),'status':'RETROSPECTIVE_RESEARCH_ONLY',
-            'model_version':'l1-e01e02e03-'+hashlib.sha256(json.dumps(protocol.__dict__,sort_keys=True).encode()).hexdigest()[:16],
+            'model_version':'l1-e01e02e03-v2-'+hashlib.sha256(json.dumps(protocol.__dict__,sort_keys=True).encode()).hexdigest()[:16],
             'research_only':True,'trade_eligible':False,'horizons':out}

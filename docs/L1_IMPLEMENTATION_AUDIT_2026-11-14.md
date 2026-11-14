@@ -34,6 +34,11 @@ same-session open-to-close return and close location; it does not use raw
 multi-day prices as corporate-action-adjusted history. The new daily stage
 records the one-session audit but does not train, freeze or settle a model.
 
+The E01 comparison now uses a recursive daily-return EWMA on the purged
+training window and reports its MSE; its deliberate embargo lag must be
+considered when interpreting comparisons. The research runner defaults to
+evaluating every eligible session. Neither change establishes model advantage.
+
 On the current Windows workstation, `QDR-L1-Daily-Observation` is registered
 for 06:30 China time on Tuesday through Saturday, using `scripts/run_daily.ps1`.
 The task requires an interactive user session and its first scheduled run has
