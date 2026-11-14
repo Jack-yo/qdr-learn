@@ -121,9 +121,10 @@
   }
   function driversAndSignals(data) {
     const records=Array.isArray(data?.drivers)?data.drivers.filter(x=>x&&x.label&&isNum(x.value)).slice(0,7):[];
-    return panel('l1-driver', `${header('03 / CONDITION CHANGE', '哪些信息正在改变预测？', '<span class="l1-kicker">FEATURE EVIDENCE</span>')}
+    const names={market_intraday_return:'SPY 当日开盘至收盘涨跌',market_close_location:'SPY 收盘价在当日区间的位置'};
+    return panel('l1-driver', `${header('03 / CONDITION CHANGE', '当前市场观察与变化', '<span class="l1-kicker">FEATURE EVIDENCE</span>')}
       <div class="l1-subtitle">观察到的变化 ≠ 已验证的预测驱动。贡献必须来自实际模型与样本外增量。</div>
-      ${records.length ? `<div class="l1-driver-rows">${records.map((x)=>`<div class="l1-driver-row"><div class="l1-driver-head"><span>${e(x.label)}</span><strong>${num(x.value,x.unit||'',2)}</strong></div><div class="l1-driver-meta"><span>${asText(x.status||'OBSERVED')}</span><span>${x.delta!==null&&isNum(x.delta)?'日变化 '+signed(x.delta):'变化待核验'}</span><span>${x.oos_increment===null||!isNum(x.oos_increment)?'增量未验证':'样本外增量 '+signed(x.oos_increment,4)}</span></div></div>`).join('')}</div>`
+      ${records.length ? `<div class="l1-driver-rows">${records.map((x)=>`<div class="l1-driver-row"><div class="l1-driver-head"><span>${e(names[x.label]||x.label)}</span><strong>${x.unit==='fraction'?pct(x.value):num(x.value,x.unit||'',2)}</strong></div><div class="l1-driver-meta"><span>${asText(x.status||'OBSERVED')}</span><span>${x.delta!==null&&isNum(x.delta)?'日变化 '+signed(x.delta):'变化待核验'}</span><span>${x.oos_increment===null||!isNum(x.oos_increment)?'增量未验证':'样本外增量 '+signed(x.oos_increment,4)}</span></div></div>`).join('')}</div>`
         :empty('尚无经过审计的特征变化', '后续接入 12 维日频观测。若因子未经过增量验证，只展示变化，不标记为有效领先信号。')}
       <div class="l1-driver-footer">支持未来展开历史条件检索、相似环境、模型贡献与条件情景；本阶段不伪造解释性数值。</div>`);
   }
@@ -138,7 +139,7 @@
       <div class="l1-filters" role="group" aria-label="观测维度筛选">${FILTERS.map(([id,name])=>`<button type="button" data-l1-domain="${e(id)}" class="${S.dimension===id?'active':''}" aria-pressed="${S.dimension===id}">${e(name)}</button>`).join('')}</div>
       <div class="l1-domain-grid">${displayed.map(([id,name,desc,group],i)=>{
         const item=lookup.get(id), status=item?.status||'MISSING';
-        const val=['OBSERVED','PARTIAL'].includes(status)&&isNum(item.value)?num(item.value,item.unit||'',item.precision??2):'—';
+        const val=['OBSERVED','PARTIAL'].includes(status)&&isNum(item.value)?(item.unit==='fraction'?pct(item.value):num(item.value,item.unit||'',item.precision??2)):'—';
         return `<button type="button" class="l1-domain" data-l1-open-domain="${e(id)}" aria-pressed="${S.selectedDomain===id}"><div class="l1-domain-h"><span class="l1-domain-icon">${String(DOMAINS.findIndex(x=>x[0]===id)+1).padStart(2,'0')}</span><span class="l1-domain-state ${e(status.toLowerCase())}">${label(status)}</span></div><strong>${e(name)}</strong><p>${e(desc)}</p><div class="l1-domain-number">${val}</div><small>${status==='OBSERVED'?asText(item.label||'已到达的数据观察值') : status==='PARTIAL'?'部分覆盖：仅显示已取得的实际数值': '数据或计算尚未完成'}<span class="l1-domain-coverage">${item?.coverage?e(item.coverage.available+' / '+item.coverage.registered+' 项特征'):''}</span></small></button>`;
       }).join('')}</div>
       ${S.selectedDomain ? `<div class="l1-domain-details"><h3>${e((DOMAINS.find(x=>x[0]===S.selectedDomain)||[])[1]||'指标明细')}</h3><p>数据、来源及可得时点，研究观察不代表领先预测有效。</p><div class="l1-domain-details-list">${(Array.isArray(data?.features)?data.features:[]).filter(x=>x.domain===S.selectedDomain).map(x=>`<div class="l1-research-row"><span>${e(x.id)} <small>${asText(x.status)} · ${asText(x.source)}</small></span><strong>${isNum(x.value)?n(x.value,4):'—'} <small>${asText(x.available_at)}</small></strong></div>`).join('')||'<p class="l1-no-features">该维度尚未取得可核验的指标明细</p>'}</div></div>` : ''}`);
@@ -165,7 +166,7 @@
     return panel('l1-research',`${header('06 / RESEARCH WORKBENCH', '历史验证与回放', '<span class="l1-kicker">RESEARCH-ONLY</span>')}
       <div class="l1-research-columns"><div><h3>市场异常扫描</h3>${alertsHTML}</div><div><h3>模型与基准对照</h3>${metricsHTML}</div></div>
       <div class="l1-replay"><label for="l1-replay-date">回放历史研究日</label><input type="date" id="l1-replay-date" value="${e(S.replayDate)}"><button type="button" data-l1-replay>查看当时研究</button>
-        <span>${replay?'研究预测 '+num(replay.expected_return*100,'%',2)+' · 后续实际 '+num(replay.actual_return*100,'%',2)+' · 非真实冻结预测':replayData?.status==='NO_OOS_PREDICTION'?'该日期无样本外实验记录':'选择日期后显示真实研究记录'}</span></div>
+        <span>${replay?'研究预测 '+num(replay.expected_return*100,'%',2)+' · 后续实际 '+num(replay.actual_return*100,'%',2)+' · 非真实冻结预测':replayData?.status==='NO_OOS_PREDICTION'?'该日期无样本外实验记录':replayData?.status==='INSUFFICIENT_OUTCOME_DATA'?'记录缺少有效结果，无法回放':replayData?.status==='BLOCKED'?'回放不可用：'+asText(replayData.code):'选择日期后显示真实研究记录'}</span></div>
       <p class="l1-research-warning">历史回溯 ≠ 当时已冻结的前向预测。研究指标不自动授予模型使用资格，误报、校准和概率增量必须使用独立样本外评价。</p>`);
   }
   pages.market=async()=>{
@@ -183,12 +184,16 @@
     const rec=extractForecast(forecast,fresh,S.horizon);
     const old=oldRaw.ok?oldRaw.data:null;
     const observationStatus=fresh?.modules?.market_observation?.freshness_status || 'BLOCKED';
+    const retrospective=typed?.status==='CURRENT_VINTAGE_RETROSPECTIVE_OBSERVATION';
+    const stale=typed?.asof_session&&fresh?.asof_session&&typed.asof_session!==fresh.asof_session;
     const html=`<div class="l1-cockpit">
       <div class="l1-head"><div><div class="l1-breadcrumb">L1 / MARKET FORECAST <span>· 01</span></div><h1>市场未来展望 <span class="l1-beta">RESEARCH</span></h1><p>从市场内部变化推断未来收益与风险分布；对每个预测提供真实证据，不把过去行情包装成未来信号。</p></div>
       <div class="l1-head-actions"><span class="l1-access ${rec?'good':''}"><i></i>${rec?'已读取冻结预测':'模型 / 数据接入待完成'}</span><button class="l1-refresh" type="button" data-l1-refresh>↻ 重新核查</button></div></div>
       ${indicatorCards(fresh,system,observationStatus)}
+      ${retrospective?`<div class="l1-data-note"><span class="l1-dot warn"></span><span>当前版本行情回顾观察 · 交易日 ${asText(typed.asof_session)} · 数据获取时间 UTC ${stamp(typed.source_time?.available_at)} · 非当时冻结预测，原价不代表含分红总收益</span></div>`:''}
+      ${stale?`<div class="l1-data-note"><span class="l1-dot warn"></span><span>观察日期 ${asText(typed.asof_session)} 与最新完成交易日 ${asText(fresh.asof_session)} 不一致，属于过期数据。</span></div>`:''}
       <div class="l1-top-grid">${currentForecast(rec,S.horizon)}${firstPassage(rec)}</div>
-      ${driversAndSignals(typed)}${domainsGrid(typed)}${validation(old,rec)}${researchTools(anomalyRaw?.ok?anomalyRaw.data:null, validationRaw?.ok?validationRaw.data:null, replayRaw?.ok?replayRaw.data:null)}
+      ${driversAndSignals(typed)}${domainsGrid(typed)}${validation(old,rec)}${researchTools(anomalyRaw?.ok?anomalyRaw.data:null, validationRaw?.ok?validationRaw.data:null, replayRaw?.ok?replayRaw.data:replayRaw?{status:'BLOCKED',code:replayRaw.error?.message}:null)}
       <div class="l1-bottom-note"><span>QDR · MARKET RESEARCH · L1</span><span>观察 / 回溯 / 前向预测分级 · 真实订单关闭</span></div></div>`;
     return {title:'L1 市场未来展望',html,mount(){
       document.querySelectorAll('[data-l1-horizon]').forEach(btn=>btn.addEventListener('click',()=>{

@@ -160,7 +160,19 @@ def _recent_audit(root,asof=None):
 
 
 def observations_for_api(root,asof=None):
-    folder,m,day,feat,audit=_recent_audit(root,asof)
+    try:
+        folder,m,day,feat,audit=_recent_audit(root,asof)
+    except L1Blocked as exc:
+        if exc.code!='L1_NO_RESEARCH_ARCHIVE':
+            raise
+        from quant_research.workflow.l1_current_observation import current_observation_for_api
+        from quant_research.policy import PolicyError
+        root=Path(root).resolve()
+        try:
+            return current_observation_for_api(root/'data/real_v21.duckdb',asof=asof,
+                                               raw_root=root/'data/raw',symbols=['SPY'])
+        except (PolicyError,ValueError,OSError) as error:
+            raise L1Blocked(getattr(error,'code','L1_CURRENT_OBSERVATION_UNAVAILABLE')) from error
     row=feat.loc[feat.date.eq(day)].iloc[0]
     domains=domain_status(feat,audit,asof=day)
     relevant=audit.loc[audit.date.eq(day)].set_index('feature')
@@ -218,6 +230,10 @@ def replay_for_api(root,asof,horizon):
     f=rows.loc[pd.to_datetime(rows.date).eq(day)&rows.horizon.eq(int(horizon))]
     if len(f)!=1:return {'status':'NO_OOS_PREDICTION','asof_session':str(day.date()),'horizon':int(horizon),'prediction':None}
     v=f.iloc[0]
+    required=('e03_expected_return','target_return','e01_rv_model','target_forward_rv')
+    if any(not np.isfinite(pd.to_numeric(v.get(key),errors='coerce')) for key in required):
+        return {'status':'INSUFFICIENT_OUTCOME_DATA','asof_session':str(day.date()),
+                'horizon':int(horizon),'prediction':None}
     return {'status':'RETROSPECTIVE_RESEARCH_ONLY','asof_session':str(day.date()),'horizon':int(horizon),
             'prediction':{'expected_return':float(v.e03_expected_return),
                           'actual_return':float(v.target_return),
@@ -231,6 +247,8 @@ def market_overview_for_api(root,horizon,asof=None):
     observation=observations_for_api(root,asof)
     observation['forecast']=None
     observation['horizon']=int(horizon)
+    if observation['status']=='CURRENT_VINTAGE_RETROSPECTIVE_OBSERVATION':
+        return observation
     from quant_research.workflow.l1_forward import latest_forward_for_api
     sealed=latest_forward_for_api(root,observation['asof_session'],int(horizon))
     if sealed is not None:

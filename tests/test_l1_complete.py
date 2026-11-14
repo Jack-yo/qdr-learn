@@ -154,6 +154,18 @@ def test_archive_api_and_tamper_block(tmp_path):
         market_overview_for_api(tmp_path,3)
 
 
+def test_replay_blocks_missing_outcome_instead_of_returning_nan(tmp_path, monkeypatch):
+    from quant_research.workflow import l1_runtime
+    day=pd.Timestamp('2024-01-03')
+    pd.DataFrame([{'date':day,'horizon':3,'e03_expected_return':.01,
+                   'target_return':None,'e01_rv_model':.2,
+                   'target_forward_rv':.3,'target_first_touch':'NEITHER'}]).to_csv(
+                       tmp_path/'oos_predictions.csv',index=False)
+    monkeypatch.setattr(l1_runtime,'_recent_audit',lambda root,asof: (tmp_path,{},day,None,None))
+    result=l1_runtime.replay_for_api(tmp_path,str(day.date()),3)
+    assert result['status']=='INSUFFICIENT_OUTCOME_DATA' and result['prediction'] is None
+
+
 def test_optional_raw_math_and_event_cutoff():
     from quant_research.research.l1_derived_sources import (
        derive_snapshot,option_interest_concentration,dealer_gamma_scenario,

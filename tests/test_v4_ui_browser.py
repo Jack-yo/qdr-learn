@@ -210,14 +210,14 @@ def local_app():
 def _open(browser,base,route):
     page=browser.new_page(viewport={"width":1536,"height":900})
     page.goto(base+"/studio#"+route,wait_until="domcontentloaded")
-    page.locator("#content .heading").wait_for(timeout=10000)
-    if route!="overview":
+    page.locator("#content .l1-head" if route=="market" else "#content .heading").wait_for(timeout=10000)
+    if route not in ("overview","market"):
         page.locator(".v4-subtab").first.wait_for(timeout=10000)
     return page
 
 
 def test_six_page_information_architecture_and_keyboard_tabs(browser,local_app):
-    expected={"market":4,"style":5,"lab":4,"screen":4,"risk":5}
+    expected={"style":5,"lab":4,"screen":4,"risk":5}
     for name,count in expected.items():
         page=_open(browser,local_app,name)
         try:
@@ -230,17 +230,11 @@ def test_six_page_information_architecture_and_keyboard_tabs(browser,local_app):
             assert tabs.nth(following).get_attribute("aria-selected")=="true"
             assert page.locator("#v4-panel-"+name+"-"+str(following)).is_visible()
             assert not page.locator("#v4-panel-"+name+"-"+str(selected)).is_visible()
-            if name=="market":
-                assert page.locator(".v4-five-metrics .kpi").count()==5
-                assert page.get_by_text("历史 H1 上涨概率").count()==1
             if name=="risk":
                 assert page.locator(".v4-five-metrics .kpi").count()==5
             if name=="lab":
                 assert page.locator("details #v4-factor-hypothesis").count()==1
                 assert not page.locator("#v4-factor-hypothesis").is_visible()
-            if name=="market":
-                tabs.nth(3).click()
-                assert "undefined" not in page.locator("#v4-panel-market-3").inner_text()
         finally:
             page.close()
 
@@ -248,6 +242,7 @@ def test_six_page_information_architecture_and_keyboard_tabs(browser,local_app):
 def test_overview_research_flow_and_market_validation(browser,local_app):
     page=_open(browser,local_app,"overview")
     try:
+        page.get_by_text('最新已收盘行情观察').wait_for(timeout=10000)
         assert page.get_by_text('最新已收盘行情观察').count()==1
         assert page.locator('.v4-current-quotes').get_by_text('$100.00').count()==1
         assert page.get_by_text('采集时间晚于当日决策截止',exact=False).count()==1
@@ -256,13 +251,12 @@ def test_overview_research_flow_and_market_validation(browser,local_app):
         page.locator("#v4-run-observation").click()
         page.get_by_text("已提交日终观察", exact=False).first.wait_for()
         page.locator("#nav-market").click()
-        page.get_by_role("tab",name="预测验证").click()
-        panel=page.locator("#v4-panel-market-3")
-        assert panel.get_by_text("历史样本外概率可靠性").count()==1
-        assert page.get_by_text("0.2200").count()>=1
-        assert panel.locator(".v4-calibration-row").count()==1
-        page.get_by_role("tab",name="风险驱动").click()
-        assert page.get_by_text("5D / 20D 波动比").count()>=1
+        page.locator('.l1-cockpit').wait_for()
+        assert page.locator('[data-l1-horizon]').count()==3
+        assert page.locator('[data-l1-open-domain]').count()==12
+        assert page.get_by_text('暂无合格预测',exact=False).count()>=1
+        page.locator('[data-l1-horizon="1"]').click()
+        page.locator('[data-l1-horizon="1"][aria-pressed="true"]').wait_for()
     finally:
         page.close()
 
