@@ -629,6 +629,21 @@ def handler(console):
                     return self.send(200,account_summary(console.root/'data/paper.sqlite3',config))
                 except (OSError,ValueError,KeyError):
                     return self.send(409,{'status':'BLOCKED','code':'PAPER_CONFIG_MISSING'})
+            if path == '/api/v1/l1/v2/overview':
+                from .workflow.l1_v2 import current_l1_v2
+                from .data.l1_light_sources import SourceUnavailable
+                params = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+                if set(params)-{'horizon','refresh'} or any(len(v)!=1 for v in params.values()):
+                    return self.send(400,{'schema':'qdr.l1.v2','status':'BLOCKED','code':'INVALID_QUERY'})
+                if params.get('horizon',['3'])[0] not in ('1','3','5') or params.get('refresh',['0'])[0] not in ('0','1'):
+                    return self.send(400,{'schema':'qdr.l1.v2','status':'BLOCKED','code':'INVALID_QUERY'})
+                try:
+                    data=current_l1_v2(console.root,refresh=params.get('refresh',['0'])[0]=='1')
+                    return self.send(200,data)
+                except SourceUnavailable as exc:
+                    return self.send(409,{'schema':'qdr.l1.v2','status':'BLOCKED','code':exc.code})
+                except (ValueError, OSError, KeyError, TypeError):
+                    return self.send(409,{'schema':'qdr.l1.v2','status':'BLOCKED','code':'L1_V2_DATA_INVALID'})
             if path.startswith('/api/v1/l1/'):
                 from .workflow.l1_runtime import (
                     L1Blocked, market_overview_for_api, observations_for_api,
