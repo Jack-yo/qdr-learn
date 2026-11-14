@@ -118,3 +118,12 @@
 .l1-replay button{background:#1e4750;color:#9de5df;border:1px solid #3e8b91;border-radius:7px;padding:8px 12px}
 .l1-research-warning{color:#8197b1;font-size:11px;line-height:1.7}
 @media(max-width:950px){.l1-research-columns{grid-template-columns:1fr}}
+
+button.l1-domain{cursor:pointer;text-align:left;font:inherit;color:inherit;width:100%}
+button.l1-domain[aria-pressed="true"]{border-color:#4bafaa;box-shadow:inset 0 0 0 1px #377f81}
+.l1-domain-details{margin-top:16px;border:1px solid #2e5066;background:#13273b;padding:17px;border-radius:11px}
+.l1-domain-details h3{margin:0 0 7px;font-size:13px;color:#ecf6fe}
+.l1-domain-details p{margin:0 0 12px;color:#849cb5;font-size:11px}
+.l1-domain-details small{display:block;color:#7b94ad;font-size:10px;line-height:1.7}
+.l1-domain-details-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:22px}
+@media(max-width:850px){.l1-domain-details-list{grid-template-columns:1fr}}

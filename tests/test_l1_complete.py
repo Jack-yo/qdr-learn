@@ -96,6 +96,8 @@ def test_archive_api_and_tamper_block(tmp_path):
     response=market_overview_for_api(tmp_path,3)
     assert response['schema']=='qdr.l1.market.v1' and response['forecast'] is None
     assert len(response['domains'])==12 and response['status']=='OBSERVATION_ONLY'
+    assert len(response['features'])==len(REGISTRY)
+    assert all(x['research_only'] for x in response['features'])
     assert validation_for_api(tmp_path)['model_admitted'] is False
     assert replay_for_api(tmp_path,clock.date.iloc[-1],3)['status']=='NO_OOS_PREDICTION'
     (out/'features.csv').write_text('bad',encoding='utf8')

@@ -142,6 +142,18 @@ def observations_for_api(root,asof=None):
     folder,m,day,feat,audit=_recent_audit(root,asof)
     row=feat.loc[feat.date.eq(day)].iloc[0]
     domains=domain_status(feat,audit,asof=day)
+    relevant=audit.loc[audit.date.eq(day)].set_index('feature')
+    detail=[]
+    for feature,dimension in REGISTRY.items():
+        audit_row=relevant.loc[feature] if feature in relevant.index else None
+        status='MISSING' if audit_row is None else str(audit_row.status)
+        raw=row.get(feature)
+        value=float(raw) if pd.notna(raw) and status=='OBSERVED' else None
+        detail.append({'id':feature,'domain':dimension,'status':status,'value':value,
+                       'source':None if audit_row is None else str(audit_row.source),
+                       'available_at':None if audit_row is None else str(audit_row.available_at),
+                       'reason':'NOT_AVAILABLE' if audit_row is None else str(audit_row.reason),
+                       'research_only':True})
     fields=['market_return_1','market_return_5','market_vol_20','breadth_up_share','market_vol_ratio']
     drivers=[]
     for col in fields:
@@ -152,6 +164,7 @@ def observations_for_api(root,asof=None):
             'knowledge_cutoff_utc':str(row.decision_cutoff_utc),
             'source_snapshot_sha256':m['source_snapshot_sha256'],
             'model_version':m['model_version'],'domains':domains,'drivers':drivers,
+            'features':detail,
             'feature_rows':len(feat),'historical_pit_verified':False,
             'current_prediction_eligible':False,'forecast':None}
 
@@ -203,6 +216,7 @@ def market_overview_for_api(root,horizon,asof=None):
         observation.update(sealed)
         observation['domains']=observations_for_api(root,asof)['domains']
         observation['drivers']=observations_for_api(root,asof)['drivers']
+        observation['features']=observations_for_api(root,asof)['features']
     return observation
 
 

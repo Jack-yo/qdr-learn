@@ -7,7 +7,7 @@
   const V = window.V4;
   if (!V) throw Error('QDR L1 must load after the V4 UI core');
   const {pages, state, e, n, pct, date, settle, show} = V;
-  const S = { horizon: state.marketHorizon || 3, dimension: 'all', view: 'distribution', expanded: false, replayDate: '' };
+  const S = { horizon: state.marketHorizon || 3, dimension: 'all', selectedDomain: null, view: 'distribution', expanded: false, replayDate: '' };
   const DOMAINS = [
     ['price', '价格与趋势', '走势、速度、隔夜与盘中结构', '价格'],
     ['breadth', '真实市场广度', '上涨参与率、创新高低、广度背离', '内部结构'],
@@ -139,8 +139,9 @@
       <div class="l1-domain-grid">${displayed.map(([id,name,desc,group],i)=>{
         const item=lookup.get(id), status=item?.status||'MISSING';
         const val=['OBSERVED','PARTIAL'].includes(status)&&isNum(item.value)?num(item.value,item.unit||'',item.precision??2):'—';
-        return `<article class="l1-domain"><div class="l1-domain-h"><span class="l1-domain-icon">${String(DOMAINS.findIndex(x=>x[0]===id)+1).padStart(2,'0')}</span><span class="l1-domain-state ${e(status.toLowerCase())}">${label(status)}</span></div><strong>${e(name)}</strong><p>${e(desc)}</p><div class="l1-domain-number">${val}</div><small>${status==='OBSERVED'?asText(item.label||'已到达的数据观察值') : status==='PARTIAL'?'部分覆盖：仅显示已取得的实际数值': '数据或计算尚未完成'}<span class="l1-domain-coverage">${item?.coverage?e(item.coverage.available+' / '+item.coverage.registered+' 项特征'):''}</span></small></article>`;
-      }).join('')}</div>`);
+        return `<button type="button" class="l1-domain" data-l1-open-domain="${e(id)}" aria-pressed="${S.selectedDomain===id}"><div class="l1-domain-h"><span class="l1-domain-icon">${String(DOMAINS.findIndex(x=>x[0]===id)+1).padStart(2,'0')}</span><span class="l1-domain-state ${e(status.toLowerCase())}">${label(status)}</span></div><strong>${e(name)}</strong><p>${e(desc)}</p><div class="l1-domain-number">${val}</div><small>${status==='OBSERVED'?asText(item.label||'已到达的数据观察值') : status==='PARTIAL'?'部分覆盖：仅显示已取得的实际数值': '数据或计算尚未完成'}<span class="l1-domain-coverage">${item?.coverage?e(item.coverage.available+' / '+item.coverage.registered+' 项特征'):''}</span></small></button>`;
+      }).join('')}</div>
+      ${S.selectedDomain ? `<div class="l1-domain-details"><h3>${e((DOMAINS.find(x=>x[0]===S.selectedDomain)||[])[1]||'指标明细')}</h3><p>数据、来源及可得时点，研究观察不代表领先预测有效。</p><div class="l1-domain-details-list">${(Array.isArray(data?.features)?data.features:[]).filter(x=>x.domain===S.selectedDomain).map(x=>`<div class="l1-research-row"><span>${e(x.id)} <small>${asText(x.status)} · ${asText(x.source)}</small></span><strong>${isNum(x.value)?n(x.value,4):'—'} <small>${asText(x.available_at)}</small></strong></div>`).join('')||'<p class="l1-no-features">该维度尚未取得可核验的指标明细</p>'}</div></div>` : ''}`);
   }
   function validation(oldStudy, rec) {
     const rows=Array.isArray(oldStudy?.summary?.direction)?oldStudy.summary.direction:[];
@@ -197,6 +198,10 @@
       }));
       document.querySelectorAll('[data-l1-domain]').forEach(btn=>btn.addEventListener('click',()=>{
         S.dimension=btn.dataset.l1Domain;show('market');
+      }));
+      document.querySelectorAll('[data-l1-open-domain]').forEach(btn=>btn.addEventListener('click',()=>{
+        const d=btn.dataset.l1OpenDomain;
+        S.selectedDomain=S.selectedDomain===d?null:d;show('market');
       }));
       document.querySelector('[data-l1-refresh]')?.addEventListener('click',()=>show('market'));
       document.querySelector('[data-l1-replay]')?.addEventListener('click',()=>{
