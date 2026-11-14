@@ -175,6 +175,8 @@ def _fit_predict(train:pd.DataFrame,test:pd.DataFrame,protocol:L1Protocol)->dict
     scale=np.clip(pred_rv / max(float(train.forward_rv.mean()),1e-5),.35,3)
     quant=np.sort(pred_mu+np.quantile(resid,QUANTILES)*scale)
     result.update({'e03_baseline_mean':float(np.mean(y)),'e03_baseline_quantiles':[float(t) for t in base_quant],
+                   'e03_baseline_p_up':float((y>0).mean()),
+                   'e03_baseline_p_downside':float((y<=-protocol.lower_barrier).mean()),
                    'e03_expected_return':pred_mu,'e03_quantiles':[float(t) for t in quant],
                    'e03_p_up_unverified':float((resid*scale+pred_mu>0).mean()),
                    'e03_p_downside_unverified':float((resid*scale+pred_mu<=-protocol.lower_barrier).mean())})
@@ -274,11 +276,24 @@ def score_l1_oos(predictions:pd.DataFrame,protocol:L1Protocol=L1Protocol())->pd.
         qloss=np.array([_distribution_loss(p,v) for p,v in zip(group.e03_quantiles,y)])
         baseline=np.array([_distribution_loss(p,v) for p,v in zip(group.e03_baseline_quantiles,y)])
         eligible=group[group.e02_probs.map(lambda x:isinstance(x,dict)) & group.target_first_touch.isin(['UP','DOWN','NEITHER'])]
-        brier=brier0=None; event_n=0
+        brier=brier0=event_logloss=None; event_n=0; event_counts={}
         if len(eligible):
             labels=['UP','DOWN','NEITHER'];obs=np.array([[float(x==actual) for x in labels] for actual in eligible.target_first_touch])
             pred=np.array([[p[k] for k in labels] for p in eligible.e02_probs]); prior=np.array([[p[k] for k in labels] for p in eligible.e02_baseline])
             brier=float(((pred-obs)**2).sum(axis=1).mean());brier0=float(((prior-obs)**2).sum(axis=1).mean());event_n=len(eligible)
+            event_logloss=float(-np.sum(obs*np.log(np.clip(pred,1e-12,1)),axis=1).mean())
+            chosen=np.argmax(pred,axis=1)
+            for i,label in enumerate(labels):
+                positive=obs[:,i].astype(bool); predicted=chosen==i
+                event_counts[label]={'actual':int(positive.sum()),
+                    'false_positives':int((predicted & ~positive).sum()),
+                    'false_negatives':int((~predicted & positive).sum())}
+        mean_pred=group.e03_expected_return.to_numpy(float)
+        mean_base=group.e03_baseline_mean.to_numpy(float)
+        up=(y>0).astype(float);down=(y<=-protocol.lower_barrier).astype(float)
+        p_up=group.e03_p_up_unverified.to_numpy(float)
+        p_down=group.e03_p_downside_unverified.to_numpy(float)
+        quantiles=np.asarray(group.e03_quantiles.tolist(),dtype=float)
         report.append({'horizon':int(h),'samples':len(group),
           'e01_rv_mse':float(np.mean((r1-rv)**2)),'e01_baseline_mse':float(np.mean((r0-rv)**2)),
           'e01_ewma_mse':float(np.mean((group.e01_rv_ewma.to_numpy(float)-rv)**2)),
@@ -286,7 +301,19 @@ def score_l1_oos(predictions:pd.DataFrame,protocol:L1Protocol=L1Protocol())->pd.
           'e03_pinball_loss':float(qloss.mean()),'e03_baseline_pinball_loss':float(baseline.mean()),
           'e03_paired_delta_95ci':_bootstrap_delta(qloss-baseline,seed=protocol.seed),
           'e03_q10_q90_coverage':float(np.mean([(q[0]<=v<=q[4]) for q,v in zip(group.e03_quantiles,y)])),
+          'e03_quantile_hit_rates':{f'q{int(q*100)}':float(np.mean(y<=quantiles[:,i])) for i,q in enumerate(QUANTILES)},
+          'e03_mean_mse':float(np.mean((mean_pred-y)**2)),
+          'e03_baseline_mean_mse':float(np.mean((mean_base-y)**2)),
+          'e03_up_brier_unverified':float(np.mean((p_up-up)**2)),
+          'e03_up_baseline_brier':float(np.mean((group.e03_baseline_p_up.to_numpy(float)-up)**2)),
+          'e03_downside_brier_unverified':float(np.mean((p_down-down)**2)),
+          'e03_downside_baseline_brier':float(np.mean((group.e03_baseline_p_downside.to_numpy(float)-down)**2)),
+          'e03_probability_status':'NOT_CALIBRATED_RESEARCH_ONLY',
+          'e03_downside_threshold':-protocol.lower_barrier,
           'e02_scored_samples':event_n,'e02_brier':brier,'e02_baseline_brier':brier0,
+          'e02_log_loss':event_logloss,
+          'e02_event_counts':event_counts,
+          'e02_ambiguous_samples':int(group.target_first_touch.eq('AMBIGUOUS').sum()),
           'research_only':True,'model_admitted':False})
     return pd.DataFrame(report)
 
@@ -313,5 +340,5 @@ def forecast_l1_research(bars:pd.DataFrame,observations:pd.DataFrame,
                     'train_last_label_available_at':past.label_available_at.max().isoformat(),
                     'train_sessions':len(past)})
     return {'asof_session':str(day.date()),'status':'RETROSPECTIVE_RESEARCH_ONLY',
-            'model_version':'l1-e01e02e03-v2-'+hashlib.sha256(json.dumps(protocol.__dict__,sort_keys=True).encode()).hexdigest()[:16],
+            'model_version':'l1-e01e02e03-v3-'+hashlib.sha256(json.dumps(protocol.__dict__,sort_keys=True).encode()).hexdigest()[:16],
             'research_only':True,'trade_eligible':False,'horizons':out}

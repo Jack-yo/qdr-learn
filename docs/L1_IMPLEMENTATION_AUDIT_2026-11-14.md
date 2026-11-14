@@ -23,7 +23,7 @@ an unknown source availability time. All entries remain ineligible until the
 required independent provenance and PIT checks are completed.
 
 A separate single-session audit of the verified 2026-11-13 close snapshot is at
-`outputs/l1_snapshot_audits/2026-11-13/feature_coverage.csv`. It finds 2 of
+`outputs/l1_snapshot_audits/2026-11-13-provenance/feature_coverage.csv`. It finds 2 of
 57 features with values from that one session; rolling windows deliberately
 remain unavailable. These numbers are not estimates of full historical feed
 coverage. Run it with `python -m quant_research.workflow.l1_snapshot_audit
@@ -38,6 +38,10 @@ The E01 comparison now uses a recursive daily-return EWMA on the purged
 training window and reports its MSE; its deliberate embargo lag must be
 considered when interpreting comparisons. The research runner defaults to
 evaluating every eligible session. Neither change establishes model advantage.
+E03 reporting includes mean squared error, quantile hit rates, and explicitly
+uncalibrated Brier scores versus historical-frequency baselines; E02 reports
+multiclass log loss. `oos_metrics_by_year.csv` splits those results by year.
+These are implemented metrics, not results from a qualified real-data run.
 The historical research entry point requires consecutive XNYS sessions,
 timezone-aware source and cutoff timestamps, and a decision cutoff after the
 session close and before the following open. This rejects invalid input; it

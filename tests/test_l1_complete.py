@@ -52,6 +52,30 @@ def test_ewma_benchmark_is_recursive_daily_return_variance():
     assert _ewma_rv(values)==pytest.approx(expected**.5)
 
 
+def test_distribution_scores_use_realized_returns_and_label_uncalibrated_probabilities():
+    row={'horizon':1,'target_return':.02,'target_forward_rv':.2,
+         'e01_rv_model':.2,'e01_rv_baseline':.3,'e01_rv_ewma':.25,
+         'e03_quantiles':[-.02,-.01,0,.01,.03],
+         'e03_baseline_quantiles':[-.03,-.02,0,.02,.04],
+         'e03_expected_return':.01,'e03_baseline_mean':0,
+         'e03_p_up_unverified':.75,'e03_baseline_p_up':.5,
+         'e03_p_downside_unverified':.1,'e03_baseline_p_downside':.2,
+         'e02_probs':None,'target_first_touch':'NEITHER'}
+    score=score_l1_oos(pd.DataFrame([row])).iloc[0]
+    assert score.e03_up_brier_unverified==pytest.approx(.25**2)
+    assert score.e03_up_baseline_brier==pytest.approx(.5**2)
+    assert score.e03_mean_mse==pytest.approx(.01**2)
+    assert score.e03_quantile_hit_rates['q90']==1.0
+    assert score.e03_probability_status=='NOT_CALIBRATED_RESEARCH_ONLY'
+    row['e02_probs']={'UP':.7,'DOWN':.2,'NEITHER':.1}
+    row['e02_baseline']={'UP':.3,'DOWN':.3,'NEITHER':.4}
+    row['target_first_touch']='DOWN'
+    event=score_l1_oos(pd.DataFrame([row])).iloc[0]
+    assert event.e02_event_counts['UP']['false_positives']==1
+    assert event.e02_event_counts['DOWN']['false_negatives']==1
+    assert event.e02_log_loss==pytest.approx(-np.log(.2))
+
+
 def test_l1_feature_registry_and_optional_lateness():
     bars,clock=fixture(50)
     base,_=compute_l1_observations(bars,clock)
@@ -171,6 +195,9 @@ def test_l1_models_purge_forecast_and_metric_contract():
     metrics=score_l1_oos(oos,protocol)
     assert len(metrics)==3 and metrics.research_only.all()
     assert not metrics.model_admitted.any()
+    assert metrics.e03_probability_status.eq('NOT_CALIBRATED_RESEARCH_ONLY').all()
+    assert metrics.e03_quantile_hit_rates.map(lambda value: set(value)=={'q10','q25','q50','q75','q90'}).all()
+    assert metrics.e03_up_brier_unverified.between(0,1).all()
     f=forecast_l1_research(bars,features,clock,protocol)
     assert f['trade_eligible'] is False and len(f['horizons'])==3
 
@@ -198,12 +225,15 @@ def test_archive_api_and_tamper_block(tmp_path):
     assert len(coverage)==len(REGISTRY)
     assert not coverage.research_eligible.any()
     assert set(coverage.PIT_status)=={'NOT_INDEPENDENTLY_VERIFIED'}
+    yearly=pd.read_csv(out/'oos_metrics_by_year.csv')
+    assert set(yearly.horizon)=={1,3,5} and yearly.samples.gt(0).all()
     response=market_overview_for_api(tmp_path,3)
     assert response['schema']=='qdr.l1.market.v1' and response['forecast'] is None
     assert len(response['domains'])==12 and response['status']=='OBSERVATION_ONLY'
     assert len(response['features'])==len(REGISTRY)
     assert all(x['research_only'] for x in response['features'])
-    assert validation_for_api(tmp_path)['model_admitted'] is False
+    validation=validation_for_api(tmp_path)
+    assert validation['model_admitted'] is False and len(validation['yearly_metrics'])==len(yearly)
     assert replay_for_api(tmp_path,clock.date.iloc[-1],3)['status']=='NO_OOS_PREDICTION'
     (out/'features.csv').write_text('bad',encoding='utf8')
     with pytest.raises(L1Blocked,match='HASH_MISMATCH'):

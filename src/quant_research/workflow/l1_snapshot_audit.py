@@ -19,6 +19,12 @@ def audit_snapshot(root: Path, asof: str, output: Path) -> dict:
     cutoffs = pd.DataFrame([{'date': asof, 'decision_cutoff_utc': snapshot['frozen_at_utc']}])
     base, _ = compute_l1_observations(bars, cutoffs)
     _, audit = add_l1_features(base, bars, cutoffs)
+    benchmark = bars.loc[bars.symbol.eq('SPY')]
+    if len(benchmark) != 1:
+        raise ValueError('L1_SNAPSHOT_BENCHMARK_MISSING')
+    observed = audit.status.eq('OBSERVED')
+    audit.loc[observed, 'source'] = f"{snapshot['source']}:{snapshot['feed']}:raw:SPY"
+    audit.loc[observed, 'available_at'] = pd.Timestamp(benchmark.iloc[0].available_at)
     report = feature_coverage_report(audit)
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)

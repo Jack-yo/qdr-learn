@@ -118,6 +118,13 @@ def build_l1_research(*,bars,cutoffs,output,universe=None,optional=None,raw_meas
     anomalies=scan_all_l1_anomalies(feat)
     oos=run_l1_oos(raw['bars'],feat,raw['cutoffs'],protocol,evaluation_start=evaluation_start)
     metrics=score_l1_oos(oos,protocol)
+    annual=[]
+    if not oos.empty:
+        for year, rows in oos.groupby(pd.to_datetime(oos.date).dt.year):
+            yearly=score_l1_oos(rows,protocol)
+            yearly.insert(0,'year',int(year))
+            annual.append(yearly)
+    annual_metrics=pd.concat(annual,ignore_index=True) if annual else pd.DataFrame(columns=['year','horizon','samples'])
     # Fitting at the most recent as-of is RETROSPECTIVE_RESEARCH_ONLY,
     # explicitly not a frozen real-time forecast.
     inferred=forecast_l1_research(raw['bars'],feat,raw['cutoffs'],protocol)
@@ -127,7 +134,7 @@ def build_l1_research(*,bars,cutoffs,output,universe=None,optional=None,raw_meas
     outputs={'observations.csv':obs,'features.csv':feat,'coverage.csv':coverage,
              'feature_coverage.csv':feature_coverage_report(audit),
              'feature_audit.csv':audit,'anomalies.csv':anomalies,
-             'oos_predictions.csv':oos,'oos_metrics.csv':metrics}
+             'oos_predictions.csv':oos,'oos_metrics.csv':metrics,'oos_metrics_by_year.csv':annual_metrics}
     hashes={}
     for name,frame in outputs.items():
         path=root/name; _serializable(frame).to_csv(path,index=False)
@@ -244,8 +251,12 @@ def validation_for_api(root):
     rows=[]
     for v in metrics.to_dict(orient='records'):
         rows.append({k:(None if isinstance(x,float) and not np.isfinite(x) else x) for k,x in v.items()})
+    yearly=[]
+    if 'oos_metrics_by_year.csv' in m.get('outputs_sha256',{}):
+        for v in pd.read_csv(folder/'oos_metrics_by_year.csv').to_dict(orient='records'):
+            yearly.append({k:(None if isinstance(x,float) and not np.isfinite(x) else x) for k,x in v.items()})
     return {'status':'RETROSPECTIVE_RESEARCH_ONLY','model_version':m['model_version'],
-            'dataset_pit_attested':False,'model_admitted':False,'metrics':rows}
+            'dataset_pit_attested':False,'model_admitted':False,'metrics':rows,'yearly_metrics':yearly}
 
 
 def replay_for_api(root,asof,horizon):
