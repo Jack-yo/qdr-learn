@@ -37,13 +37,22 @@ def freeze_l1_research(*,bars,observations,cutoffs,output_root,
     first_entry=pd.Timestamp(clock.window(day,1).entry_time).tz_convert('UTC')
     now=pd.Timestamp(now_utc or datetime.now(timezone.utc)).tz_convert('UTC')
     if not signal<=now<first_entry:raise ValueError('OUTSIDE_REAL_FORWARD_FREEZE_WINDOW')
+    current_cutoff=cutoffs.loc[pd.to_datetime(cutoffs.date).eq(pd.Timestamp(day)), 'decision_cutoff_utc']
+    if len(current_cutoff)!=1 or pd.isna(current_cutoff.iloc[0]):
+        raise ValueError('Missing asof decision cutoff')
+    cutoff=pd.Timestamp(current_cutoff.iloc[0])
+    if cutoff.tzinfo is None:
+        raise ValueError('ASOF_CUTOFF_NAIVE')
+    cutoff=cutoff.tz_convert('UTC')
+    if not signal<=cutoff<=now or cutoff>=first_entry:
+        raise ValueError('ASOF_CUTOFF_OUTSIDE_FREEZE_WINDOW')
     observed=observations.loc[pd.to_datetime(observations.date).eq(pd.Timestamp(day))]
     if len(observed)!=1 or bool(observed.iloc[0].get('forecast_eligible')) is not False:
         raise ValueError('Unqualified or missing observation status')
     if pd.to_datetime(bars.date).max()!=pd.Timestamp(day):
         raise ValueError('Future or older-date bars cannot be used for a forward freeze')
     raw=bars.loc[pd.to_datetime(bars.date).eq(pd.Timestamp(day))]
-    if raw.empty or (pd.to_datetime(raw.available_at,utc=True)>signal).any():
+    if raw.empty or (pd.to_datetime(raw.available_at,utc=True)>cutoff).any():
         raise ValueError('Late/absent asof bars')
     inference=forecast_l1_research(bars,observations,cutoffs,protocol,asof=day)
     if inference['asof_session']!=day:raise ValueError('Inference is not as-of T')
@@ -66,7 +75,7 @@ def freeze_l1_research(*,bars,observations,cutoffs,output_root,
              'first_passage_calibration_status':f['e02_status'],
              'train_last_date':entry['train_last_date'],'train_sessions':entry['train_sessions']})
     payload={'schema':'qdr.l1.market.v1','status':'FROZEN_FORWARD_RESEARCH_ONLY',
-        'asof_session':day,'knowledge_cutoff_utc':signal.isoformat(),
+        'asof_session':day,'knowledge_cutoff_utc':cutoff.isoformat(),
         'entry_at_utc':first_entry.isoformat(),'frozen_at_utc':now.isoformat(),
         'source_snapshot_sha256':source_snapshot_sha256,
         'model_version':inference['model_version'],
@@ -99,6 +108,8 @@ def read_l1_frozen(root,asof,identity):
         manifest.get('forecast_sha256')!=sha256(data_bytes).hexdigest()):
         raise ValueError('FROZEN_RESEARCH_ARCHIVE_INVALID')
     payload=json.loads(data_bytes)
+    if sha256(_canonical(payload).encode()).hexdigest()[:16]!=identity:
+        raise ValueError('FROZEN_RESEARCH_IDENTITY_MISMATCH')
     if payload.get('status')!='FROZEN_FORWARD_RESEARCH_ONLY' or payload.get('asof_session')!=str(asof) or payload.get('model_admitted') is not False:
         raise ValueError('INVALID_FORECAST_SCOPE')
     for row in payload.get('forecasts',[]):
@@ -113,9 +124,8 @@ def read_l1_frozen(root,asof,identity):
 def latest_forward_for_api(root,asof,horizon):
     folder=Path(root)/'outputs/l1_frozen'/str(asof)
     if not folder.is_dir():return None
-    archives=sorted((p for p in folder.iterdir() if p.is_dir()),key=lambda p:p.name)
-    for directory in reversed(archives):
-        payload=read_l1_frozen(root,asof,directory.name)
+    archives=[read_l1_frozen(root,asof,p.name) for p in folder.iterdir() if p.is_dir()]
+    for payload in sorted(archives,key=lambda item:pd.Timestamp(item['frozen_at_utc']),reverse=True):
         for h in payload['forecasts']:
             if h['horizon']==horizon:
                 return {**{k:v for k,v in payload.items() if k!='forecasts'},'forecast':h}
@@ -146,7 +156,7 @@ def main(argv=None):
     if a.raw_measurements:
         derived=raw_packets_to_optional(_read(a.raw_measurements),cutoffs,obs)
         optional=derived if optional is None else pd.concat([optional,derived],ignore_index=True)
-    features,_=add_l1_features(obs,bars,cutoffs,optional)
+    features,_=add_l1_features(obs,bars,cutoffs,optional,universe=universe)
     from quant_research.clock import TradingClock
     result=freeze_l1_research(bars=bars,observations=features,cutoffs=cutoffs,
         output_root=a.root,source_snapshot_sha256=a.source_snapshot_sha256,

@@ -41,12 +41,15 @@ OPTIONAL_NAMES={x for vals in OPTIONAL.values() for x in vals}
 
 
 def add_l1_features(base:pd.DataFrame, bars:pd.DataFrame, cutoffs:pd.DataFrame,
-                    optional:pd.DataFrame|None=None) -> tuple[pd.DataFrame,pd.DataFrame]:
+                    optional:pd.DataFrame|None=None, *, universe:pd.DataFrame|None=None,
+                    min_stock_coverage:float=.98) -> tuple[pd.DataFrame,pd.DataFrame]:
     """Compute feasible extras; require explicit dated evidence for optional feeds.
 
     All output observations retain research-only qualification. Any late measurement
     is blocked rather than backdated. Missing PIT sources remain null.
     """
+    if not 0 < min_stock_coverage <= 1:
+        raise ValueError('Invalid stock coverage minimum')
     out=base.sort_values('date').copy().reset_index(drop=True)
     dates=pd.to_datetime(out.date)
     if dates.duplicated().any():raise ValueError('Duplicate observation session')
@@ -88,13 +91,14 @@ def add_l1_features(base:pd.DataFrame, bars:pd.DataFrame, cutoffs:pd.DataFrame,
     if sec.shape[1]>=6:
         all_present=sec.notna().all(axis=1)
         rr=sec.pct_change(fill_method=None)
-        for i in range(20,len(out)):
-            if not all_present.iloc[i-20:i+1].all():continue
-            s=rr.iloc[i-19:i+1]
-            corr=s.corr().to_numpy()
-            triangle=corr[np.triu_indices_from(corr,1)]
-            if np.isfinite(triangle).all():out.loc[i,'sector_corr_20']=triangle.mean()
-            out.loc[i,'sector_dispersion_5']=(sec.iloc[i]/sec.iloc[i-5]-1).std(ddof=0)
+        for i in range(5,len(out)):
+            if all_present.iloc[i-5:i+1].all():
+                out.loc[i,'sector_dispersion_5']=(sec.iloc[i]/sec.iloc[i-5]-1).std(ddof=0)
+            if i>=20 and all_present.iloc[i-20:i+1].all():
+                s=rr.iloc[i-19:i+1]
+                corr=s.corr().to_numpy()
+                triangle=corr[np.triu_indices_from(corr,1)]
+                if np.isfinite(triangle).all():out.loc[i,'sector_corr_20']=triangle.mean()
     clock=cutoffs[['date','decision_cutoff_utc']].copy();clock.date=pd.to_datetime(clock.date)
     clock.decision_cutoff_utc=pd.to_datetime(clock.decision_cutoff_utc,utc=True)
     audits=[]
@@ -127,7 +131,8 @@ def add_l1_features(base:pd.DataFrame, bars:pd.DataFrame, cutoffs:pd.DataFrame,
                 val=getattr(r,feature)
                 specific[key]={'date':r.date,'feature':feature,'status':'OBSERVED' if pd.notna(val) else 'MISSING',
                                'source':'calculated' if feature not in OPTIONAL_NAMES else 'external',
-                               'available_at':r.decision_cutoff_utc,'reason':'COMPUTED_OR_PRESENT' if pd.notna(val) else 'NOT_AVAILABLE'}
+                               # The cutoff is a deadline, not an observed source timestamp.
+                               'available_at':None,'reason':'COMPUTED_OR_PRESENT' if pd.notna(val) else 'NOT_AVAILABLE'}
     return out,pd.DataFrame(list(specific.values())).sort_values(['date','feature']).reset_index(drop=True)
 
 

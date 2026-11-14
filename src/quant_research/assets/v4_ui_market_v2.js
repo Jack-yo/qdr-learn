@@ -46,7 +46,7 @@
         new Date(data.frozen_at_utc) < new Date(data.knowledge_cutoff_utc) ||
         new Date(data.knowledge_cutoff_utc) >= new Date(data.entry_at_utc || 0)) return null;
     const f = data.forecast;
-    if (!f || Number(f.horizon) !== horizon || !validProbability(f.p_up) ||
+    if (!f || Number(f.horizon) !== horizon || !validProbability(f.p_up) || !validProbability(f.p_downside) ||
         !isNum(f.expected_return) || !Array.isArray(f.quantiles) || f.quantiles.length !== 5 ||
         f.quantiles.some(q => !isNum(q)) ||
         f.quantiles.some((q,i) => i > 0 && Number(q)<Number(f.quantiles[i-1]))) return null;

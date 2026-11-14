@@ -53,6 +53,26 @@ def _serializable(frame):
     return x
 
 
+def feature_coverage_report(audit):
+    """Summarize observed records without asserting provider or PIT qualification."""
+    records=[]
+    for feature, domain in REGISTRY.items():
+        rows=audit.loc[audit.feature.eq(feature)].sort_values('date')
+        observed=rows.loc[rows.status.eq('OBSERVED')]
+        n=len(rows)
+        sources=sorted(set(observed.source.dropna().astype(str)))
+        records.append({'feature_id':feature,'domain':domain,
+            'source':', '.join(sources) if sources else None,'frequency':'daily',
+            'start_date':observed.date.min() if len(observed) else None,
+            'end_date':observed.date.max() if len(observed) else None,
+            'available_at':observed.available_at.max() if len(observed) else None,
+            'coverage_ratio':len(observed)/n if n else 0.0,
+            'missing_rate':(n-len(observed))/n if n else 1.0,
+            'PIT_status':'NOT_INDEPENDENTLY_VERIFIED','research_eligible':False,
+            'blocked_reason':'SOURCE_AND_HISTORICAL_PIT_NOT_INDEPENDENTLY_VERIFIED' if len(observed) else 'NO_OBSERVED_VALUES'})
+    return pd.DataFrame(records)
+
+
 def build_l1_research(*,bars,cutoffs,output,universe=None,optional=None,raw_measurements=None,
                       protocol:L1Protocol=L1Protocol(),evaluation_start=None):
     """Implement all three research experiments; fail closed if no valid data."""
@@ -68,7 +88,7 @@ def build_l1_research(*,bars,cutoffs,output,universe=None,optional=None,raw_meas
         measured=raw_packets_to_optional(raw['raw_measurements'],raw['cutoffs'],obs)
         if additional is not None:additional=pd.concat([additional,measured],ignore_index=True)
         else:additional=measured
-    feat,audit=add_l1_features(obs,raw['bars'],raw['cutoffs'],additional)
+    feat,audit=add_l1_features(obs,raw['bars'],raw['cutoffs'],additional,universe=raw.get('universe'))
     anomalies=scan_all_l1_anomalies(feat)
     oos=run_l1_oos(raw['bars'],feat,raw['cutoffs'],protocol,evaluation_start=evaluation_start)
     metrics=score_l1_oos(oos,protocol)
@@ -79,6 +99,7 @@ def build_l1_research(*,bars,cutoffs,output,universe=None,optional=None,raw_meas
     if root.exists():raise FileExistsError('Research output exists; no archive overwrite')
     root.mkdir(parents=True,exist_ok=False)
     outputs={'observations.csv':obs,'features.csv':feat,'coverage.csv':coverage,
+             'feature_coverage.csv':feature_coverage_report(audit),
              'feature_audit.csv':audit,'anomalies.csv':anomalies,
              'oos_predictions.csv':oos,'oos_metrics.csv':metrics}
     hashes={}

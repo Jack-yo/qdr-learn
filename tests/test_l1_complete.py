@@ -63,6 +63,51 @@ def test_l1_feature_registry_and_optional_lateness():
     assert out.iloc[-1].vix_30d==25
 
 
+def test_stock_dispersion_uses_daily_members_and_requires_consecutive_bars():
+    bars, clock = fixture(30)
+    stocks = []
+    membership = []
+    for i in range(30):
+        symbol = f'STOCK{i}'
+        for j, day in enumerate(clock.date):
+            close = 100 * (1 + i * .0001) ** j
+            stocks.append({'date': day, 'symbol': symbol, 'security_id': symbol,
+                           'open': close, 'high': close, 'low': close, 'close': close,
+                           'volume': 1000, 'available_at': (day + pd.Timedelta(hours=21)).isoformat()+'Z'})
+            membership.append({'date': day, 'security_id': symbol, 'is_member': True,
+                               'available_at': (day + pd.Timedelta(hours=20)).isoformat()+'Z'})
+    bars = pd.concat([bars, pd.DataFrame(stocks)], ignore_index=True)
+    universe = pd.DataFrame(membership)
+    base, _ = compute_l1_observations(bars, clock, universe)
+    features, _ = add_l1_features(base, bars, clock, universe=universe)
+    assert features.stock_dispersion_1.iloc[-1] == pytest.approx(np.std(np.arange(30)*.0001))
+    without_universe, _ = add_l1_features(base, bars, clock)
+    assert without_universe.stock_dispersion_1.isna().all()
+
+
+def test_sector_five_day_dispersion_does_not_require_twenty_days():
+    bars, clock = fixture(10)
+    base, _ = compute_l1_observations(bars, clock)
+    features, _ = add_l1_features(base, bars, clock)
+    assert features.sector_dispersion_5.iloc[:5].isna().all()
+    assert features.sector_dispersion_5.iloc[5:].notna().all()
+    assert features.sector_corr_20.isna().all()
+
+
+def test_single_snapshot_audit_never_claims_history_or_model(tmp_path, monkeypatch):
+    from quant_research.workflow import l1_snapshot_audit
+    bars, clock = fixture(1)
+    day = str(clock.date.iloc[0].date())
+    snapshot = {'rows': bars.to_dict('records'), 'frozen_at_utc': clock.decision_cutoff_utc.iloc[0],
+                'source': 'TEST', 'feed': 'TEST', 'source_snapshot_sha256': 'a'*64}
+    monkeypatch.setattr(l1_snapshot_audit, 'read_snapshot', lambda root, asof: snapshot)
+    result = l1_snapshot_audit.audit_snapshot(tmp_path, day, tmp_path/'audit')
+    assert result['sessions'] == 1 and result['historical_pit_verified'] is False
+    assert result['model_admitted'] is False
+    coverage = pd.read_csv(tmp_path/'audit'/'feature_coverage.csv')
+    assert len(coverage) == len(REGISTRY) and not coverage.research_eligible.any()
+
+
 def test_l1_models_purge_forecast_and_metric_contract():
     bars,clock=fixture()
     base,_=compute_l1_observations(bars,clock)
@@ -93,6 +138,10 @@ def test_archive_api_and_tamper_block(tmp_path):
     manifest=build_l1_research(bars=bars_file,cutoffs=clock_file,output=out,
                                protocol=proto,evaluation_start='2023-01-03')
     assert manifest['status']=='RETROSPECTIVE_RESEARCH_ONLY'
+    coverage=pd.read_csv(out/'feature_coverage.csv')
+    assert len(coverage)==len(REGISTRY)
+    assert not coverage.research_eligible.any()
+    assert set(coverage.PIT_status)=={'NOT_INDEPENDENTLY_VERIFIED'}
     response=market_overview_for_api(tmp_path,3)
     assert response['schema']=='qdr.l1.market.v1' and response['forecast'] is None
     assert len(response['domains'])==12 and response['status']=='OBSERVATION_ONLY'
@@ -155,10 +204,28 @@ def test_forward_freeze_is_research_only_and_tamper_evident(tmp_path):
     (identities[0]/'forecast.json').write_text('{}',encoding='utf8')
     with pytest.raises(ValueError,match='INVALID'):
         read_l1_frozen(tmp_path,date,identities[0].name)
+    from hashlib import sha256
+    manifest_path=identities[0]/'manifest.json'
+    manifest=json.loads(manifest_path.read_text(encoding='utf8'))
+    manifest['forecast_sha256']=sha256(b'{}').hexdigest()
+    manifest_path.write_text(json.dumps(manifest),encoding='utf8')
+    with pytest.raises(ValueError,match='IDENTITY_MISMATCH'):
+        read_l1_frozen(tmp_path,date,identities[0].name)
     with pytest.raises(ValueError,match='OUTSIDE_REAL_FORWARD_FREEZE_WINDOW'):
         freeze_l1_research(bars=bars,observations=obs,cutoffs=clock,
            output_root=tmp_path,source_snapshot_sha256='a'*64,asof=date,
            now_utc=instant-pd.Timedelta(hours=2),clock=Clock(),protocol=protocol)
+    late_clock=clock.copy()
+    late_clock.loc[late_clock.index[-1], 'decision_cutoff_utc']=(instant+pd.Timedelta(minutes=30)).isoformat()
+    with pytest.raises(ValueError,match='ASOF_CUTOFF_OUTSIDE_FREEZE_WINDOW'):
+        freeze_l1_research(bars=bars,observations=obs,cutoffs=late_clock,
+           output_root=tmp_path,source_snapshot_sha256='a'*64,asof=date,
+           now_utc=instant,clock=Clock(),protocol=protocol)
+    late_clock.loc[late_clock.index[-1], 'decision_cutoff_utc']=(instant-pd.Timedelta(minutes=10)).isoformat()
+    delayed=freeze_l1_research(bars=bars,observations=obs,cutoffs=late_clock,
+        output_root=tmp_path,source_snapshot_sha256='a'*64,asof=date,
+        now_utc=instant,clock=Clock(),protocol=protocol)
+    assert pd.Timestamp(delayed['knowledge_cutoff_utc'])==instant-pd.Timedelta(minutes=10)
 
 
 def test_all_dimensions_anomaly_scan_past_only():
