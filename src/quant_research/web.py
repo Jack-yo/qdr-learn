@@ -945,7 +945,11 @@ def main(argv=None):
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument('--source',choices=['alpaca','yahoo'],default='alpaca')
     parser.add_argument('--db',type=Path)
+    parser.add_argument('--env-file',type=Path,help='Optional local Alpaca credentials file')
     args = parser.parse_args(argv)
+    if args.env_file:
+        from .cli import load_local_credentials
+        load_local_credentials(args.env_file)
     root = Path.cwd()
     if not (root / "configs/sources.yaml").is_file():
         parser.error("Start from project root")

@@ -104,7 +104,7 @@ def _network(url, headers, *, max_bytes=5_000_000):
 class LiveSources:
     ETF_SYMBOLS=('SPY','QQQ','IWM','RSP','HYG','LQD','TLT','SHY',
                  'XLB','XLC','XLE','XLF','XLI','XLK','XLP','XLRE','XLU','XLV','XLY')
-    CBOE_VIX='https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv'
+    CBOE_VIX='https://cdn-api.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv'
     def __init__(self, root, *, cache=None, fetch=None, env=None, now=None):
         self.cache=cache or BoundedCache(root, now=now)
         self.fetch=fetch or _network
@@ -130,10 +130,20 @@ class LiveSources:
         key=self.env.get('ALPACA_API_KEY'); secret=self.env.get('ALPACA_SECRET_KEY')
         if not key or not secret:
             raise SourceUnavailable('MISSING_ALPACA_CREDENTIALS')
-        feed=self.env.get('QDR_L1_FEED','delayed_sip').lower()
-        if feed not in {'delayed_sip','sip','iex'}:raise SourceUnavailable('INVALID_FEED')
-        end=self._now().date()+timedelta(days=1)
-        start=end-timedelta(days=int(days))
+        requested_feed=self.env.get('QDR_L1_FEED','delayed_sip').lower()
+        if requested_feed not in {'delayed_sip','sip','iex'}:raise SourceUnavailable('INVALID_FEED')
+        # delayed_sip is a snapshot feed; daily historical bars use SIP and a
+        # completed-session boundary, avoiding the restricted recent window.
+        feed='sip' if requested_feed=='delayed_sip' else requested_feed
+        from quant_research.clock import TradingClock
+        clock=TradingClock()
+        now=self._now()
+        if now.tzinfo is None:raise SourceUnavailable('NAIVE_CLOCK')
+        session=clock.calendar.date_to_session(now.date(),direction='previous')
+        while clock.close(session)+timedelta(minutes=20)>now:
+            session=clock.calendar.previous_session(session)
+        end=clock.close(session)+timedelta(minutes=1)
+        start=session.date()-timedelta(days=int(days))
         symbols=tuple(symbols or self.ETF_SYMBOLS)
         if not symbols or len(symbols)>50 or any(not re.fullmatch(r'[A-Z][A-Z0-9.-]{0,13}',x) for x in symbols):
             raise SourceUnavailable('INVALID_SYMBOLS')
@@ -167,9 +177,13 @@ class LiveSources:
             {'APCA-API-KEY-ID':key,'APCA-API-SECRET-KEY':secret},ttl=60,refresh=refresh,feed=feed)
         try:
             doc=json.loads(body)
-            if not isinstance(doc.get('snapshots'),dict):raise ValueError('Invalid snapshots')
+            if not isinstance(doc,dict):raise ValueError('Invalid snapshots')
+            snapshots=doc.get('snapshots',doc)
+            if (not isinstance(snapshots,dict) or not set(snapshots)<=set(symbols)
+                    or any(not isinstance(value,dict) for value in snapshots.values())):
+                raise ValueError('Invalid snapshots')
         except (ValueError,TypeError) as exc:raise SourceUnavailable('INVALID_ALPACA_SNAPSHOTS') from exc
-        return doc['snapshots'],{'fetched_at':stamp,'sha256':digest,'source':'ALPACA_'+feed,
+        return snapshots,{'fetched_at':stamp,'sha256':digest,'source':'ALPACA_'+feed,
                                  'scope':'LAST_TRADE_LEVEL1_QUOTE_NOT_FULL_DEPTH'}
 
     def cboe_vix(self, *, refresh=False):
