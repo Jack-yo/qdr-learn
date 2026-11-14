@@ -214,11 +214,11 @@ def observations_for_api(root,asof=None):
         if exc.code!='L1_NO_RESEARCH_ARCHIVE':
             raise
         from quant_research.workflow.l1_current_observation import current_observation_for_api
-        from quant_research.policy import PolicyError
+        from quant_research.policy import PolicyError, SYMBOLS
         root=Path(root).resolve()
         try:
             return current_observation_for_api(root/'data/real_v21.duckdb',asof=asof,
-                                               raw_root=root/'data/raw',symbols=['SPY'])
+                                               raw_root=root/'data/raw',symbols=SYMBOLS)
         except (PolicyError,ValueError,OSError) as error:
             raise L1Blocked(getattr(error,'code','L1_CURRENT_OBSERVATION_UNAVAILABLE')) from error
     row=feat.loc[feat.date.eq(day)].iloc[0]

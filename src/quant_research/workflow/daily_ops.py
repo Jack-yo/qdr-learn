@@ -91,7 +91,7 @@ def _execute_locked(args, root, run_id, ownership):
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "offline": args.offline,
         "stages": {name: {"status": "NOT_RUN"} for name in
-                   ("maintain-data", "capture", "l1-observation-audit", "daily-observation", "data-catalog")},
+                   ("maintain-data", "capture", "l1-observation-audit", "l1-retrospective-observation", "daily-observation", "data-catalog")},
         "real_orders_enabled": False,
     }
     _write(manifest_path, manifest)
@@ -150,6 +150,18 @@ def _execute_locked(args, root, run_id, ownership):
                 'output': target.relative_to(root).as_posix(), 'forecast_generated': False}
 
     ok, _ = _stage(manifest, manifest_path, 'l1-observation-audit', l1_observe)
+    if not ok:
+        return 4
+
+    def l1_retrospective():
+        from quant_research.workflow.l1_retrospective_report import write_retrospective_report
+        target=root/'outputs'/'l1_retrospective_observations'/session/run_id
+        result=write_retrospective_report(root,session,target)
+        return {'status':result['status'],'observed_features':result['observed_features'],
+                'registered_features':result['registered_features'],
+                'output':target.relative_to(root).as_posix(),'forecast_generated':False}
+
+    ok, _ = _stage(manifest, manifest_path, 'l1-retrospective-observation', l1_retrospective)
     if not ok:
         return 4
 
