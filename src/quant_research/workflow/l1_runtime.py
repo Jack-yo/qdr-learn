@@ -13,7 +13,7 @@ import re
 import pandas as pd
 import numpy as np
 from quant_research.research.l1_observatory import compute_l1_observations,scan_l1_anomalies
-from quant_research.research.l1_features import add_l1_features,domain_status,REGISTRY
+from quant_research.research.l1_features import add_l1_features,domain_status,REGISTRY,scan_all_l1_anomalies
 from quant_research.research.l1_models import (L1Protocol,run_l1_oos,score_l1_oos,
     forecast_l1_research,HORIZONS)
 
@@ -69,7 +69,7 @@ def build_l1_research(*,bars,cutoffs,output,universe=None,optional=None,raw_meas
         if additional is not None:additional=pd.concat([additional,measured],ignore_index=True)
         else:additional=measured
     feat,audit=add_l1_features(obs,raw['bars'],raw['cutoffs'],additional)
-    anomalies=scan_l1_anomalies(feat)
+    anomalies=scan_all_l1_anomalies(feat)
     oos=run_l1_oos(raw['bars'],feat,raw['cutoffs'],protocol,evaluation_start=evaluation_start)
     metrics=score_l1_oos(oos,protocol)
     # Fitting at the most recent as-of is RETROSPECTIVE_RESEARCH_ONLY,

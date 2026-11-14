@@ -5,7 +5,7 @@ import json
 import numpy as np
 import pandas as pd
 import pytest
-from quant_research.research.l1_features import DOMAINS,REGISTRY,add_l1_features,domain_status
+from quant_research.research.l1_features import DOMAINS,REGISTRY,add_l1_features,domain_status,scan_all_l1_anomalies
 from quant_research.research.l1_observatory import compute_l1_observations
 from quant_research.research.l1_models import (L1Protocol,first_touch_label,make_l1_labels,
     run_l1_oos,score_l1_oos,forecast_l1_research)
@@ -159,3 +159,26 @@ def test_forward_freeze_is_research_only_and_tamper_evident(tmp_path):
         freeze_l1_research(bars=bars,observations=obs,cutoffs=clock,
            output_root=tmp_path,source_snapshot_sha256='a'*64,asof=date,
            now_utc=instant-pd.Timedelta(hours=2),clock=Clock(),protocol=protocol)
+
+
+def test_all_dimensions_anomaly_scan_past_only():
+    bars,clock=fixture(125)
+    base,_=compute_l1_observations(bars,clock)
+    extra,_=add_l1_features(base,bars,clock)
+    extra['market_vol_5']=0.20
+    extra.loc[len(extra)-1,'market_vol_5']=2.0
+    found=scan_all_l1_anomalies(extra,lookback=80,min_history=40,z_limit=3)
+    # Constant historical values produce no finite z-score (std=0),
+    # never a fabricated infinitely significant alert.
+    assert not found.feature.eq('market_vol_5').any()
+    # For a real, variable history, a final extreme must be detected,
+    # while changing the final observation cannot alter earlier alerts.
+    rng=np.random.default_rng(17)
+    extra['market_vol_5']=rng.normal(.2,.02,len(extra))
+    extra.loc[len(extra)-1,'market_vol_5']=2
+    found=scan_all_l1_anomalies(extra,lookback=80,min_history=40,z_limit=3)
+    assert found.feature.eq('market_vol_5').any()
+    changed=extra.copy();changed.loc[len(extra)-1,'market_vol_5']=10
+    other=scan_all_l1_anomalies(changed,lookback=80,min_history=40,z_limit=3)
+    assert found.loc[found.date.lt(extra.date.max())].feature.tolist()==other.loc[other.date.lt(extra.date.max())].feature.tolist()
+    assert set(found.status)=={'OBSERVATION_ONLY'}

@@ -147,3 +147,38 @@ def domain_status(features:pd.DataFrame,audit:pd.DataFrame,*,asof=None)->list[di
                     'coverage':{'available':len(valid),'registered':len(names)},
                     'source_available_at':None})
     return ans
+
+
+def scan_all_l1_anomalies(features:pd.DataFrame,*,lookback:int=126,
+                          min_history:int=40,z_limit:float=3.4)->pd.DataFrame:
+    """Run a strictly past-only anomaly scan across all 12 registered domains.
+
+    A fixed conservative threshold reduces, but does not eliminate, multiple
+    testing false alerts. Correlated alerts are capped per domain per day.
+    None of these anomalies is an admitted predictive or trading signal.
+    """
+    if not min_history>=20 or lookback<min_history or z_limit<=0:
+        raise ValueError('Invalid L1 anomaly scan parameters')
+    if features.date.duplicated().any() or not features.date.is_monotonic_increasing:
+        raise ValueError('Require unique chronologically ordered sessions')
+    records=[]
+    for field,domain in REGISTRY.items():
+        if field not in features:continue
+        values=pd.to_numeric(features[field],errors='coerce')
+        history=values.shift(1).rolling(lookback,min_periods=min_history)
+        mean=history.mean();std=history.std()
+        scores=(values-mean)/std.replace(0,np.nan)
+        for index in np.flatnonzero(scores.abs().ge(z_limit).fillna(False).to_numpy()):
+            records.append({'date':features.date.iloc[index],'domain':domain,'feature':field,
+                'value':float(values.iloc[index]),'past_mean':float(mean.iloc[index]),
+                'z_score':float(scores.iloc[index]),'status':'OBSERVATION_ONLY',
+                'predictive_evidence':'NOT_TESTED'})
+    columns=['date','domain','feature','value','past_mean','z_score','status','predictive_evidence']
+    if not records:return pd.DataFrame(columns=columns)
+    result=pd.DataFrame.from_records(records)
+    result['abs_z']=result.z_score.abs()
+    result=result.sort_values(['date','domain','abs_z'],ascending=[True,True,False])
+    result=result.groupby(['date','domain'],sort=False).head(2)
+    result=result.sort_values(['date','abs_z'],ascending=[True,False])
+    result=result.groupby('date',sort=False).head(12)
+    return result[columns].sort_values('date').reset_index(drop=True)
