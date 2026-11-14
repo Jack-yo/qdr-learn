@@ -10,7 +10,7 @@
 
 已有旧端点：`GET /api/v1/v4/freshness`、`GET /api/status`、`GET /api/v1/market/research?horizon=3`。旧历史研究端点仅用于标记为历史的验证结果，**不可作为当前预测**。
 
-新增目标端点：`GET /api/v1/l1/market/overview?horizon=1|3|5`。不支持或数据不合格时返回 409 + 结构化 BLOCKED；前端用明确空态。不要使用 L3 个股预测替代 L1。
+已实现的端点：`GET /api/v1/l1/market/overview?horizon=1|3|5`（附加可选 asof）、`/api/v1/l1/observations`、`/api/v1/l1/anomalies`、`/api/v1/l1/validation`、`/api/v1/l1/replay`。无研究归档返回 409；有可信度分级的历史观察数据时返回 `OBSERVATION_ONLY`，不填假概率；只有真实冻结数据才返回研究级 forecast。不得使用 L3 个股预测替代 L1。
 
 ### 成功响应示例（结构样板；非预测示例数据）
 
@@ -71,4 +71,4 @@
 
 ## 5. 完成状态
 
-前端源文件、样式和离线预览已完成。**真实数据/后端端点未完成**，由 Codex 后续接入。本次不声称 H1/H3/H5 已具备实盘预测能力。
+前端源文件、样式和离线预览已完成。后端只读端点、离线研究引擎和实际 T 日冻结的研究接口已写好，均提供严格空态和研究资格标记。**真实供应商数据、历史 PIT 独立证明及真实样本外模型验收仍未完成，交由 Codex 做数据接入和本地实证**。新端点在缺少本地归档时返回结构化 409；有研究归档但没有真正冻结预测时，可返回 `OBSERVATION_ONLY` 和 12 维观测数据，`forecast=null`。本次不声称 H1/H3/H5 已具备实盘预测能力。新增接口细节见 `docs/L1_CODEX_DATA_HANDOFF.md`。

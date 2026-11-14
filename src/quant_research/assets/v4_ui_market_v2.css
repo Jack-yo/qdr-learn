@@ -104,3 +104,17 @@
 @media(max-width:1080px){.l1-top-grid{grid-template-columns:1fr}.l1-domain-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:720px){.l1-head{flex-direction:column;align-items:flex-start}.l1-head h1{font-size:24px}.l1-topstats{grid-template-columns:repeat(2,minmax(0,1fr))}.l1-domain-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.l1-driver-rows{grid-template-columns:1fr}.l1-valid-grid{grid-template-columns:1fr}.l1-top-grid{grid-template-columns:1fr}.l1-prediction-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}.l1-prediction-metrics .l1-mini{padding:12px 7px}.l1-prediction-metrics .l1-mini strong{font-size:16px}.l1-panel{padding:18px 14px}.l1-head-actions{width:100%}.l1-event .l1-empty{min-height:140px}}
 @media(max-width:450px){.l1-domain-grid{grid-template-columns:1fr}.l1-topstats .l1-mini strong{font-size:16px}.l1-period{width:100%}.l1-period button{min-width:0;flex:1;gap:4px}.l1-period button small{font-size:9px}.l1-data-note{flex-direction:column;align-items:flex-start}.l1-bottom-note{flex-direction:column;align-items:flex-start}}
+
+.l1-domain-coverage{display:block;font-size:9px;opacity:.75;margin-top:5px}
+.l1-research{margin-bottom:16px}
+.l1-research-columns{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.l1-research-columns h3{margin:0 0 9px;color:#e1edf8;font-size:13px}
+.l1-research-row{display:flex;justify-content:space-between;gap:14px;border-top:1px solid #263a4f;padding:10px 0;color:#9dafc8;font-size:11px;line-height:1.5}
+.l1-research-row strong{color:#d6e4f4;font-weight:650;text-align:right}
+.l1-metrics-header{color:#7e9bb5;font-size:10px;line-height:1.5}
+.l1-replay{display:flex;flex-wrap:wrap;align-items:center;gap:12px;border-top:1px solid #263a4f;padding-top:15px;margin-top:15px;color:#9bb0c9;font-size:11px}
+.l1-replay label{color:#d9e8f5}
+.l1-replay input{background:#101e30;color:#d9ebfa;border:1px solid #395167;border-radius:7px;padding:8px;color-scheme:dark}
+.l1-replay button{background:#1e4750;color:#9de5df;border:1px solid #3e8b91;border-radius:7px;padding:8px 12px}
+.l1-research-warning{color:#8197b1;font-size:11px;line-height:1.7}
+@media(max-width:950px){.l1-research-columns{grid-template-columns:1fr}}

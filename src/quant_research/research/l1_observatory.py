@@ -24,14 +24,14 @@ DOMAINS = (
     Domain('price', 'Price / trend', 'P0', 'daily OHLCV'),
     Domain('breadth', 'Equity breadth', 'P0', 'PIT stock membership + daily OHLCV'),
     Domain('volatility', 'Volatility structure', 'P0', 'daily OHLCV; options for IV'),
-    Domain('option_pricing', 'Options pricing', 'P1', 'licensed historical option surface'),
-    Domain('option_positioning', 'Options hedging / positioning', 'P2', 'options OI + assumptions'),
+    Domain('options_pricing', 'Options pricing', 'P1', 'licensed historical option surface'),
+    Domain('options_positioning', 'Options hedging / positioning', 'P2', 'options OI + assumptions'),
     Domain('microstructure', 'Liquidity microstructure', 'P2', 'bid/ask / order-book feed'),
     Domain('correlation', 'Correlation / dispersion', 'P0', 'cross-sectional daily OHLCV'),
     Domain('cross_asset', 'Cross-asset transmission', 'P1', 'ETF / rates / spreads'),
     Domain('positioning', 'Crowding / positioning', 'P2', 'dated reports and ETF flows'),
     Domain('events', 'Macro and event calendar', 'P1', 'release timestamps + revisions'),
-    Domain('financing', 'Funding / financial conditions', 'P2', 'rate / funding series'),
+    Domain('funding', 'Funding / financial conditions', 'P2', 'rate / funding series'),
     Domain('path', 'Return path / tail events', 'P0', 'timestamped OHLCV; intraday for same-bar order'),
 )
 
