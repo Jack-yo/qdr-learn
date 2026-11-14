@@ -331,7 +331,8 @@ def handler(console):
             if path in {'/assets/studio.css','/assets/studio.js',
                         '/assets/v4_ui_core.js','/assets/v4_ui_pages_a.js',
                         '/assets/v4_ui_pages_b.js','/assets/v4_ui_pages_c.js',
-                        '/assets/v4_ui_fidelity.js'}:
+                        '/assets/v4_ui_fidelity.js',
+                        '/assets/v4_ui_market_v2.js', '/assets/v4_ui_market_v2.css'}:
                 asset = Path(__file__).with_name('assets') / path.rsplit('/',1)[1]
                 content_type = 'text/css; charset=utf-8' if path.endswith('.css') else 'text/javascript; charset=utf-8'
                 return self.send(200, asset.read_bytes(), content_type)
@@ -628,6 +629,49 @@ def handler(console):
                     return self.send(200,account_summary(console.root/'data/paper.sqlite3',config))
                 except (OSError,ValueError,KeyError):
                     return self.send(409,{'status':'BLOCKED','code':'PAPER_CONFIG_MISSING'})
+            if path.startswith('/api/v1/l1/'):
+                from .workflow.l1_runtime import (
+                    L1Blocked, market_overview_for_api, observations_for_api,
+                    anomalies_for_api, validation_for_api, replay_for_api,
+                )
+                from datetime import date as date_cls
+                routes = {'/api/v1/l1/market/overview', '/api/v1/l1/observations',
+                          '/api/v1/l1/anomalies', '/api/v1/l1/validation',
+                          '/api/v1/l1/replay'}
+                if path not in routes:
+                    return self.send(404, {'status':'BLOCKED','code':'L1_ROUTE_NOT_FOUND'})
+                query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+                fields = {'asof','horizon'} if path == '/api/v1/l1/replay' else (
+                    {'horizon','asof'} if path == '/api/v1/l1/market/overview' else (
+                    {'asof'} if path in {'/api/v1/l1/observations','/api/v1/l1/anomalies'} else set()))
+                if set(query)-fields or any(len(v)!=1 for v in query.values()):
+                    return self.send(400, {'status':'BLOCKED','code':'L1_QUERY_INVALID'})
+                asof = query.get('asof',[None])[0]
+                try:
+                    if asof is not None and (date_cls.fromisoformat(asof).isoformat()!=asof):
+                        raise ValueError('Invalid asof')
+                    horizon = query.get('horizon',['3'])[0]
+                    if path in {'/api/v1/l1/market/overview','/api/v1/l1/replay'} and horizon not in {'1','3','5'}:
+                        raise ValueError('Invalid horizon')
+                except (ValueError,TypeError):
+                    return self.send(400, {'status':'BLOCKED','code':'L1_QUERY_INVALID'})
+                try:
+                    if path == '/api/v1/l1/market/overview':
+                        payload = market_overview_for_api(console.root,int(horizon),asof)
+                    elif path == '/api/v1/l1/observations':
+                        payload = observations_for_api(console.root,asof)
+                    elif path == '/api/v1/l1/anomalies':
+                        payload = anomalies_for_api(console.root,asof)
+                    elif path == '/api/v1/l1/validation':
+                        payload = validation_for_api(console.root)
+                    else:
+                        if asof is None:raise ValueError('Replay requires an asof')
+                        payload = replay_for_api(console.root,asof,int(horizon))
+                    return self.send(200,payload)
+                except L1Blocked as exc:
+                    return self.send(409, {'status':'BLOCKED','code':exc.code})
+                except (ValueError,OSError,KeyError):
+                    return self.send(409, {'status':'BLOCKED','code':'L1_RESEARCH_ARTIFACT_INVALID'})
             if path == '/api/v1/market/research':
                 query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
                 if set(query) - {'asof', 'horizon'} or any(len(values) != 1 for values in query.values()):
