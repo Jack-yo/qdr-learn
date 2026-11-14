@@ -48,9 +48,15 @@ def _payload(path: str):
                                    "mean_probability":0.27,
                                    "observed_up_rate":0.30}]}}
     if route in ("/api/status","/api/v1/system/status"):
-        return {"prices":[],"dataset":{"asof_date_et":"2024-12-30"}}
+        return {"prices":[{"symbol":"SPY","date":"2024-12-30","close":100.0,"basis":"raw"}],
+                "dataset":{"asof_date_et":"2024-12-30","source":"ALPACA","feed":"sip","adjustment_bases":["raw"]}}
+    if route=="/api/v1/v4/freshness":
+        return {"asof_session":"2024-12-30","modules":{"market_observation":{
+            "freshness_status":"CURRENT","source_data_asof":"2024-12-30","known_by_decision_cutoff":False}}}
     if route=="/api/v1/market/research":
-        return market
+        horizon=int(urlsplit(path).query.split('horizon=')[-1].split('&')[0]) if 'horizon=' in path else 1
+        prediction={**market["predictions"][0],"horizon":horizon,"date":"2024-12-30"}
+        return {**market,"horizon":horizon,"predictions":[prediction]}
     if route=="/api/v1/styles":
         return {"asof_date_et":"2024-12-30",
                 "latest":[{"factor_name":"MOM","factor_label":"动量",
@@ -185,7 +191,10 @@ def browser():
         try:
             browser=p.chromium.launch(headless=True)
         except playwright.Error:
-            pytest.skip("Playwright Chromium browser not installed")
+            try:
+                browser=p.chromium.launch(channel="chrome",headless=True)
+            except playwright.Error:
+                pytest.skip("Neither Playwright Chromium nor system Chrome is available")
         try:
             yield browser
         finally:
@@ -214,11 +223,24 @@ def test_six_page_information_architecture_and_keyboard_tabs(browser,local_app):
         try:
             tabs=page.get_by_role("tab")
             assert tabs.count()==count
-            assert tabs.nth(0).get_attribute("aria-selected")=="true"
-            tabs.nth(0).press("ArrowRight")
-            assert tabs.nth(1).get_attribute("aria-selected")=="true"
-            assert page.locator("#v4-panel-"+name+"-1").is_visible()
-            assert not page.locator("#v4-panel-"+name+"-0").is_visible()
+            selected=1 if name=="screen" else 0
+            following=(selected+1)%count
+            assert tabs.nth(selected).get_attribute("aria-selected")=="true"
+            tabs.nth(selected).press("ArrowRight")
+            assert tabs.nth(following).get_attribute("aria-selected")=="true"
+            assert page.locator("#v4-panel-"+name+"-"+str(following)).is_visible()
+            assert not page.locator("#v4-panel-"+name+"-"+str(selected)).is_visible()
+            if name=="market":
+                assert page.locator(".v4-five-metrics .kpi").count()==5
+                assert page.get_by_text("历史 H1 上涨概率").count()==1
+            if name=="risk":
+                assert page.locator(".v4-five-metrics .kpi").count()==5
+            if name=="lab":
+                assert page.locator("details #v4-factor-hypothesis").count()==1
+                assert not page.locator("#v4-factor-hypothesis").is_visible()
+            if name=="market":
+                tabs.nth(3).click()
+                assert "undefined" not in page.locator("#v4-panel-market-3").inner_text()
         finally:
             page.close()
 
@@ -226,17 +248,50 @@ def test_six_page_information_architecture_and_keyboard_tabs(browser,local_app):
 def test_overview_research_flow_and_market_validation(browser,local_app):
     page=_open(browser,local_app,"overview")
     try:
+        assert page.get_by_text('最新已收盘行情观察').count()==1
+        assert page.locator('.v4-current-quotes').get_by_text('$100.00').count()==1
+        assert page.get_by_text('采集时间晚于当日决策截止',exact=False).count()==1
         assert page.locator(".v4-workflow-step").count()==5
         assert page.locator(".v4-overview-trend .v4-spark").count()==1
         page.locator("#v4-run-observation").click()
         page.get_by_text("已提交日终观察", exact=False).first.wait_for()
         page.locator("#nav-market").click()
         page.get_by_role("tab",name="预测验证").click()
-        assert page.get_by_text("历史样本外概率可靠性").count()==1
+        panel=page.locator("#v4-panel-market-3")
+        assert panel.get_by_text("历史样本外概率可靠性").count()==1
         assert page.get_by_text("0.2200").count()>=1
-        assert page.locator(".v4-calibration-row").count()==1
+        assert panel.locator(".v4-calibration-row").count()==1
         page.get_by_role("tab",name="风险驱动").click()
         assert page.get_by_text("5D / 20D 波动比").count()>=1
+    finally:
+        page.close()
+
+
+def test_latest_quote_does_not_use_freshness_for_a_different_date(browser,local_app):
+    page=browser.new_page(viewport={'width':1536,'height':900})
+    try:
+        payload={'modules':{'market_observation':{'source_data_asof':'2024-12-27',
+                  'freshness_status':'CURRENT','known_by_decision_cutoff':True}}}
+        page.route('**/api/v1/v4/freshness',lambda route:route.fulfill(
+            status=200,content_type='application/json',body=json.dumps(payload)))
+        page.goto(local_app+'/studio#overview',wait_until='domcontentloaded')
+        page.locator('.v4-current-quotes').wait_for(timeout=10000)
+        strip=page.locator('.v4-current-quotes')
+        assert strip.get_by_text('日期待核验',exact=False).count()==1
+        assert strip.get_by_text('到达时间待核验',exact=False).count()==1
+    finally:
+        page.close()
+
+
+def test_style_monitor_does_not_fetch_market_research_archive(browser,local_app):
+    page=browser.new_page(viewport={'width':1536,'height':900})
+    requests=[]
+    page.on('request',lambda req:requests.append(req.url))
+    try:
+        page.goto(local_app+'/studio#style',wait_until='domcontentloaded')
+        page.get_by_role('tab',name='风格总览').wait_for(timeout=10000)
+        assert not any('/api/v1/market/research' in url for url in requests)
+        assert page.locator('#v4-panel-style-0').get_by_text('最新相对收益暂不可用',exact=False).count()==1
     finally:
         page.close()
 
@@ -270,6 +325,10 @@ def test_factor_comparison_and_risk_tabs(browser,local_app):
         page.close()
     risk=_open(browser,local_app,"risk")
     try:
+        overview=risk.locator('#v4-panel-risk-0')
+        assert overview.get_by_role('columnheader',name='持仓市值').count()==1
+        assert overview.get_by_text('当前没有具备内部对账的持仓').count()==1
+        assert overview.get_by_text('最大行业暴露').count()==1
         risk.get_by_role("tab",name="交易复盘").click()
         assert risk.get_by_text("交易复盘与实际研究观察").count()==1
         assert risk.get_by_text("没有完成期限的研究复盘").count()==1
@@ -281,14 +340,19 @@ def test_factor_comparison_and_risk_tabs(browser,local_app):
 def test_factor_lab_quintile_chart_tracks_selected_factor_version(browser,local_app):
     page=_open(browser,local_app,"lab")
     try:
+        search=page.locator('#v4-library-search')
+        search.fill('动量B')
+        assert not page.locator('[data-factor-version="F1"]').is_visible()
+        assert page.locator('[data-factor-version="F2"]').is_visible()
+        search.fill('')
         page.get_by_role("tab",name="因子有效性").click()
-        assert page.locator(".v4-factor-chart").count()==1
+        assert page.locator("#v4-panel-lab-1 .v4-factor-chart").count()==1
         assert page.get_by_text("0.1200").count()>=1
         page.get_by_role("tab",name="因子实验室").click()
         page.locator('[data-factor-version="F2"]').click()
         page.get_by_role("tab",name="因子有效性").click()
-        assert page.locator(".v4-factor-chart").count()==1
+        assert page.locator("#v4-panel-lab-1 .v4-factor-chart").count()==1
         assert page.get_by_text("0.0300").count()>=1
-        assert page.locator(".v4-factor-chart").get_by_text("2.00%").count()>=1
+        assert page.locator("#v4-panel-lab-1 .v4-factor-chart").get_by_text("2.00%").count()>=1
     finally:
         page.close()

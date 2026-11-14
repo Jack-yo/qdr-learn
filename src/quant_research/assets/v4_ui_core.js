@@ -68,11 +68,13 @@ async function show(page){
    x.setAttribute('aria-current',x.dataset.page===key?'page':'false');
  });
  root.innerHTML='<div style="padding:20px;color:#94a9c4">正在读取真实研究数据…</div>';
+ const slow=setTimeout(()=>{if(epoch===state.epoch)root.innerHTML='<div class="v4-empty"><b>研究数据读取时间较长</b>仍在等待本地数据服务响应。页面会在读取完成后自动显示；请检查数据中心及服务状态。</div>';},8000);
  try{const result=await pages[key]();if(epoch!==state.epoch)return;
   setContent(result.html);
   if(typeof result.mount==='function')result.mount();
   document.title='QDR Quant Studio · '+e(result.title||key);
  }catch(error){if(epoch===state.epoch)setContent(heading('研究数据暂不可用','该模块未获得合格数据')+fail(error));}
+ finally{clearTimeout(slow);}
 }
 function go(page){
  const key=pages[page]?page:'overview';

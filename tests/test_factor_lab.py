@@ -69,6 +69,12 @@ def test_real_experiment_has_only_proxy_labels_and_purged_diagnostics(project,re
     clock=TradingClock();days=clock.calendar.sessions_in_range('2017-01-01','2022-12-31')
     daily=pd.read_parquet(folder/'daily_ic.parquet')
     assert not daily.loc[daily.partition.eq('train'),'date'].isin(days[-5:]).any()
+    expected=daily.loc[daily.partition.eq('validation') & daily.horizon.eq(3)].sort_values('date').reset_index(drop=True)
+    actual=pd.DataFrame(data['rolling_ic_h3'])
+    assert len(actual)==len(expected)
+    expected_rolling=expected['rank_ic'].rolling(20,min_periods=20).mean().dropna()
+    assert not expected_rolling.empty
+    assert actual['rolling_ic_20'].iloc[expected_rolling.index[0]] == pytest.approx(expected_rolling.iloc[0])
 
 
 def test_completed_experiment_is_idempotent_and_comparison_is_same_snapshot(project,real_runs):

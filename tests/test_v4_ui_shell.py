@@ -86,7 +86,17 @@ def test_fidelity_workspace_implements_real_tabs_and_stock_master_detail():
     assert '/api/v1/factor-lab/compare' in source
     assert 'calibrationHistory' in source
     assert 'historicalTransitions' in source
+    assert 'const view={tabs:{screen:1}' in source
     assert 'RETROSPECTIVE_CURRENT_VINTAGE_NOT_PIT_NOT_FORWARD' in (
         APP/'web.py').read_text(encoding='utf-8')
     assert 'Math.random' not in source
     assert 'demoProbabilities' not in source
+
+
+def test_mobile_navigation_stays_on_one_scrollable_row():
+    shell=SHELL.read_text(encoding='utf-8')
+    assert '@media(max-width:800px){body{overflow:auto}' in shell
+    assert 'aside{position:sticky;top:0' in shell
+    assert 'flex-wrap:nowrap' in shell
+    assert 'overflow-x:auto' in shell
+    assert '.v4-metric-strip.v4-five-metrics{grid-template-columns:repeat(5' in shell

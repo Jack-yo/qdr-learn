@@ -120,8 +120,21 @@ def result(root,experiment_id):
         path=(folder/name).resolve()
         if not path.is_relative_to(folder.resolve()) or not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest()!=digest:
             raise PolicyError('EXPERIMENT_ARTIFACT_CORRUPT','Experiment artifact SHA256 mismatch')
+    rolling=[]
+    if 'daily_ic.parquet' in manifest['artifacts_sha256']:
+        daily=pd.read_parquet(folder/'daily_ic.parquet')
+        required={'date','partition','horizon','rank_ic'}
+        if not required.issubset(daily.columns):
+            raise PolicyError('EXPERIMENT_ARTIFACT_CORRUPT','Daily IC artifact is missing required columns')
+        daily=daily.loc[daily.partition.eq('validation') & daily.horizon.eq(3),['date','rank_ic']].copy()
+        daily['date']=pd.to_datetime(daily['date'],errors='raise')
+        if daily['date'].duplicated().any():
+            raise PolicyError('EXPERIMENT_ARTIFACT_CORRUPT','Daily IC contains duplicate validation dates')
+        daily=daily.sort_values('date')
+        daily['rolling_ic_20']=daily['rank_ic'].rolling(20,min_periods=20).mean()
+        rolling=json.loads(daily.to_json(orient='records',date_format='iso',double_precision=15))
     return {'experiment':item,'status':'COMPLETED','result':json.loads((folder/'result.json').read_text(encoding='utf-8')),
-            'report_path':(folder/'report.html').relative_to(root).as_posix()}
+            'rolling_ic_h3':rolling,'report_path':(folder/'report.html').relative_to(root).as_posix()}
 
 
 def compare(root,left,right):

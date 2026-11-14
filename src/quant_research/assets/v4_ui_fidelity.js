@@ -6,7 +6,7 @@ const V=window.V4;
 if(!V)throw Error('V4 core must load before the approved workspace');
 const {pages,state,e,n,pct,signed,date,short,badge,button,link,card,table,empty,note,row,settle,svgLine,progress,show}=V;
 const saved={};for(const name of ['overview','market','style','lab','screen','risk'])saved[name]=pages[name];
-const view={tabs:{},strategy:null,symbol:null,labLeft:null,labRight:null,marketObs:null};
+const view={tabs:{screen:1},strategy:null,symbol:null,labLeft:null,labRight:null,marketObs:null};
 const specs={
  market:['市场预测','状态识别','风险驱动','预测验证'],
  style:['风格总览','经典因子收益','ETF 代理观察','轮动与历史','领先性验证'],
@@ -20,7 +20,78 @@ function aside(left,right){return '<div class="v4-workspace-aside">'+left+'<div 
 function actual(v){return v!==null&&v!==undefined&&v!==''&&Number.isFinite(Number(v));}
 function numeric(v,precision=4){return actual(v)?n(v,precision):'—';}
 function titleNumber(label,value){return '<div class="v4-mini-metric"><div class="muted">'+e(label)+'</div><b>'+value+'</b></div>';}
+function metricCard(label,value,detail,tone='blue'){
+ return '<div class="kpi v4-metric-card"><div class="klabel">'+e(label)+
+   '</div><div class="kval '+e(tone)+'">'+value+'</div><div class="knote">'+e(detail)+'</div></div>';
+}
+function metricStrip(items,cls=''){
+ return '<div class="grid kpis v4-metric-strip '+cls+'">'+items.join('')+'</div>';
+}
 function box(name,body,sub=''){return card(name,body,sub);}
+function currentQuoteStrip(systemResult,freshResult){
+ const system=systemResult?.ok?systemResult.data:null;
+ const dataset=system?.dataset, fresh=freshResult?.ok?freshResult.data?.modules?.market_observation:null;
+ if(!dataset||dataset.source!=='ALPACA'||dataset.feed!=='sip'||!dataset.adjustment_bases?.includes('raw'))
+  return '<div class="v4-current-quotes v4-current-unavailable"><b>最新行情观察不可用</b>　请在数据中心检查 Alpaca SIP 原价及来源回执。</div>';
+ const day=String(dataset.asof_date_et||'');
+ const prices=Array.isArray(system.prices)?system.prices:[];
+ const cells=['SPY','IWM','IWD','IWF','MTUM'].map(symbol=>{
+  const p=prices.find(x=>x.symbol===symbol&&String(x.date).slice(0,10)===day&&x.basis==='raw');
+  return '<div><span>'+e(symbol)+'</span><b>'+(p&&actual(p.close)?'$'+n(p.close,2):'—')+'</b></div>';
+ }).join('');
+ const sameSourceDate=day!==''&&String(fresh?.source_data_asof||'')===day;
+ const known=sameSourceDate?fresh?.known_by_decision_cutoff:null;
+ const qualification=known===false?'采集时间晚于当日决策截止，仅供当前观察':known===true?'数据到达时间已记录':'到达时间待核验';
+ return '<section class="v4-current-quotes"><div class="v4-current-heading"><b>最新已收盘行情观察</b><span>ALPACA SIP 原价 · '+date(day)+' · '+e(sameSourceDate?(fresh?.freshness_status||'未核验'):'日期待核验')+'</span></div>'+
+  '<div class="v4-current-quote-grid">'+cells+'</div><div class="v4-current-note">'+e(qualification)+'；不是最新预测或交易信号。<a href="/data">查看来源与数据状态</a></div></section>';
+}
+function emptyTable(columns,title,reason){
+ return '<div class="v4-table-scroll"><table class="table"><thead><tr>'+columns.map(x=>'<th>'+e(x)+'</th>').join('')+
+  '</tr></thead><tbody><tr><td colspan="'+columns.length+'" class="v4-table-empty">'+empty(title,reason)+'</td></tr></tbody></table></div>';
+}
+function emptyChart(title,reason){
+ return '<div class="v4-chart-empty" role="img" aria-label="'+e(title)+'"><div><b>'+e(title)+'</b><span>'+e(reason)+'</span></div></div>';
+}
+function emptyStats(labels){return '<div class="grid cols'+labels.length+'">'+labels.map(x=>
+ '<div class="mini-stat"><div class="muted">'+e(x)+'</div><div class="val">—</div></div>').join('')+'</div>';}
+function realMultiLine(records,series,description='五日相对收益'){
+ const rows=records.filter(x=>x.date).sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+ const available=series.filter(s=>rows.filter(x=>actual(x[s.key])).length>=2);
+ const values=rows.flatMap(x=>available.map(s=>x[s.key]).filter(actual).map(Number));
+ if(rows.length<2||values.length<2)return emptyChart('暂无足够历史观察','至少需要两个可核验观察。');
+ const low=Math.min(...values),span=Math.max(1e-10,Math.max(...values)-low),W=740,H=175,pad=20;
+ const lines=available.map(s=>{let previous=-2,points=0,path='';
+  rows.forEach((x,i)=>{if(!actual(x[s.key]))return;const px=pad+(W-2*pad)*i/(rows.length-1);
+   const py=H-pad-(H-2*pad)*(Number(x[s.key])-low)/span;
+   path+=(i===previous+1?'L':'M')+px.toFixed(1)+' '+py.toFixed(1)+' ';previous=i;points++;});
+  return points>1?'<path d="'+path+'" fill="none" stroke="'+s.color+'" stroke-width="2.5"/>':'';
+ }).join('');
+ return '<svg class="v4-spark" style="height:175px" viewBox="0 0 740 175" preserveAspectRatio="none" role="img" aria-label="真实风格代理历史观察">'+
+  [0,.25,.5,.75,1].map(t=>'<line x1="20" x2="720" y1="'+(20+135*t)+'" y2="'+(20+135*t)+'" stroke="#30445f"/>').join('')+lines+'</svg>'+
+  '<div class="legend">'+available.map(s=>'<span><i class="lg-dot" style="background:'+s.color+'"></i>'+e(s.label)+'</span>').join('')+'</div>'+
+  note(description+' · '+date(rows[0].date)+' 至 '+date(rows.at(-1).date)+'；缺失点断线。');
+}
+function compactFactorDefinition(markup){
+ const host=document.createElement('div');host.innerHTML=markup;
+ const cardNode=host.firstElementChild;if(!cardNode)return markup;
+ cardNode.classList.add('v4-factor-definition');
+ const assumption=cardNode.querySelector('#v4-factor-hypothesis')?.closest('.v4-field');
+ if(assumption){
+  const details=document.createElement('details');details.className='v4-hypothesis-details';
+  details.innerHTML='<summary>研究假设 · 展开编辑</summary>';
+  assumption.replaceWith(details);details.appendChild(assumption);
+ }
+ return cardNode.outerHTML;
+}
+function factorLibrary(markup){
+ const host=document.createElement('div');host.innerHTML=markup;
+ const title=host.querySelector('.ctitle');
+ if(title)title.insertAdjacentHTML('afterend','<label for="v4-library-search" class="v4-library-label">搜索已显示的因子</label><input id="v4-library-search" type="search" placeholder="按名称或类型筛选">');
+ return host.innerHTML;
+}
+function collapsedCard(markup,label){
+ return '<details class="v4-collapsed-card"><summary>'+e(label)+'</summary>'+markup+'</details>';
+}
 function unwrap(markup){
  const doc=document.createElement('div');
  doc.innerHTML=markup;
@@ -118,6 +189,7 @@ function calibrationHistory(summary){
 }
 function historicalTransitions(history){
  const allowed=['UP_LOW_VOL','UP_HIGH_VOL','DOWN_LOW_VOL','DOWN_HIGH_VOL'];
+ const labels={UP_LOW_VOL:'上涨低波',UP_HIGH_VOL:'上涨高波',DOWN_LOW_VOL:'下跌低波',DOWN_HIGH_VOL:'下跌高波'};
  const ordered=(history||[]).filter(x=>allowed.includes(x.market_state)&&x.date)
    .sort((a,b)=>String(a.date).localeCompare(String(b.date)));
  if(ordered.length<40)return empty('不足以推导历史五日状态转移',
@@ -132,17 +204,20 @@ function historicalTransitions(history){
  if(Object.values(tally).reduce((sum,counts)=>sum+counts.reduce((a,b)=>a+b,0),0)<20)
   return empty('有效转移样本偏少','仅计算实际相隔五个观察交易日的样本，不对缺口补值。');
  return '<div class="v4-transition-table"><table class="table"><thead><tr><th>历史当前状态 ↓</th>'+
-  allowed.map(x=>'<th>'+e(x)+'</th>').join('')+'</tr></thead><tbody>'+
+  allowed.map(x=>'<th title="'+e(x)+'">'+e(labels[x])+'</th>').join('')+'</tr></thead><tbody>'+
   allowed.map(from=>{
    const total=tally[from].reduce((a,b)=>a+b,0);
-   return '<tr><th>'+e(from)+' (n='+total+')</th>'+tally[from].map(v=>
-     '<td>'+(total>=5?(v/total*100).toFixed(1)+'%':'—')+'</td>').join('')+'</tr>';
+   return '<tr><th title="'+e(from)+'">'+e(labels[from])+'<small>n='+total+'</small></th>'+tally[from].map(v=>{
+     const ratio=total>=5?v/total:null;
+     return '<td'+(ratio===null?'':' style="background:rgba(57,192,164,'+(0.12+0.58*ratio).toFixed(3)+')"')+'>'+
+       (ratio===null?'—':(ratio*100).toFixed(1)+'%')+'</td>';
+   }).join('')+'</tr>';
   }).join('')+'</tbody></table></div>'+note('这是历史经验转移频率，分母为该起始状态有效样本；不是经验证的未来状态转移概率。');
 }
 
 async function overview(original){
  const a=unwrap(original.html);
- const historical=await settle('/api/v1/market/research?horizon=3');
+ const [historical,system,fresh]=await Promise.all([settle('/api/v1/market/research?horizon=3'),settle('/api/status'),settle('/api/v1/v4/freshness')]);
  const history=historical.ok&&Array.isArray(historical.data.state_history)?
    historical.data.state_history.filter(x=>actual(x.market_return_20)):[];
  const chart=history.length>=2?
@@ -152,19 +227,26 @@ async function overview(original){
  const baseMarket=a.take('市场状态预测');
  const market=chart?baseMarket.replace(/<\/section>\s*$/,chart+'</section>'):baseMarket;
  const style=a.take('经典因子');
- const alpha=a.take('Alpha 研究');
- const risk=a.take('组合持仓');
+ let alpha=a.take('Alpha 研究');
+ let risk=a.take('组合持仓');
+ const alphaHost=document.createElement('div');alphaHost.innerHTML=alpha;
+ const alphaEmpty=alphaHost.querySelector('.v4-empty');
+ if(alphaEmpty)alphaEmpty.outerHTML=emptyTable(['股票','选股策略','因子排名','H3 预测','交易状态'],'尚无前向研究记录','需要真实冻结预测和合格研究计划。');
+ alpha=alphaHost.innerHTML;
+ const riskHost=document.createElement('div');riskHost.innerHTML=risk;
+ const riskEmpty=riskHost.querySelector('.v4-empty');
+ if(riskEmpty)riskEmpty.outerHTML=emptyStats(['组合仓位','行业最大暴露','当前风险提醒'])+note('缺少已对账模拟账本，风险状态不可确认。');
+ risk=riskHost.innerHTML;
  const score=a.take('前向 H3');
  const daily=a.take('每日四层');
  const evidence=a.take('系统数据资格');
  const flow=['数据更新','因子计算','四层条件预测','候选与风险计划','冻结及前向复盘'];
  const steps='<div class="v4-workflow-steps">'+flow.map((name,i)=>
   '<div class="v4-workflow-step"><span>0'+(i+1)+'</span><b>'+e(name)+'</b></div>').join('')+'</div>';
- const shortcuts='<nav class="v4-quick-actions" aria-label="四层研究工作区">'+
-  [['market','01 市场预测'],['style','02 风格轮动'],['lab','03 因子实验'],['screen','03 选股与回测'],['risk','04 持仓风控']]
-  .map(([id,label])=>'<a href="/studio#'+id+'">'+e(label)+'</a>').join('')+
-  '<button type="button" class="btn primary" id="v4-run-observation">运行已有日终观察</button></nav>';
- const wrap=a.heading+a.hero+shortcuts+
+ const headingHost=document.createElement('div');headingHost.innerHTML=a.heading;
+ const actions=headingHost.querySelector('.h-actions');
+ if(actions)actions.insertAdjacentHTML('beforeend','<button type="button" class="btn primary" id="v4-run-observation">运行已有日终观察</button>');
+ const wrap=headingHost.innerHTML+currentQuoteStrip(system,fresh)+a.hero+
   layout(market,style)+layout(alpha,risk)+
   box('前向研究闭环 · 日终五阶段',steps, '进展以真实研究任务为准')+
   '<details class="v4-workspace-details"><summary>预测验证、归档状态与数据资格</summary>'+
@@ -187,10 +269,28 @@ async function overview(original){
 }
 async function market(original){
  const a=unwrap(original.html);
- const r=await settle('/api/v1/market/research?horizon='+Number(state.marketHorizon||3));
+ const selectedH=Number(state.marketHorizon||3);
+ const [r,system,fresh]=await Promise.all([settle('/api/v1/market/research?horizon='+selectedH),settle('/api/status'),settle('/api/v1/v4/freshness')]);
  const data=r.ok?r.data:null,states=Array.isArray(data?.states)?data.states:[];
+ const horizonResults=await Promise.all([1,3,5].map(h=>h===selectedH?Promise.resolve(r):
+   settle('/api/v1/market/research?horizon='+h)));
+ const horizonData=new Map([1,3,5].map((h,i)=>[h,horizonResults[i].ok?horizonResults[i].data:null]));
  const current=states[0]||null;
  const history=Array.isArray(data?.state_history)?data.state_history:[];
+ const h3Prediction=horizonData.get(3)?.predictions?.[0]||null;
+ const predictionFor=(h)=>horizonData.get(h)?.predictions?.[0]||null;
+ const probabilityFor=(prediction)=>prediction?.p_up??prediction?.probability_up??null;
+ const horizonMetrics=[1,3,5].map((h,i)=>{
+  const prediction=predictionFor(h),probability=probabilityFor(prediction);
+  return metricCard('历史 H'+h+' 上涨概率',actual(probability)?pct(probability):'—',
+    prediction?.date?'决策日 '+date(prediction.date)+' · 回溯研究':'该期限暂无可核验预测',
+    ['green','green','green'][i]);
+ });
+ const downsideProbability=h3Prediction?.p_downside??h3Prediction?.downside_probability??null;
+ horizonMetrics.push(metricCard('历史 H3 显著下跌概率',actual(downsideProbability)?pct(downsideProbability):'—',
+   (h3Prediction?.date?'决策日 '+date(h3Prediction.date)+' · ':'')+'回溯样本 · 与上涨概率非互补','amber'));
+ horizonMetrics.push(metricCard('历史市场状态',current?.market_state?e(current.market_state):'—',
+   current?.date?'观察日 '+date(current.date)+' · 非前向状态':'缺少可核验状态观测','purple'));
  const summary=data?.summary||{};
  const factors=[
   ['市场 1 日收益','market_return_1','收益'],
@@ -227,11 +327,11 @@ async function market(original){
     current?((history.filter(x=>actual(x.market_return_20)).length>1?
        svgLine(history.filter(x=>actual(x.market_return_20)).map(x=>x.market_return_20),
        '#57d5b8',190):'')+
-     row('历史市场状态',e(current.market_state||'未知'))+
+     '<div class="v4-regime-stats">'+row('历史市场状态',e(current.market_state||'未知'))+
      row('研究观测日期',date(current.date||data?.manifest?.asof_date_et))+
      row('输入数据可用时间',e(current.state_available_at||'—'))+
      row('市场 20 日收益',actual(current.market_return_20)?signed(current.market_return_20):'—')+
-     row('市场 20 日波动',actual(current.market_vol_20)?pct(current.market_vol_20):'—')):
+     row('市场 20 日波动',actual(current.market_vol_20)?pct(current.market_vol_20):'—')+'</div>'):
      empty('尚无可核验的市场状态','需要已完成的历史状态观测记录。'),
     '真实历史状态');
  const metrics=(summary.direction||[])[0]||null;
@@ -256,13 +356,15 @@ async function market(original){
       ['M1','已核验的 market_* 因子','训练期 Logistic / Ridge','—']])+
       studyNote('实际 beta、标准化均值/方差、Platt a/b 没有可用的参数归档接口，不输出虚构参数。'));
  const panel=[
-   stack(layout(distribution,a.take('市场环境')),a.take('四层联动')),
-   layout(regime,transition),
-   stack(layout(why,a.take('模型可靠性与风险传导')),parameters),
+   stack(currentQuoteStrip(system,fresh),metricStrip(horizonMetrics,'v4-five-metrics'),layout(regime,transition,'v4-reference-market'),
+     '<div class="v4-reference-three">'+why+validation+parameters+'</div>',
+     a.toolbar,layout(distribution,a.take('市场环境')),a.take('四层联动')),
+   layout(regime,transition,'v4-reference-market'),
+   layout(why,a.take('模型可靠性与风险传导')),
    stack(layout(validation,a.take('概率可靠性与模型验证')),
      a.take('历史研究与对照版本'))
  ];
- return {html:panelHtml('market',a.heading+a.toolbar+a.hero,panel),
+ return {html:panelHtml('market',a.heading,panel),
  mount(){
   for(const x of document.querySelectorAll('[data-v4-switch-market]'))x.addEventListener('click',()=>{
    state.marketHorizon=Number(x.dataset.v4SwitchMarket);show('market');
@@ -271,39 +373,34 @@ async function market(original){
 }
 async function style(original){
  const a=unwrap(original.html);
- const dataResult=await Promise.all([settle('/api/v1/styles?mode=observation'),settle('/api/v1/market/research?horizon=3')]);
+ const dataResult=await Promise.all([settle('/api/v1/styles?mode=observation'),settle('/api/status'),settle('/api/v1/v4/freshness')]);
  const dat=dataResult[0].ok?dataResult[0].data:null;
- const m=dataResult[1].ok?dataResult[1].data:null;
  const factors=Array.isArray(dat?.latest)?dat.latest:[];
  const fseries=Array.isArray(dat?.series)?dat.series:[];
- const mstate=Array.isArray(m?.states)?m.states[0]:null;
- const pairs=[
-  ['小盘 IWM / SPY','style_small_relative_return_5d','style_small_relative_return_20d'],
-  ['价值 IWD / IWF','style_value_relative_return_5d','style_value_relative_return_20d'],
-  ['动量 MTUM / SPY','style_momentum_relative_return_5d','style_momentum_relative_return_20d'],
-  ['质量 QUAL / SPY','style_quality_relative_return_5d','style_quality_relative_return_20d'],
-  ['低波 USMV / SPY','style_low_vol_relative_return_5d','style_low_vol_relative_return_20d']
- ];
- const etf=box('ETF 风格代理 · 历史相对表现',
-  mstate?table(['ETF 风格组合','5 日相对收益','20 日相对收益','观察日'],
-   pairs.map(([name,s,t])=>[e(name),actual(mstate[s])?signed(mstate[s]):'—',
-    actual(mstate[t])?signed(mstate[t]):'—',date(mstate.date||m?.manifest?.asof_date_et)])):
-   empty('暂无 ETF 风格代理观测','市场数据未形成满足时间资格的同日 ETF 组合历史。'),
-   '不等于 Fama–French 多空因子收益');
+ const etf=box('ETF 风格代理 · 最新相对表现',
+  emptyChart('最新相对收益暂不可用','独立的最新风格收益计算尚未接入；旧实验曲线不用于当前监控。')+
+  emptyTable(['ETF 风格组合','5 日相对收益','20 日相对收益','观察日'],
+   '风格代理收益受阻','已核验的最新 SIP 收盘原价显示在上方；跨期收益需要合格的公司行为调整。'),
+   '独立观察 · 不等于 Fama–French 多空因子收益');
  const classic=box('经典因子收益 · Fama–French 系列',
-  factors.length?table(['因子','经济含义','5日实际收益','20日实际收益','观察状态'],
+  factors.length?table(['因子','经济含义','5日实际收益','20日实际收益','观察状态','Rank IC (H5)'],
    factors.filter(x=>x.factor_name!=='RF').map(x=>[
     e(x.factor_name),e(x.factor_label||'—'),actual(x.sum_5d)?signed(x.sum_5d):'—',
-    actual(x.sum_20d)?signed(x.sum_20d):'—',e(x.state||'—')])):
+    actual(x.sum_20d)?signed(x.sum_20d):'—',e(x.state||'—'),'—'])):
     empty('尚无真实经典因子数据','需要来源可追踪的因子历史记录。'),
    '经典因子与 ETF 代理分开核验');
- const rotation=box('风格轮动 · 动量变化与持续性',
-   factors.length?table(['风格','5 日收益','20 日收益','5D - 20D 平均日收益差'],
-    factors.filter(x=>x.factor_name!=='RF').map(x=>[
-     e(x.factor_name),actual(x.sum_5d)?signed(x.sum_5d):'—',
-     actual(x.sum_20d)?signed(x.sum_20d):'—',
-     actual(x.sum_5d)&&actual(x.sum_20d)?signed(Number(x.sum_5d)/5-Number(x.sum_20d)/20):'—'])):
-    empty('暂无可比较的轮动样本','需要至少 20 日同口径经典因子收益。'),
+ const rotationFactors=['MOM','SMB','RMW','HML'].map(key=>factors.find(x=>String(x.factor_name).toUpperCase()===key)).filter(Boolean);
+ const maxReturn=Math.max(1e-12,...rotationFactors.filter(x=>actual(x.sum_5d)).map(x=>Math.abs(Number(x.sum_5d))));
+ const rotation=box('风格轮动观察 · 动量与持续性',
+   rotationFactors.length?layout(
+    '<div><div class="muted">近 5 日因子收益 · 相对幅度</div>'+rotationFactors.map(x=>
+      actual(x.sum_5d)?'<div class="barrow"><div class="name">'+e(x.factor_name)+'</div><div class="progress"><div style="width:'+
+       (Math.abs(Number(x.sum_5d))/maxReturn*100).toFixed(2)+'%;'+(Number(x.sum_5d)<0?'background:#d98698':'')+
+       '"></div></div><div class="pct">'+signed(x.sum_5d)+'</div></div>':
+      row(e(x.factor_name),'—')).join('')+'</div>',
+    '<div><div class="muted">5 日与 20 日平均收益差</div>'+rotationFactors.map(x=>
+      row(e(x.factor_name),actual(x.sum_5d)&&actual(x.sum_20d)?signed(Number(x.sum_5d)/5-Number(x.sum_20d)/20):'—')).join('')+'</div>'):
+    empty('暂无可比较的轮动样本','需要同口径经典因子收益。'),
    '仅描述已发生变化 · 不代表领先预测');
  const series=box('风格历史观察 · 已选择因子',
    fseries.length>1?svgLine(fseries.filter(x=>x.factor_name===state.styleFactor&&actual(x.sum_20d))
@@ -315,15 +412,26 @@ async function style(original){
     '必须比较加入风格信息前后的 H1/H3/H5 预测误差，不能将过去涨幅等同于未来收益。'),
    'ETF 相对收益标签 · 时间隔离');
  const panels=[
+   stack(layout(classic,etf),layout(rotation,box('从观察到预测 · 研究约束',
+     note('跟踪经典因子收益与方向，研究不同周期的变化和持续性。')+
+     note('只有在时间外样本中证明增量后，才可用于 Alpha 模型；ETF 代理与 French 因子口径不同。')+
+     badge('预测能力待验证','amber')))),
    stack(layout(a.take('经典风格强弱'),a.take('滚动收益')),a.take('风格观察明细')),
-   layout(classic,series),
    layout(etf,box('代理使用口径',
      studyNote('IWM/SPY 代表小盘相对大型股，IWD/IWF 代表价值相对成长；它们不是 French SMB/HML/RMW/CMA 因子的精确替代。')+
-     row('ETF 历史研究日期',date(mstate?.date||m?.manifest?.asof_date_et)))),
+     row('最新相对收益状态',badge('待接入与核验','amber')))),
    layout(rotation,series),
    layout(validation,a.take('风格预测研究边界'))
  ];
- return {html:panelHtml('style',a.heading+a.hero,panels)};
+ const factorCards=[['动量','MOM'],['小盘','SMB'],['盈利质量','RMW'],['价值','HML']].map(([label,key])=>{
+  const item=factors.find(x=>String(x.factor_name).toUpperCase()===key);
+  const value=item?.sum_5d;
+  return metricCard(label+' '+key,actual(value)?signed(value):'—',
+   item?'French 5 日观察 · '+date(dat?.asof_date_et):'缺少该因子观察',
+   actual(value)&&Number(value)<0?'red':'green');
+ });
+ panels[0]=currentQuoteStrip(dataResult[1],dataResult[2])+metricStrip(factorCards)+panels[0];
+ return {html:panelHtml('style',a.heading,panels)};
 }
 async function lab(original){
  const a=unwrap(original.html);
@@ -334,6 +442,7 @@ async function lab(original){
  const selected=completed.find(x=>(x.config?.factor_version_id||x.factor_version_id)===state.factorVersion)||completed[0]||null;
  const detail=selected?await settle('/api/v1/factor-lab/experiments/'+encodeURIComponent(selected.id)):null;
  const report=detail?.ok?detail.data.result:null;
+ const rollingIC=Array.isArray(detail?.data?.rolling_ic_h3)?detail.data.rolling_ic_h3:[];
  const validation=Array.isArray(report?.summary)?report.summary.filter(x=>x.partition==='validation'):[];
  const metricRows=validation.map(x=>[
   'H'+e(x.horizon),numeric(x.rank_ic_mean,4),numeric(x.icir_unannualized,3),
@@ -357,12 +466,16 @@ async function lab(original){
       signed(h3.q5_minus_q1_price_return_spread):'—')+
     note('当前版本标签是价格代理，不等于可执行收益或真实手续费后收益。'):
     empty('暂无可比较的真实历史分组','Q1–Q5 收益必须来源已完成的因子实验报告，不能生成演示曲线。'));
- const stability=box('因子稳定性与多时段检验',
-   metricRows.length?table(['H','IC 5%分位','IC 中位数','IC 95%分位','平均证券数'],
+ const stability=box('滚动 IC 与稳定性',
+   (rollingIC.length?realMultiLine(rollingIC,[
+     {label:'20 观察日滚动 Rank IC',key:'rolling_ic_20',color:'#57d5b8'},
+     {label:'逐日 Rank IC',key:'rank_ic',color:'#bd96f1'}],'历史验证期 Rank IC'):
+     emptyChart('滚动 IC 序列未提供','当前实验没有可核验的逐日 IC 文件。'))+
+   (metricRows.length?table(['H','IC 5%分位','IC 中位数','IC 95%分位','平均证券数'],
      validation.map(x=>['H'+e(x.horizon),numeric(x.ic_p05),numeric(x.ic_median),
        numeric(x.ic_p95),numeric(x.mean_covered_securities,0)])):
-    empty('缺少逐期样本外 IC 统计','至少需要完整的历史日期分组研究报告。'),
-   '需进一步加入真正前向的滚动 IC 曲线');
+    empty('缺少逐期样本外 IC 统计','至少需要完整的历史日期分组研究报告。')),
+   'H3 历史验证期 · 价格代理标签 · 非前向交易');
  const strategyResponse=await settle('/api/v1/strategies');
  const strategies=strategyResponse.ok?(strategyResponse.data.strategies||[]):[];
  const multi=strategies.find(x=>Array.isArray(x.config?.strategy?.factors)&&x.config.strategy.factors.length>=2)||null;
@@ -378,6 +491,13 @@ async function lab(original){
   '<div id="v4-compare-output">'+empty('请选择两个因子版本',
    '比较必须来自双方共同覆盖的真实股票 / 日期，不根据因子名称推断相关性。')+'</div>',
   '相同数据快照与验证协议下的 Rank IC 差异');
+ const corrRows=correlations.map(x=>[short(x.factor_a,12),short(x.factor_b,12),
+   numeric(x.median_daily_spearman),numeric(x.valid_sessions,0),
+   x.redundancy_warning?'高相关':'未触发']);
+ const corrSummary=box('因子相关性 · 研究摘要',
+   corrRows.length?table(['因子 A','因子 B','日横截面 Spearman','有效日','冗余标记'],corrRows):
+    empty('暂无同日可比相关性','需要至少两个真实因子版本拥有共同股票与共同日期。'),
+   '真实共同样本；仅表示相关性，不是增量结论');
  const versions=box('不可变因子版本与实验记录',
    fac.length?table(['因子','版本','研究定义'],fac.slice(0,30).map(x=>[e(x.name),'v'+e(x.version),
     e(x.config?.template||'自定义')])):empty('暂无已定义因子','在因子实验室新增并保存。'));
@@ -385,8 +505,25 @@ async function lab(original){
    exp.length?table(['实验 ID','状态','数据源'],exp.slice(0,30).map(x=>[
     short(x.id),e(x.status||'—'),e(x.config?.source||x.source||'—')])):
     empty('暂无实验记录','建立因子版本并运行实验。'));
+ const maxCorrelation=correlations.map(x=>x.median_daily_spearman)
+   .filter(actual).map(Number).sort((a,b)=>Math.abs(b)-Math.abs(a))[0];
+ const labMetrics=metricStrip([
+   metricCard('H3 Rank IC',actual(h3?.rank_ic_mean)?numeric(h3.rank_ic_mean):'—',
+     selected?'历史验证期 · 截止 '+(report?.asof_date_et?date(report.asof_date_et):'未标明'):'没有可审查实验','green'),
+   metricCard('H3 ICIR',actual(h3?.icir_unannualized)?numeric(h3.icir_unannualized,3):'—',
+     actual(h3?.daily_ic_count)?n(h3.daily_ic_count,0)+' 个有效研究日':'有效日不足','blue'),
+   metricCard('H3 Q5 − Q1',actual(h3?.q5_minus_q1_price_return_spread)?
+      signed(h3.q5_minus_q1_price_return_spread):'—',
+     '事后价格代理价差 · 不扣交易成本','purple'),
+   metricCard('最大因子相关性',actual(maxCorrelation)?numeric(maxCorrelation,3):'—',
+     correlations.length?'同日横截面中位数':'缺少共同样本','amber')
+ ],'v4-lab-metrics');
  const panels=[
-   stack(aside(a.take('已保存因子'),stack(a.take('创建因子'),a.take('真实数据预览'))),a.take('最近因子实验')),
+   aside(factorLibrary(a.take('已保存因子')),stack(compactFactorDefinition(a.take('创建因子')),
+     note('下方结果为已归档的历史实验，数据截止 '+(report?.asof_date_et?date(report.asof_date_et):'未提供')+'；不是最新交易日预测。'),
+     labMetrics,layout(outcome,stability),corrSummary,
+     collapsedCard(a.take('真实数据预览'),'真实数据预览及实验操作'),
+     analysis,layout(versions,experiments),a.take('最近因子实验'))),
    stack(layout(analysis,outcome),stability),
    layout(corr,box('因子相关性 · 历史同日横截面',
      correlations.length?table(['因子A','因子B','Spearman 中位数','有效日','冗余风险'],
@@ -398,8 +535,14 @@ async function lab(original){
      '相关性来自历史策略共同股票横截面')),
    stack(layout(versions,experiments))
  ];
- return {html:panelHtml('lab',a.heading+a.steps+a.hero,panels),
+ return {html:panelHtml('lab',a.heading,panels),
  mount(){
+   document.getElementById('v4-library-search')?.addEventListener('input',ev=>{
+    const query=ev.target.value.trim().toLocaleLowerCase();
+    document.querySelectorAll('[data-factor-version]').forEach(item=>{
+     item.hidden=!item.textContent.toLocaleLowerCase().includes(query);
+    });
+   });
    document.getElementById('v4-compare-run')?.addEventListener('click',async()=>{
     const l=document.getElementById('v4-compare-left')?.value;
     const r=document.getElementById('v4-compare-right')?.value;
@@ -424,13 +567,14 @@ async function lab(original){
 }
 function candidateRows(ranking){
  return ranking.slice(0,30).map((x,i)=>[
+  n(i+1,0),
   '<button type="button" class="v4-link v4-symbol-pick" data-v4-stock="'+i+'">'+e(x.symbol||x.security_id||'未知')+'</button>',
-  n(x.score,4),e(x.sector||'—'),
-  Object.keys(x.weighted_factor_contributions||{}).length+' 项',badge('研究排名','blue')
+  e(x.sector||'—'),n(x.score,4),'—','—','—','—',badge('历史排名','blue')
  ]);
 }
 function candidateDetail(item){
- if(!item)return empty('请选择候选股票','点击左侧实际策略排名查看因子拆解，不显示模拟目标价。');
+ if(!item)return '<div class="v4-muted-note">请选择候选股票，查看实际因子拆解。</div>'+
+   ['超跌程度 · A','卖压衰竭 · B','重新转强 · C'].map(x=>row(e(x),'—')).join('');
  const con=item.weighted_factor_contributions||{};
  const values=Object.entries(con).filter(([,v])=>actual(v))
    .sort((a,b)=>Math.abs(Number(b[1]))-Math.abs(Number(a[1])));
@@ -461,13 +605,34 @@ async function screen(original){
   '<option value="">请选择策略</option>'+strategies.map(s=>'<option value="'+e(s.id)+'"'+
    (String(s.id)===String(view.strategy)?' selected':'')+'>'+e(s.name)+' · v'+e(s.version)+'</option>').join('')+
   '</select></label>';
+ const activeStrategy=strategies.find(x=>String(x.id)===String(view.strategy))||null;
+ const strategyFactors=Array.isArray(activeStrategy?.config?.strategy?.factors)?
+   activeStrategy.config.strategy.factors:[];
+ const groupNames=[['A','超跌程度'],['B','卖压衰竭'],['C','重新转强']];
+ const groups=groupNames.map(([key,label])=>{
+  const members=strategyFactors.filter(x=>String(x.group||'').toUpperCase()===key);
+  const weight=members.length&&members.every(x=>actual(x.weight))?members.reduce((v,x)=>v+Number(x.weight),0):null;
+  return '<div class="v4-strategy-group"><b>因子组 '+key+' · '+label+'</b><span>'+ (weight===null?'未配置':pct(weight))+'</span>'+
+    (members.length?members.map(x=>row(e(x.factor_experiment_id||x.factor_version_id||x.factor_id||'未归档'),actual(x.weight)?pct(x.weight):'—')).join(''):
+     '<div class="v4-muted-note">未配置真实因子版本</div>')+'</div>';
+ }).join('');
+ const strategySummary=box('筛选策略配置',selector+
+   (activeStrategy?table(['历史因子实验','研究组别','冻结权重'],strategyFactors.map(x=>[
+     e(x.factor_experiment_id||x.factor_version_id||x.factor_id||'未归档'),
+     e(x.group||'未归档'),actual(x.weight)?pct(x.weight):'未归档']))+
+     row('策略版本',e(activeStrategy.name)+' · v'+e(activeStrategy.version))+
+     row('原定持有期',e(activeStrategy.config?.strategy?.horizon||'—')+' 日')+
+     row('策略来源状态',e(composite?.ok?composite.data.status:'等待策略验证')):
+     note('缺少可审查的多因子策略；至少需要两个真实完成的因子实验。'))+
+   '<div class="v4-muted-note">历史股票池与基础过滤条件：'+(activeStrategy?'以已冻结配置为准':'尚未配置')+'</div>'+groups+
+   note('因子权重仅重现已冻结配置，不代表因子贡献或预测收益。'),
+   '策略条件 · 历史候选需单独验证');
  const selected=box('所选股票 · 个股因子解释',
   '<div id="v4-stock-detail">'+candidateDetail(candidate)+'</div>',
   '选择股票实时联动');
  const candidates=box('历史候选股票 · 因子排名',
-  selector+
-  (ranks.length?table(['股票','综合分位','行业','有效因子','状态'],candidateRows(ranks)):
-   empty('尚无已验证的历史多因子排名',composite?.ok?
+  (ranks.length?table(['排名','股票','行业','综合分位','超跌 A','衰竭 B','转强 C','H3 预测','状态'],candidateRows(ranks)):
+   emptyTable(['排名','股票','行业','综合分位','超跌 A','衰竭 B','转强 C','H3 预测','状态'],'尚无已验证的历史多因子排名',composite?.ok?
     '策略没有可审查的真实横截面复合排名。':
     strategies.length?'请核对各因子实验的共同交易日及数据来源。':'需要至少一个由两个以上已完成因子实验组成的策略。'))+
   row('实际研究观察日',date(composite?.ok?composite.data.asof_date_et:null))+
@@ -489,16 +654,17 @@ async function screen(original){
  const backtestCard=box('策略模拟回测 · 样本外成本后表现',
   backtests.length?table(['运行版本','验证状态'],backtests.slice(0,20).map(x=>[
    short(x.run_id||x.id,22),e(x.status||'—')])):
-   empty('尚无严格回测收益曲线',
-    '缺历史 PIT 证券身份、公司行为、原始成交价格或交易成本时，不呈现虚假的年化收益及回撤。'),
+   emptyStats(['净收益','最大回撤','Rank IC'])+emptyChart('尚无严格回测收益曲线',
+    '缺历史 PIT 证券身份、公司行为、原始成交价格或交易成本。'),
   '可用性与证据分开');
  const panels=[
    stack(a.take('因子组合配置'),a.take('已保存策略与候选解释')),
-   stack(layout(candidates,selected,'v4-stock-master-detail'),planCard),
+   stack(aside(strategySummary,stack(a.hero,candidates,
+     layout(selected,backtestCard,'v4-stock-master-detail'))),planCard),
    stack(layout(backtestCard,a.take('严格回测与前向冻结记录'))),
    stack(a.take('样本外预测'),a.take('冻结预测的后续结果复盘'))
  ];
- return {html:panelHtml('screen',a.heading+a.steps+a.hero,panels),
+ return {html:panelHtml('screen',a.heading,panels),
  mount(){
   document.getElementById('v4-workspace-strategy')?.addEventListener('change',ev=>{
    view.strategy=ev.target.value||null;view.symbol=null;view.tabs.screen=1;show('screen');
@@ -515,11 +681,53 @@ async function screen(original){
 }
 async function risk(original){
  const a=unwrap(original.html);
- const [plans,outcomes]=await Promise.all([settle('/api/v1/v4/plans'),settle('/api/v1/v4/outcomes')]);
+ const [plans,outcomes,accountResult,riskResult,timelineResult]=await Promise.all([
+  settle('/api/v1/v4/plans'),settle('/api/v1/v4/outcomes'),
+  settle('/api/v1/paper/account'),settle('/api/v1/paper/risk'),
+  settle('/api/v1/paper/timeline')]);
  const p=plans.ok?(plans.data.records||[]):[];
  const o=outcomes.ok?(outcomes.data.records||[]):[];
- const alerts=box('预警中心 · 研究信号与优先级',
-   a.take('风险预警'));
+ const account=accountResult.ok?accountResult.data:null;
+ const risk=riskResult.ok?riskResult.data:null;
+ const timeline=timelineResult.ok?timelineResult.data:null;
+ const verified=account?.status==='INTERNALLY_RECONCILED_PAPER_ESTIMATE';
+ const riskOK=risk?.status==='CONCENTRATION_MEASURED';
+ const riskAlerts=riskOK?(risk.alerts||[]):[];
+ const sessions=timeline?.status==='INTERNALLY_RECONCILED_PAPER_ESTIMATE'?
+   (timeline.sessions||[]):[];
+ const alertsCard=a.take('风险预警');
+ const actualPositions=a.take('当前模拟持仓');
+ const actualRisk=a.take('组合风险度量');
+ const actualHistory=a.take('逐日权益');
+ const positionCard=verified?actualPositions:box('当前模拟持仓 · 风险与退出计划',
+   emptyTable(['证券','持仓市值','仓位','浮动盈亏','行业','风险预算','退出条件','警示'],
+    '当前没有具备内部对账的持仓','缺少合格模拟账本，不显示虚构持仓。'),'缺少合格持仓');
+ const riskCard=riskOK?actualRisk:box('风险模型仪表',
+   ['总仓位利用率','行业集中度','风险预算占用'].map(x=>row(e(x),'—')).join('')+
+   emptyStats(['最大行业暴露','组合平均 Beta'])+emptyStats(['持仓相互相关','组合风险状态'])+
+   note('缺少已对账账本及合格风险输入，无法计算。'),'证据不足');
+ const historyCard=sessions.length>1?actualHistory:box('组合净值与回撤',
+   emptyChart('暂无足够连续交易日数据','需要已冻结并真实观察的模拟账本。'),'模拟账本 · 非券商绩效');
+ const evidenceCard=a.take('来源与模型可靠性');
+ const rulesCard=a.take('仓位与退出规则');
+ const equityWindow=sessions.filter(x=>actual(x.equity)).slice(-30).map(x=>Number(x.equity));
+ let maxDrawdown=null,peak=null;
+ for(const equity of equityWindow){
+  peak=peak===null?equity:Math.max(peak,equity);
+  if(peak>0)maxDrawdown=Math.max(maxDrawdown??0,1-equity/peak);
+ }
+ const riskMetrics=metricStrip([
+   metricCard('模拟组合权益',verified&&actual(account.equity)?'$'+n(account.equity,2):'—',
+     verified?'内部对账估值':'缺少合格模拟账本','blue'),
+   metricCard('组合持仓占比',riskOK&&actual(risk.gross_weight)?pct(risk.gross_weight):'—',
+     riskOK?'按已核验持仓估算':'暂无可核验持仓','green'),
+   metricCard('组合日 VaR95',riskOK&&actual(risk.daily_var95)?pct(risk.daily_var95):'—',
+     riskOK?'实际风险接口结果':'缺少合格组合收益序列','amber'),
+   metricCard('逐日账本最大回撤',maxDrawdown!==null?signed(-maxDrawdown):'—',
+     equityWindow.length>1?'最多近 30 个已核验账本日':'历史账本记录不足','purple'),
+   metricCard('已核验风险预警',riskOK?n(riskAlerts.length,0):'—',
+     riskOK?'仅统计已触发规则':'缺少风险核验','red')
+ ],'v4-five-metrics');
  const analysis=box('尾部风险与模型失效评估',
    empty('暂无经核验的动态压力与模型失效概率',
     '当前组合风险接口仅能展示已有的规则阈值及合格历史风险统计；不能从持仓比例直接猜测 VaR。'));
@@ -533,15 +741,15 @@ async function risk(original){
      date(x.session_date_et),short(x.plan_identity,18),e(x.status||'—')])):
      empty('没有完成期限的研究复盘','先事前冻结研究计划，再按真实价格和来源回执检验后续结果。'),
     '不把回测价格路径当真实券商成交');
- const equityHistory=a.take('逐日权益');
  const panels=[
-   stack(layout(a.take('当前模拟持仓'),a.take('组合风险度量'))),
-   layout(analysis,a.take('来源与模型可靠性')),
-   stack(alerts),
-   layout(a.take('仓位与退出规则'),exitPlans),
-   layout(equityHistory,replay)
+   stack(riskMetrics,layout(positionCard,riskCard,'v4-reference-market'),
+     '<div class="v4-reference-three">'+historyCard+alertsCard+rulesCard+'</div>',exitPlans),
+   stack(layout(analysis,riskCard),evidenceCard),
+   stack(alertsCard,analysis),
+   layout(rulesCard,exitPlans),
+   layout(historyCard,replay)
  ];
- return {html:panelHtml('risk',a.heading+a.hero,panels)};
+ return {html:panelHtml('risk',a.heading,panels)};
 }
 const generators={overview,market,style,lab,screen,risk};
 for(const name of Object.keys(generators)){
