@@ -356,3 +356,26 @@ def test_factor_lab_quintile_chart_tracks_selected_factor_version(browser,local_
         assert page.locator("#v4-panel-lab-1 .v4-factor-chart").get_by_text("2.00%").count()>=1
     finally:
         page.close()
+
+
+def test_light_theme_and_market_color_convention_in_browser(browser,local_app):
+    """Full V4 shell uses the light palette and preserves color preference."""
+    page=browser.new_page(viewport={"width":1440,"height":900})
+    try:
+        page.goto(local_app+"/studio#overview",wait_until="domcontentloaded")
+        toggle=page.locator("#v4-color-mode")
+        toggle.wait_for(timeout=10000)
+        assert toggle.inner_text()=="绿涨红跌"
+        assert page.evaluate("getComputedStyle(document.querySelector('.app')).backgroundColor")=="rgb(245, 247, 251)"
+        assert page.evaluate("getComputedStyle(document.querySelector('aside')).backgroundColor")=="rgb(255, 255, 255)"
+        assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--rise').trim()")=="#087e5c"
+        toggle.click()
+        assert toggle.inner_text()=="红涨绿跌"
+        assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--rise').trim()")=="#ca3d50"
+        page.reload(wait_until="domcontentloaded")
+        toggle=page.locator("#v4-color-mode")
+        toggle.wait_for(timeout=10000)
+        assert toggle.inner_text()=="红涨绿跌"
+        assert page.evaluate("getComputedStyle(document.querySelector('.app')).backgroundColor")=="rgb(245, 247, 251)"
+    finally:
+        page.close()

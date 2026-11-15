@@ -32,6 +32,7 @@ const statuses={OBSERVED:'已观测',PARTIAL:'部分覆盖',MISSING:'待接入'}
 const isNum=v=>v!==null&&v!==undefined&&v!==''&&Number.isFinite(Number(v));
 const fmt=(v,d=2)=>isNum(v)?n(Number(v),d):'—';
 const sign=(v,d=2)=>isNum(v)?(Number(v)>0?'+':'')+n(Number(v),d):'—';
+const moveClass=v=>isNum(v)?Number(v)>0?'is-up':Number(v)<0?'is-down':'is-flat':'is-flat';
 const percent=v=>isNum(v)?n(Number(v)*100,1)+'%':'—';
 const emDash='—';
 const stripTime=t=>t?e(String(t).replace('T',' ').slice(0,16)):'—';
@@ -115,9 +116,11 @@ function statusBar(v2,v3,rows){
    '<span>仅描述已观测市场，不代表上涨概率</span></div>'+
    '<div class="lv3-status-stat"><span>SPY 收盘</span><strong>'+metric(spy?.value,spy?.unit)+'</strong>'+
    '<small>交易日 '+e(v3?.asof_session||v2?.asof_session||'待核验')+'</small></div>'+
-   '<div class="lv3-status-stat"><span>SPY 五日走势</span><strong>'+metric(daily?.value,daily?.unit)+'</strong>'+
+   '<div class="lv3-status-stat"><span>SPY 五日走势</span><strong class="lv3-market-change '+moveClass(daily?.value)+'">'+
+   (isNum(daily?.value)?sign(daily.value,2)+(daily.unit?' '+e(daily.unit):''):'—')+'</strong>'+
    '<small>当日已收盘的五日变化</small></div>'+
-   '<div class="lv3-status-stat"><span>市场内部 · RSP−SPY</span><strong>'+metric(breadth?.value,breadth?.unit)+'</strong>'+
+   '<div class="lv3-status-stat"><span>市场内部 · RSP−SPY</span><strong class="lv3-market-change '+moveClass(breadth?.value)+'">'+
+   (isNum(breadth?.value)?sign(breadth.value,2)+(breadth.unit?' '+e(breadth.unit):''):'—')+'</strong>'+
    '<small>等权 ETF 相对表现代理</small></div>'+
    '<div class="lv3-status-stat"><span>卖压评分</span><strong>'+fmt(pressure,1)+'</strong>'+
    '<small>0–100 · 相对历史尺度</small></div></div>';
@@ -223,10 +226,10 @@ function rawPanel(rows,official,extended,v3){
     e(label)+'</button>').join('');
  const cards=visible.map(x=>{
    const delta=isNum(x.delta)?
-     '<span class="lv3-change">'+sign(x.delta,2)+' '+e(x.unit||'')+'</span>':
+     '<span class="lv3-change '+moveClass(x.delta)+'">'+sign(x.delta,2)+' '+e(x.unit||'')+'</span>':
      '<span class="lv3-change neutral">单期观测 · 无可比变化</span>';
    return '<article class="lv3-raw-item"><div class="lv3-raw-name">'+e(x.label||x.id)+
-     '</div><strong class="mono">'+metric(x.value,x.unit)+'</strong>'+delta+
+     '</div><strong class="mono '+(/^(spy_return_(1|5|20)|breadth_proxy_rsp_spy_5|small_cap_relative_5|credit_proxy_hyg_lqd_5)$/.test(x.id)?'lv3-market-change '+moveClass(x.value):'')+'">'+metric(x.value,x.unit)+'</strong>'+delta+
      tinySpark(x.history)+'<div class="lv3-raw-foot"><span>'+e(x.source||'来源待核验')+
      '</span><span>'+e(x.observed_date||v3?.asof_session||'—')+'</span></div></article>';
  }).join('');
