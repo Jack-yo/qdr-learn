@@ -62,7 +62,7 @@ V3 默认按需请求近 2500 自然日内的 5 只核心 ETF 日线，要求至
 ## 开发验收
 
 ```bash
-python -m pytest -q tests/test_l1_v3_probability.py tests/test_l1_v3_outcomes.py tests/test_l1_v3_ui.py
+python -m pytest -q tests/test_l1_v3_probability.py tests/test_l1_v3_outcomes.py tests/test_l1_v3_ui.py tests/test_l1_v3_shell_integration.py
 ```
 
 重点检查：

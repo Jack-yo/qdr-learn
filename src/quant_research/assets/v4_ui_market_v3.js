@@ -336,7 +336,11 @@ pages.market=async()=>{
      S.category=button.dataset.lv3Cat;show('market');
    }));
    document.querySelector('[data-lv3-refresh]')?.addEventListener('click',()=>{
-     S.force=true;show('market');
+     S.force=true;
+     // V4 global refresh purges its progressive GET memo before the redraw.
+     const global=document.querySelector('#v4-refresh');
+     if(global)global.click();
+     else show('market');
    });
    document.querySelector('[data-lv3-old]')?.addEventListener('click',()=>{
      S.legacyMode=true;show('market');
