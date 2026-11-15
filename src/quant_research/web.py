@@ -332,7 +332,8 @@ def handler(console):
                         '/assets/v4_ui_core.js','/assets/v4_ui_pages_a.js',
                         '/assets/v4_ui_pages_b.js','/assets/v4_ui_pages_c.js',
                         '/assets/v4_ui_fidelity.js',
-                        '/assets/v4_ui_market_v2.js', '/assets/v4_ui_market_v2.css'}:
+                        '/assets/v4_ui_market_v2.js', '/assets/v4_ui_market_v2.css',
+                         '/assets/v4_ui_market_v3.js', '/assets/v4_ui_market_v3.css'}:
                 asset = Path(__file__).with_name('assets') / path.rsplit('/',1)[1]
                 content_type = 'text/css; charset=utf-8' if path.endswith('.css') else 'text/javascript; charset=utf-8'
                 return self.send(200, asset.read_bytes(), content_type)
@@ -629,6 +630,49 @@ def handler(console):
                     return self.send(200,account_summary(console.root/'data/paper.sqlite3',config))
                 except (OSError,ValueError,KeyError):
                     return self.send(409,{'status':'BLOCKED','code':'PAPER_CONFIG_MISSING'})
+            if path == '/api/v1/l1/v3/overview':
+                from .workflow.l1_v3 import current_l1_v3
+                from .data.l1_light_sources import SourceUnavailable
+                q = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+                if (set(q)-{'refresh','archive'} or
+                    any(len(v)!=1 for v in q.values()) or
+                    q.get('refresh',['0'])[0] not in ('0','1') or
+                    q.get('archive',['0'])[0] not in ('0','1')):
+                    return self.send(400,{'schema':'qdr.l1.probability.v3',
+                                          'status':'BLOCKED','code':'INVALID_QUERY'})
+                try:
+                    result=current_l1_v3(console.root,
+                        refresh=q.get('refresh',['0'])[0]=='1',
+                        freeze=q.get('archive',['0'])[0]=='1')
+                    return self.send(200,result)
+                except SourceUnavailable as exc:
+                    return self.send(409,{'schema':'qdr.l1.probability.v3',
+                                          'status':'BLOCKED','code':exc.code})
+                except (ValueError,OSError,KeyError,TypeError):
+                    return self.send(409,{'schema':'qdr.l1.probability.v3',
+                                          'status':'BLOCKED','code':'V3_RESEARCH_DATA_INVALID'})
+            if path == '/api/v1/l1/v3/outcomes':
+                from .workflow.l1_v3_outcomes import recent_v3_outcomes
+                if urlsplit(self.path).query:
+                    return self.send(400,{'status':'BLOCKED','code':'INVALID_QUERY'})
+                try:
+                    return self.send(200,{'schema':'qdr.l1.v3.outcomes',
+                        'status':'RESEARCH_SETTLEMENT_ONLY',
+                        'records':recent_v3_outcomes(console.root,limit=30),
+                        'real_orders_enabled':False})
+                except (ValueError,OSError,TypeError):
+                    return self.send(409,{'status':'BLOCKED',
+                                          'code':'V3_OUTCOME_ARCHIVE_UNAVAILABLE'})
+            if path == '/api/v1/l1/v3/history':
+                from .workflow.l1_v3 import recent_research_snapshots
+                if urlsplit(self.path).query:
+                    return self.send(400,{'status':'BLOCKED','code':'INVALID_QUERY'})
+                try:
+                    return self.send(200,{'schema':'qdr.l1.v3.history',
+                        'status':'RESEARCH_ARCHIVE_ONLY',
+                        'records':recent_research_snapshots(console.root,limit=15)})
+                except (ValueError,OSError,TypeError):
+                    return self.send(409,{'status':'BLOCKED','code':'V3_ARCHIVE_UNAVAILABLE'})
             if path == '/api/v1/l1/v2/official':
                 from .data.l1_official_sources import scan_official_l1
                 q = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
