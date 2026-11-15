@@ -17,9 +17,9 @@ def test_dark_shell_new_assets_and_strict_api():
     for suffix in ("v4_ui_market_v3.js","v4_ui_market_v3.css"):
         assert "/assets/"+suffix in shell
         assert "/assets/"+suffix in api
-    assert "if path == '/api/v1/l1/v3/overview':" in api
+    assert "if path in ('/api/v1/l1/v3/latest'," in api
     assert "if path == '/api/v1/l1/v3/history':" in api
-    assert "'refresh','archive'" in api
+    assert "V3_QUERY_NOT_ALLOWED_READ_ONLY" in api
 
 
 def test_actual_page_uses_independent_real_data_and_numeric_trace():
@@ -71,6 +71,7 @@ const V={pages:{market:async()=>{oldCount++;return{html:'原版研究'};}},
 state:{marketHorizon:3},e:x=>String(x??'').replace(/[&<>"]/g,'_'),
 n:(x,d=2)=>Number(x).toFixed(d),show(){},
 settle:async url=>{seen.push(url);
+if(url.includes('/v3/status'))return {ok:true,data:{schema:'qdr.l1.v3.pipeline.status',status:'CURRENT_RESEARCH',model_retrain_due:false,model_reference:{asof_session:'2026-11-01'}}};
 if(url.includes('/v3/outcomes'))return {ok:true,data:{
  schema:'qdr.l1.v3.outcomes',records:[{asof_session:'2026-11-10',horizon:1,
  actual_scenario:'UP',actual_return:.011,brier_3class:.15,frozen_sha256:'b'.repeat(64)}]}};
@@ -82,8 +83,9 @@ vm.runInNewContext(fs.readFileSync(process.argv[1],'utf8'),{window:{V4:V},docume
 (async()=>{
 const page=await V.pages.market();
 const html=page.html;
-assert.equal(seen.length,5);
-assert.match(seen[0],/v3\/overview\?archive=1/);
+assert.equal(seen.length,6);
+assert.match(seen[0],/v3\/latest$/);
+assert.match(seen[1],/v3\/status$/);
 assert.match(html,/H3 · 这次概率如何算出/);
 assert.match(html,/SPY五日收益/);
 assert.match(html,/1\.23 %/);
@@ -110,7 +112,7 @@ assert.doesNotMatch(partial,/47\.0%/);
 assert.doesNotMatch(partial,/43\.0%/);
 assert.match(partial,/OFR/);
 assert.equal(oldCount,0);
-console.log('PASS model trace, old palette, raw metrics, fallback and four progressive requests');
+console.log('PASS model trace, old palette, raw metrics, fallback and six progressive requests');
 })().catch(err=>{console.error(err);process.exitCode=1;});
 """
     result=subprocess.run([node,"-e",runner,str(JS)],

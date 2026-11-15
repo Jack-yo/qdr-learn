@@ -630,35 +630,37 @@ def handler(console):
                     return self.send(200,account_summary(console.root/'data/paper.sqlite3',config))
                 except (OSError,ValueError,KeyError):
                     return self.send(409,{'status':'BLOCKED','code':'PAPER_CONFIG_MISSING'})
-            if path == '/api/v1/l1/v3/overview':
-                from .workflow.l1_v3 import current_l1_v3
-                from .data.l1_light_sources import SourceUnavailable
-                q = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
-                if (set(q)-{'refresh','archive'} or
-                    any(len(v)!=1 for v in q.values()) or
-                    q.get('refresh',['0'])[0] not in ('0','1') or
-                    q.get('archive',['0'])[0] not in ('0','1')):
+            if path in ('/api/v1/l1/v3/latest',
+                        '/api/v1/l1/v3/overview',
+                        '/api/v1/l1/v3/status'):
+                # Read-only browser contract: NEVER download years of bars,
+                # train an estimator, freeze research, or call Alpaca in GET.
+                if urlsplit(self.path).query:
                     return self.send(400,{'schema':'qdr.l1.probability.v3',
-                                          'status':'BLOCKED','code':'INVALID_QUERY'})
+                        'status':'BLOCKED','code':'V3_QUERY_NOT_ALLOWED_READ_ONLY'})
+                from .workflow.l1_v3_pipeline import (
+                    latest_frozen,current_pipeline_status)
+                from .data.l1_light_sources import SourceUnavailable
                 try:
-                    result=current_l1_v3(console.root,
-                        refresh=q.get('refresh',['0'])[0]=='1',
-                        freeze=q.get('archive',['0'])[0]=='1')
-                    return self.send(200,result)
+                    if path.endswith('/status'):
+                        return self.send(200,current_pipeline_status(console.root))
+                    return self.send(200,latest_frozen(console.root))
                 except SourceUnavailable as exc:
                     return self.send(409,{'schema':'qdr.l1.probability.v3',
-                                          'status':'BLOCKED','code':exc.code})
+                        'status':'BLOCKED','code':exc.code})
                 except (ValueError,OSError,KeyError,TypeError):
                     return self.send(409,{'schema':'qdr.l1.probability.v3',
-                                          'status':'BLOCKED','code':'V3_RESEARCH_DATA_INVALID'})
+                        'status':'BLOCKED','code':'V3_FROZEN_RESEARCH_INVALID'})
             if path == '/api/v1/l1/v3/outcomes':
                 from .workflow.l1_v3_outcomes import recent_v3_outcomes
+                from .workflow.l1_v3_scorecard import forward_scorecard
                 if urlsplit(self.path).query:
                     return self.send(400,{'status':'BLOCKED','code':'INVALID_QUERY'})
                 try:
                     return self.send(200,{'schema':'qdr.l1.v3.outcomes',
                         'status':'RESEARCH_SETTLEMENT_ONLY',
                         'records':recent_v3_outcomes(console.root,limit=30),
+                        'forward_scorecard':forward_scorecard(console.root),
                         'real_orders_enabled':False})
                 except (ValueError,OSError,TypeError):
                     return self.send(409,{'status':'BLOCKED',

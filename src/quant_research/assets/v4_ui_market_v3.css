@@ -190,3 +190,19 @@
 .lv3-outcome-table th{background:#192a40;color:#92afc7;padding:10px;text-align:left;font-weight:550}
 .lv3-outcome-table td{padding:12px 10px;border-bottom:1px solid #273c55;color:#d5e2f0}
 .lv3-outcome-empty{padding:16px 12px;background:#14273a;border:1px dashed #325069;border-radius:8px;font-size:11px;color:#9db4cb}
+
+/* Persistent model status sits alongside—not above—the compact market verdict. */
+.lv3-pipeline-state{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  padding:9px 13px;margin:0 0 13px;border:1px solid #294358;
+  border-radius:8px;background:#132337;color:#92aabf;font-size:11px}
+.lv3-pipeline-state>span:not(.lv3-pill){flex:1;min-width:220px}
+.lv3-pipeline-state a{color:#8bbfdd}
+
+.lv3-forward-score-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:10px;margin:8px 0 16px}
+.lv3-score-item{padding:11px 13px;border:1px solid #29475d;background:#172c42;
+  border-radius:8px;display:flex;flex-direction:column;gap:7px}
+.lv3-score-item span{font-size:10px;color:#96b8ce}
+.lv3-score-item strong{font-size:22px;color:#e0effc}
+.lv3-score-item small{font-size:10px;color:#8eabc1;line-height:1.4}
+@media(max-width:700px){.lv3-forward-score-grid{grid-template-columns:1fr}}

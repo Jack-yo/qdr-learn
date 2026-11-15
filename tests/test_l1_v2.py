@@ -63,7 +63,7 @@ def test_delayed_snapshot_feed_uses_completed_sip_bars(tmp_path,instant,expected
     seen=[]
     def fetch(url,headers):
         seen.append(parse_qs(urlsplit(url).query))
-        return json.dumps({'bars':{'SPY':[]},'next_page_token':None}).encode()
+        return json.dumps({'bars':{'SPY':[{'t':expected_end[:10]+'T05:00:00Z'}]},'next_page_token':None}).encode()
     source=LiveSources(tmp_path,fetch=fetch,now=lambda:instant,
         env={'ALPACA_API_KEY':'test','ALPACA_SECRET_KEY':'private','QDR_L1_FEED':'delayed_sip'})
     _,receipts=source.bars(symbols=['SPY'])
