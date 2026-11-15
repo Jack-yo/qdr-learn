@@ -40,7 +40,7 @@ vm.runInNewContext(fs.readFileSync(process.argv[1],'utf8'),
  {window:{V4:V},document:{querySelectorAll:()=>[],querySelector:()=>null}});
 (async()=>{
 let html=(await V.pages.market()).html;
-assert.equal(seen.length,2);
+assert.equal(seen.length,3);
 assert.match(html,/新增官方数据源/);
 assert.match(html,/3\/4 已取得观测/);
 assert.match(html,/3\.62%/);
@@ -51,7 +51,7 @@ assert.doesNotMatch(html,/0 \/ 0 项特征/);
 mainReady=false; seen.length=0; html=(await V.pages.market()).html;
 assert.match(html,/3\.62%/);
 assert.match(html,/市场未来展望/);
-assert.equal(seen.length,2);
+assert.equal(seen.length,3);
 console.log('PASS independent official data and graceful missing Alpaca model');
 })().catch(err=>{console.error(err);process.exitCode=1;});
 """

@@ -114,13 +114,28 @@ class LiveSources:
     def request(self, endpoint, params=None, headers=None, *, ttl=1800, refresh=False, feed=''):
         params=params or {}
         host=urlsplit(endpoint).hostname
-        if endpoint not in {self.CBOE_VIX,'https://data.alpaca.markets/v2/stocks/bars',
-                            'https://data.alpaca.markets/v2/stocks/snapshots',
-                            'https://api.stlouisfed.org/fred/series/observations',
-                            'https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml',
-                            'https://markets.newyorkfed.org/api/rates/secured/sofr/last/10.json',
-                            'https://markets.newyorkfed.org/api/rates/unsecured/effr/last/10.json',
-                            'https://publicreporting.cftc.gov/resource/gpe5-46if.json'}:
+        allowed_static = {
+            self.CBOE_VIX,
+            'https://data.alpaca.markets/v2/stocks/bars',
+            'https://data.alpaca.markets/v2/stocks/snapshots',
+            'https://api.stlouisfed.org/fred/series/observations',
+            'https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml',
+            'https://markets.newyorkfed.org/api/rates/secured/sofr/last/10.json',
+            'https://markets.newyorkfed.org/api/rates/unsecured/effr/last/10.json',
+            'https://publicreporting.cftc.gov/resource/gpe5-46if.json',
+            'https://publicreporting.cftc.gov/resource/72hh-3qpy.json',
+            'https://www.financialresearch.gov/financial-stress-index/data/fsi.csv',
+            'https://www.bls.gov/schedule/news_release/bls.ics',
+        }
+        cboe_date = re.fullmatch(
+            r'https://cdn[.]cboe[.]com/data/us/options/market_statistics/daily/[0-9]{4}-[0-9]{2}-[0-9]{2}_daily_options',
+            endpoint,
+        )
+        cboe_volume = re.fullmatch(
+            r'https://cdn[.]cboe[.]com/resources/us/equities/market-statistics/historical-market-volume/market_history_20[0-9]{2}[.]csv',
+            endpoint,
+        )
+        if endpoint not in allowed_static and not cboe_date and not cboe_volume:
             raise SourceUnavailable('UNAPPROVED_SOURCE')
         key=self.cache.identity(endpoint,params,feed=feed)
         if not refresh:
