@@ -11,7 +11,7 @@ GET /api/v1/l1/v2/extended?refresh=1
 
 返回 `schema=qdr.l1.extended.v1`、`asof_session`、`features`、`source_health`、`calendar_events`。各来源并行、独立失败；只有真实数值才作为 `OBSERVED`。新增值仅作为当日数据证据，不直接进入市场涨跌概率、E01/E02/E03 或三项综合评分。
 
-## 新增数据源
+## 新增数据源（本轮含后续 ETF 资金发行与 FINRA 增量）
 
 | 任务键 | 原始源 | 真实观测及维度 | 缓存 |
 |---|---|---|---|
@@ -22,6 +22,8 @@ GET /api/v1/l1/v2/extended?refresh=1
 | cftc_gold、cftc_wti | CFTC Disaggregated Futures-only `72hh-3qpy` | 黄金、WTI 管理资金净仓 / OI | 4h |
 | cboe_equity_volume | Cboe consolidated historical market volume `market_history_YYYY.csv` | 美国市场 TRF 场外报告成交金额占比（非方向性订单流） | 6h |
 | stock_sample | Alpaca 30 只指定流动性较高股票、按需近 55 日行情 | 固定样本上涨占比、MA20 上方占比、20 日新高/低家数 | 15m |
+| ici_etf | `https://www.ici.org/research/stats/etf_flows` | ICI 全美 ETF **周度净发行估算**（十亿美元），分别显示**统计周结束日与报告公布日期**；非交易盘中的净买入 | 6h |
+| finra_short_volume | `https://cdn.finra.org/equity/regsho/daily/CNMSshvolYYYYMMDD.txt` | FINRA 报告设施范围 SPY/QQQ/IWM 卖空成交占比，不是未平仓空头持仓或全交易所卖空量 | 2h |
 
 官方来源文档：
 - Cboe Options: https://www.cboe.com/markets/us/options/market-statistics/daily
@@ -31,6 +33,9 @@ GET /api/v1/l1/v2/extended?refresh=1
 - Cboe equity volume: https://www.cboe.com/markets/us/equities/market-statistics/historical-market-volume/
 
 ## 数据资格与解释
+
+- ICI 公开周报的数字是全市场 ETF **estimated net issuance**，由发行份额与赎回份额净额估算，带发布滞后和修订风险；不能把它称为逐日资金净流入或机构买入。若网页修改或公开日期无法确认，适配器返回缺失。
+- FINRA 的 ShortVolume 本身已经包含 ShortExemptVolume，计算占比时不可重复相加；其报告设施之外的成交未覆盖。不能拿这项指标推断股票空头余额或空头回补。
 
 - 每条数据携带 `source`、`observed_date`、`fetched_at`、`pit` 和单位。当前公网下载不是历史 PIT 有效性证明；回放/模型训练不得用当前版本结果倒填历史。
 - Cboe 成交 PCR 以官方 Volume 的 put/call 比率复核并设允许四舍五入误差；无成交时不能显示 0 PCR。SPX 汇总 OI 不等于真实 dealer gamma。
@@ -59,7 +64,7 @@ http://127.0.0.1:8766/api/v1/l1/v2/extended
 http://127.0.0.1:8766/studio#market
 ```
 
-在浏览器 Network 查看三条 GET 各自是否 200；在 `source_health` 检查 8 组来源。外部源因网络/WAF/权限可能仍不可用，因此必须在目标机逐源实际验收，不能将离线模拟测试等同于真实联网成功。
+在浏览器 Network 查看三条 GET 各自是否 200；在 `source_health` 检查 10 组来源。外部源因网络/WAF/权限可能仍不可用，因此必须在目标机逐源实际验收，不能将离线模拟测试等同于真实联网成功。
 
 ## 仍需要授权或更强历史基础的数据
 

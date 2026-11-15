@@ -13,6 +13,7 @@ from quant_research.data.l1_public_extended import (
     EQUITY_SAMPLE, SAMPLE_ID, parse_cboe_options, parse_ofr_stress_csv,
     parse_bls_calendar, parse_cftc_contract, parse_cboe_equities_volume,
     sample_stock_breadth, scan_extended_public,
+    parse_ici_weekly_etf_issuance, parse_finra_consolidated_short_volume,
 )
 
 CLOCK = datetime(2026, 11, 15, 12, 0, tzinfo=timezone.utc)
@@ -42,6 +43,19 @@ SUMMARY:State Employment and Unemployment\r
 END:VEVENT\r
 END:VCALENDAR\r
 """
+ICI = ("""<html><body><h1>Release: Estimated ETF Net Issuance</h1>
+<p>Washington, DC; November 10, 2026—The estimated value of all exchange-traded
+fund (ETF) shares issued exceeded that of shares redeemed by $49.83 billion
+for the week ended November 4, 2026, the Investment Company Institute reported today.</p>
+</body></html>""").encode()
+FINRA = ("""Date|Symbol|ShortVolume|ShortExemptVolume|TotalVolume|Market
+20261113|SPY|600|50|1000|Q
+20261113|SPY|250|20|500|N
+20261113|QQQ|300|30|750|N
+20261113|IWM|220|10|400|B
+20261113|AAPL|300|20|700|Q
+1
+""").encode()
 CFTC_NASDAQ = json.dumps([{
     "cftc_contract_market_code":"20974A",
     "report_date_as_yyyy_mm_dd":"2026-11-10T00:00:00",
@@ -101,6 +115,10 @@ def fake_source(tmp_path,broken=None,with_stocks=True):
             return CFTC_NASDAQ
         if p.path.endswith("/market_history_2026.csv"):
             return MARKET_VOLUME
+        if p.path.endswith("/etf_flows"):
+            return ICI
+        if "CNMSshvol" in p.path:
+            return FINRA
         if p.path.endswith("/stocks/bars"):
             if not with_stocks:
                 raise SourceUnavailable("MISSING_ALPACA_CREDENTIALS")
@@ -124,6 +142,22 @@ def test_parsers_cboe_ofr_bls_cftc_and_market_volume():
     volume=parse_cboe_equities_volume(MARKET_VOLUME)["2026-11-13"]
     assert round(volume["cboe_trf_notional_share"],1)==40.0
 
+
+
+def test_ici_weekly_and_finra_short_volume_contracts():
+    weekly=parse_ici_weekly_etf_issuance(ICI)
+    row=weekly["2026-11-04"]
+    assert row["ici_weekly_etf_net_issuance_bn_usd"]==49.83
+    assert row["source_published_date"]=="2026-11-10"
+    short=parse_finra_consolidated_short_volume(FINRA)
+    assert round(short["2026-11-13"]["finra_spy_short_volume_pct"],2)==56.67
+    assert short["2026-11-13"]["finra_qqq_short_volume_pct"]==40.0
+    # ShortVolume ALREADY includes ShortExempt, so adding exempt again is wrong.
+    with pytest.raises(SourceUnavailable,match="FINRA_VOLUME_INCONSISTENT"):
+        parse_finra_consolidated_short_volume(
+            FINRA.replace(b"|600|50|1000|",b"|600|900|1000|"))
+    with pytest.raises(SourceUnavailable):
+        parse_ici_weekly_etf_issuance(b"<html>not a real weekly release</html>")
 
 def test_sample_breadth_is_explicitly_limited():
     sample=sample_stock_breadth(fake_stock_bars(),"2026-11-13")
@@ -166,9 +200,12 @@ def test_extended_scan_and_short_lived_cache(tmp_path):
     assert values["stock_sample_advance_share"]["value"]==100.0
     assert values["cboe_trf_notional_share"]["value"]==40.0
     assert len(a["calendar_events"])==2
-    assert a["features"]==b["features"] and len(calls)==8
+    assert values["ici_weekly_etf_net_issuance_bn_usd"]["value"]==49.83
+    assert values["ici_weekly_etf_net_issuance_bn_usd"]["published_date"]=="2026-11-10"
+    assert round(values["finra_spy_short_volume_pct"]["value"],2)==56.67
+    assert a["features"]==b["features"] and len(calls)==10
     cache=list((tmp_path/"data"/"cache"/"l1_on_demand").glob("*.json"))
-    assert len(cache)==8 and sum(x.stat().st_size for x in cache)<32_000_000
+    assert len(cache)==10 and sum(x.stat().st_size for x in cache)<32_000_000
 
 
 def test_isolated_feed_failure_and_no_alpaca_credentials(tmp_path):

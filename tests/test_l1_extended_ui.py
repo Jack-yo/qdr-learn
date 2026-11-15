@@ -28,10 +28,13 @@ features:[
  {domain:'events',id:'bls_scheduled_next_7d',label:'BLS 近期日程',value:2,status:'OBSERVED',source:'BLS'},
  {domain:'positioning',id:'cftc_gold_net_pct_oi',label:'黄金持仓',value:10,status:'OBSERVED',source:'CFTC'},
  {domain:'breadth',id:'stock_sample_advance_share',label:'固定样本上涨率',value:65,status:'OBSERVED',source:'ALPACA'},
- {domain:'microstructure',id:'cboe_trf_notional_share',label:'TRF 成交占比',value:40,status:'OBSERVED',source:'CBOE'}],
+ {domain:'microstructure',id:'cboe_trf_notional_share',label:'TRF 成交占比',value:40,status:'OBSERVED',source:'CBOE'},
+ {domain:'microstructure',id:'finra_spy_short_volume_pct',label:'SPY FINRA 卖空占比',value:56.67,status:'OBSERVED',source:'FINRA'},
+ {domain:'positioning',id:'ici_weekly_etf_net_issuance_bn_usd',label:'ICI 周度发行',value:49.83,status:'OBSERVED',source:'ICI',observed_date:'2026-11-04',published_date:'2026-11-10'}],
 source_health:{cboe_options:{status:'OBSERVED'},ofr_fsi:{status:'OBSERVED'},
 bls_calendar:{status:'OBSERVED'},cftc_gold:{status:'OBSERVED'},
-stock_sample:{status:'OBSERVED'},cboe_equity_volume:{status:'OBSERVED'}},
+stock_sample:{status:'OBSERVED'},cboe_equity_volume:{status:'OBSERVED'},
+finra_short_volume:{status:'OBSERVED'},ici_etf:{status:'OBSERVED'}},
 calendar_events:[{name:'CPI 预定发布',start_utc:'2026-11-17T13:30:00+00:00'}]};
 const observed=[];let coreReady=true;let extendedReady=true;
 const V={pages:{},state:{marketHorizon:3},e:x=>String(x??'').replace(/[&<>"']/g,''),
@@ -56,6 +59,10 @@ assert.match(h,/1\.20 倍/);
 assert.match(h,/-1\.90 指数点/);
 assert.match(h,/65\.00%/);
 assert.match(h,/40\.00%/);
+assert.match(h,/56\.67%/);
+assert.match(h,/49\.83 十亿美元/);
+assert.match(h,/周度净发行估算/);
+assert.match(h,/FINRA/);
 assert.match(h,/2 项/);
 assert.doesNotMatch(h,/真实交易已执行/);
 coreReady=false;observed.length=0;

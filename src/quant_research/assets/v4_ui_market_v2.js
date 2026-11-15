@@ -158,12 +158,15 @@
     if(id.startsWith('cboe_pcr_')||id==='cboe_spx_put_call_oi')
       return n(v,2)+' 倍';
     if(id==='ofr_fsi')return signed(v,2)+' 指数点';
+    if(id==='ici_weekly_etf_net_issuance_bn_usd')return signed(v,2)+' 十亿美元';
     if(id==='bls_scheduled_next_7d')return n(v,0)+' 项';
     if(id==='stock_sample_new_high20_count'||id==='stock_sample_new_low20_count')
       return n(v,0)+' 家';
     if(['stock_sample_advance_share','stock_sample_above_ma20_share',
          'cboe_trf_notional_share','cftc_nasdaq_net_pct_oi',
-         'cftc_gold_net_pct_oi','cftc_wti_net_pct_oi'].includes(id))
+         'cftc_gold_net_pct_oi','cftc_wti_net_pct_oi',
+         'finra_spy_short_volume_pct','finra_qqq_short_volume_pct',
+         'finra_iwm_short_volume_pct'].includes(id))
       return signed(v,2)+'%';
     if(['treasury_2y_pct','treasury_10y_pct','nyfed_sofr','nyfed_effr',
         'cftc_emini_sp500_lev_net_pct_oi'].includes(id))return signed(v,2)+'%';
@@ -214,7 +217,8 @@
       (selection.features?.length?selection.features.map(f=>
         '<div class="l1-evidence-feature"><span>'+e(f.label||f.id)+'</span><strong>'+
           showIndicator(f.id,f.value)+'</strong><small>'+e(f.source||'未知来源')+' · '+label(f.status)+
-          (f.observed_date?' · '+e(f.observed_date):'')+'</small></div>').join(''):
+          (f.observed_date?' · 观测 '+e(f.observed_date):'')+
+          (f.published_date?' · 公开 '+e(f.published_date):'')+'</small></div>').join(''):
        '<div class="l1-evidence-unavailable">尚无可核验的该维度数据。'+e(SOURCE_HINTS[selection.id]||'需新增数据适配器及供应商权限')+'</div>')+
       (selection.id==='events'&&calendarEvents.length?
         '<div class="l1-upcoming-head">未来 14 天已排程的 BLS 数据发布</div>'+
@@ -261,6 +265,14 @@
     if(breadth)push('stock_sample_advance_share','股票样本参与度',
       '固定 30 股样本中上涨占比 '+showIndicator(breadth.id,breadth.value),
       '不是全美股上涨家数，也不具历史 PIT 股票池');
+    const issuance=lookup.get('ici_weekly_etf_net_issuance_bn_usd');
+    if(issuance)push(issuance.id,'全美 ETF 周度发行',
+      'ICI 全市场周度净发行估算 '+showIndicator(issuance.id,issuance.value),
+      '周频发行/赎回的净额估算，不是实时 ETF 二级市场净买入');
+    const finra=lookup.get('finra_spy_short_volume_pct');
+    if(finra)push(finra.id,'短卖成交结构',
+      'FINRA 设施报告的 SPY 卖空成交占比 '+showIndicator(finra.id,finra.value),
+      'ShortVolume 包含 exempt；非全市场空头持仓、非空头回补比例');
     const funds=lookup.get('cftc_nasdaq_net_pct_oi')||lookup.get('cftc_gold_net_pct_oi');
     if(funds)push(funds.id,'周频期货资金仓位',
       funds.label+' '+showIndicator(funds.id,funds.value),
@@ -281,7 +293,8 @@
         '<div class="l1-insight-row"><strong>'+e(item.heading)+'</strong>'+
         '<span>'+e(item.finding)+'</span>'+
         '<small>'+e(item.qualification)+' · '+e(item.source.source||'来源待核验')+
-        (item.source.observed_date?' · '+e(item.source.observed_date):'')+
+        (item.source.observed_date?' · 观测 '+e(item.source.observed_date):'')+
+        (item.source.published_date?' · 发布 '+e(item.source.published_date):'')+
         '</small></div>').join('')+'</div>'+
       '<p class="l1-insight-note">本区只汇总跨维度的最新实际观察；数据不足时不填补虚构值。要把这些变量用于 H1/H3/H5 预测，必须先证明历史时点有效性和样本外增量。</p>');
   }
