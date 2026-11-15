@@ -155,6 +155,9 @@
     if(id==='vol_ratio')return n(v,2)+' 倍';
     if(id==='vix')return n(v,2)+' 点';
     if(id==='spy_level1_spread_bps')return n(v,2)+' bps';
+    if(['treasury_2y_pct','treasury_10y_pct','nyfed_sofr','nyfed_effr',
+        'cftc_emini_sp500_lev_net_pct_oi'].includes(id))return signed(v,2)+'%';
+    if(['treasury_2s10s_bp','nyfed_sofr_minus_effr_bp'].includes(id))return signed(v,1)+' bps';
     if(['treasury_yield','sofr','credit_spread'].includes(id))return n(v,2)+'%';
     return n(v,4)+'（原始值）';
   }
@@ -174,6 +177,8 @@
     const supported=stats.OBSERVED+stats.PARTIAL;
     const missingLabels=DOMAINS.filter(([id])=>!['OBSERVED','PARTIAL'].includes(lookup.get(id)?.status)).map(([,name])=>name);
     const metricTotal=raw.reduce((sum,d)=>sum+(Number(d.coverage?.available)||0),0);
+    const feedStatus=data?.source_health?Object.entries(data.source_health):[];
+    const observedFeeds=feedStatus.filter(([,value])=>value.status==='OBSERVED').length;
     const selection=S.selectedDomain&&lookup.get(S.selectedDomain);
     const makeRow=(id)=>{
       const meta=DOMAINS.find(x=>x[0]===id),item=lookup.get(id),status=item?.status||'MISSING';
@@ -208,6 +213,8 @@
         '<div><b>'+stats.OBSERVED+'</b><span>当前检查项就绪</span></div>'+
         '<div><b>'+stats.PARTIAL+'</b><span>部分覆盖维度</span></div>'+
         '<div><b>'+stats.MISSING+'</b><span>待接入维度</span></div></div>'+
+      (feedStatus.length?'<div class="l1-official-state">新增官方数据源：'+observedFeeds+'/'+feedStatus.length+
+      ' 已取得观测 · '+feedStatus.map(([id,value])=>e(id)+': '+(value.status==='OBSERVED'?'就绪':e(value.code||'不可用'))).join(' · ')+'</div>':'')+
       '<p class="l1-evidence-explain">目前共取得 '+metricTotal+
        ' 项可用的观测值；维度有数据不等于该维度完整覆盖，ETF 代理也不等于真实股票广度。</p>'+ 
       (missingLabels.length?'<p class="l1-evidence-gap"><b>当前待补数据：</b>'+e(missingLabels.join('、'))+'。展开查看各自缺口与来源。</p>':'')+
@@ -314,8 +321,9 @@
     const whenExpanded=(url)=>S.legacyOpen?settle(url):Promise.resolve(deferred);
     // One scanned dataset serves H1/H3/H5, so switching horizons does not re-fetch.
     // Research-only panels are not requested until the user expands their section.
-    const [v2Raw,forecast,freshRaw,statusRaw,oldRaw,anomalyRaw,validationRaw,replayRaw] = await Promise.all([
+    const [v2Raw,officialRaw,forecast,freshRaw,statusRaw,oldRaw,anomalyRaw,validationRaw,replayRaw] = await Promise.all([
       settle('/api/v1/l1/v2/overview?horizon=3'+(S.refreshRequested?'&refresh=1':'')),
+      settle('/api/v1/l1/v2/official'+(S.refreshRequested?'?refresh=1':'')),
       whenExpanded('/api/v1/l1/market/overview?horizon='+S.horizon),
       whenExpanded('/api/v1/v4/freshness'),whenExpanded('/api/status'),
       whenExpanded('/api/v1/market/research?horizon='+S.horizon),
@@ -324,21 +332,52 @@
     ]);
     const fresh=freshRaw.ok?freshRaw.data:null, system=statusRaw.ok?statusRaw.data:null;
     const v2=v2Raw?.ok&&v2Raw.data?.schema==='qdr.l1.v2'?v2Raw.data:null;
+    const official=officialRaw?.ok && officialRaw.data?.schema==='qdr.l1.official.v1' &&
+      (!v2||officialRaw.data?.asof_session===v2?.asof_session)?officialRaw.data:null;
+    const extra=Array.isArray(official?.features)?official.features:[];
+    const enriched=v2?{...v2,source_health:official?.source_health||null,
+      domains:(v2.domains||[]).map(domain=>{
+        const supplemental=extra.filter(feature=>feature.domain===domain.id);
+        const features=[...(domain.features||[]),...supplemental];
+        const observed=features.filter(f=>f?.status==='OBSERVED');
+        const first=observed[0]||null;
+        const status=domain.id==='price' && domain.status==='OBSERVED'?'OBSERVED':
+          observed.length?'PARTIAL':'MISSING';
+        const reason=domain.id==='positioning'&&supplemental.length?
+          '已取得部分 CFTC TFF 持仓；仍缺 ETF 申赎及其他市场的真实持仓':
+          domain.reason;
+        return {...domain,status,reason,features,
+          value:first?.value??null,label:first?.label??null,
+          coverage:{available:observed.length,registered:features.length}};
+      })
+    }:null;
+
     const typed=forecast.ok&&forecast.data?.schema==='qdr.l1.market.v1'?forecast.data:null;
     const rec=extractForecast(forecast,fresh,S.horizon);
     const old=oldRaw.ok?oldRaw.data:null;
     const observationStatus=fresh?.modules?.market_observation?.freshness_status || 'BLOCKED';
-    const displayData=v2?{...typed,domains:v2.domains,features:v2.domains.flatMap(d=>(d.features||[]).map(f=>({...f,domain:d.id,available_at:f.fetched_at||v2.fetched_at})))}:typed;
+    // If Alpaca is unavailable, standalone official public observations must
+    // still appear under evidence, without inventing any market-model score.
+    const standalone=(!enriched&&official)?{
+      schema:'qdr.l1.v2',source_health:official.source_health,
+      domains:DOMAINS.map(([id,name])=>{
+        const features=extra.filter(f=>f.domain===id);
+        return {id,name,features,status:features.length?'PARTIAL':'MISSING',
+          coverage:{available:features.length,registered:features.length},
+          reason:features.length?'独立公开市场观察（核心行情未取得）':'该维度数据尚不可用'};
+      })
+    }:null;
+    const displayData=enriched||standalone||typed;
     const html=`<div class="l1-cockpit">
       <div class="l1-head"><div><div class="l1-breadcrumb">L1 / MARKET FORECAST <span>· 01</span></div><h1>市场未来展望 <span class="l1-beta">RESEARCH</span></h1><p>从市场内部变化推断未来收益与风险分布；对每个预测提供真实证据，不把过去行情包装成未来信号。</p></div>
       <div class="l1-head-actions"><span class="l1-access ${rec?'good':''}"><i></i>${rec?'已读取冻结预测':v2?'已更新市场观察 · 预测待验收':'数据源待检查'}</span><button class="l1-refresh" type="button" data-l1-refresh>↻ 重新核查</button></div></div>
-      ${v2Raw?.pending?panel('l1-v2-lead l1-v2-loading',header('L1 V2 / AUTOMATED MARKET SCAN','市场自动扫描与综合研判','<span class="l1-kicker">数据正在获取</span>')+'<div class="l1-loading-score"><span></span><span></span><span></span></div><p class="l1-v2-muted">独立获取市场行情、计算综合指标；无需等待其他模块。</p>'):v2Cockpit(v2,S.horizon,v2Raw)}
+      ${v2Raw?.pending?panel('l1-v2-lead l1-v2-loading',header('L1 V2 / AUTOMATED MARKET SCAN','市场自动扫描与综合研判','<span class="l1-kicker">数据正在获取</span>')+'<div class="l1-loading-score"><span></span><span></span><span></span></div><p class="l1-v2-muted">独立获取市场行情、计算综合指标；无需等待其他模块。</p>'):v2Cockpit(enriched,S.horizon,v2Raw)}
       <details class="l1-v2-legacy" ${S.legacyOpen?'open':''}><summary>展开完整研究视图：收益分布、路径模型与验证</summary>
       ${indicatorCards(fresh,system,observationStatus)}
       <div class="l1-top-grid">${currentForecast(rec,S.horizon)}${firstPassage(rec)}</div>
       ${driversAndSignals(typed)}${validation(old,rec)}${researchTools(anomalyRaw?.ok?anomalyRaw.data:null, validationRaw?.ok?validationRaw.data:null, replayRaw?.ok?replayRaw.data:null)}
       </details>
-      ${domainsGrid(displayData,Boolean(v2Raw?.pending))}
+      ${domainsGrid(displayData,Boolean(v2Raw?.pending&&!standalone))}
       <div class="l1-bottom-note"><span>QDR · MARKET RESEARCH · L1</span><span>观察 / 回溯 / 前向预测分级 · 真实订单关闭</span></div></div>`;
     return {title:'L1 市场未来展望',html,mount(){
       document.querySelectorAll('[data-l1-horizon]').forEach(btn=>btn.addEventListener('click',()=>{
