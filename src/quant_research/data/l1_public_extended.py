@@ -14,6 +14,7 @@ import json
 import math
 import re
 from collections import defaultdict
+from html.parser import HTMLParser
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -28,6 +29,8 @@ BLS_CALENDAR = "https://www.bls.gov/schedule/news_release/bls.ics"
 CFTC_TFF = "https://publicreporting.cftc.gov/resource/gpe5-46if.json"
 CFTC_DISAGG = "https://publicreporting.cftc.gov/resource/72hh-3qpy.json"
 CBOE_VOLUME_PREFIX = "https://cdn.cboe.com/resources/us/equities/market-statistics/historical-market-volume/"
+ICI_ETF = "https://www.ici.org/research/stats/etf_flows"
+FINRA_PREFIX = "https://cdn.finra.org/equity/regsho/daily/CNMSshvol"
 NY = ZoneInfo("America/New_York")
 
 # Fixed transparent sample, NOT S&P 500 constituents, NOT all US-listed stocks.
@@ -241,6 +244,89 @@ def parse_cboe_equities_volume(body):
         raise SourceUnavailable("CBOE_EQUITY_VOLUME_INVALID") from exc
 
 
+class _HTMLToText(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.fragments=[]
+    def handle_data(self, text):
+        self.fragments.append(text)
+
+
+def parse_ici_weekly_etf_issuance(body):
+    """Extract only the explicit current ICI reported release, no HTML table guess."""
+    try:
+        parser=_HTMLToText()
+        parser.feed(body.decode("utf-8"))
+        text=" ".join(" ".join(parser.fragments).split())
+        intro=re.search(r"(?:Washington,\s*DC;\s*)([A-Z][a-z]+\s+\d{1,2},\s+\d{4})",
+                        text)
+        if intro is None:
+            raise SourceUnavailable("ICI_PUBLISH_DATE_MISSING")
+        published=datetime.strptime(intro.group(1),"%B %d, %Y").date().isoformat()
+        sentence=re.search(
+            r"shares (issued exceeded that of shares redeemed|redeemed exceeded that of shares issued)"
+            r" by \$([0-9,.]+) billion for the week ended ([A-Z][a-z]+\s+\d{1,2},\s+\d{4})",
+            text, re.IGNORECASE)
+        if sentence is None:
+            raise SourceUnavailable("ICI_WEEKLY_ESTIMATE_NOT_FOUND")
+        end=datetime.strptime(sentence.group(3),"%B %d, %Y").date().isoformat()
+        if published < end:
+            raise SourceUnavailable("ICI_PUBLICATION_PRECEDES_WINDOW")
+        signed=_finite(sentence.group(2).replace(",",""),0,2000)
+        if sentence.group(1).lower().startswith("redeemed"):
+            signed=-signed
+        return {end:{"ici_weekly_etf_net_issuance_bn_usd":round(signed,3),
+                     "source_published_date":published}}
+    except (UnicodeDecodeError,ValueError,TypeError,OverflowError) as exc:
+        raise SourceUnavailable("ICI_INVALID_RELEASE_HTML") from exc
+
+
+def parse_finra_consolidated_short_volume(body):
+    """FINRA TRF/ADF reported daily short-sale flow, NOT open short interest."""
+    try:
+        reader=csv.DictReader(io.StringIO(body.decode("utf-8-sig")),delimiter="|")
+        expected={"Date","Symbol","ShortVolume","ShortExemptVolume","TotalVolume","Market"}
+        if not expected.issubset(set(reader.fieldnames or [])):
+            raise SourceUnavailable("FINRA_INVALID_FILE_LAYOUT")
+        aggregates=defaultdict(lambda:{"short":0.0,"total":0.0,"markets":set()})
+        eligible={"SPY","QQQ","IWM"}
+        day=None
+        for row in reader:
+            sym=str(row.get("Symbol","")).upper().strip()
+            if sym not in eligible:
+                continue
+            rawday=str(row.get("Date","")).strip()
+            if not re.fullmatch(r"\d{8}",rawday):
+                raise SourceUnavailable("FINRA_INVALID_REPORT_DATE")
+            thisday=datetime.strptime(rawday,"%Y%m%d").date().isoformat()
+            if day is not None and day!=thisday:
+                raise SourceUnavailable("FINRA_MIXED_REPORT_DATES")
+            day=thisday
+            short=_finite(row.get("ShortVolume"),0)
+            exempt=_finite(row.get("ShortExemptVolume"),0)
+            total=_finite(row.get("TotalVolume"),0)
+            # Per official layout, ShortVolume already INCLUDES ShortExemptVolume.
+            if total==0 or short>total or exempt>short:
+                raise SourceUnavailable("FINRA_VOLUME_INCONSISTENT")
+            record=aggregates[sym]
+            record["short"]+=short
+            record["total"]+=total
+            record["markets"].add(str(row.get("Market","")).strip().upper())
+        if day is None:
+            raise SourceUnavailable("FINRA_TARGET_SYMBOLS_NOT_FOUND")
+        values={}
+        for sym,info in aggregates.items():
+            if info["total"]<=0:
+                continue
+            values[f"finra_{sym.lower()}_short_volume_pct"]=round(
+                100*info["short"]/info["total"],4)
+        if not values:
+            raise SourceUnavailable("FINRA_NO_VALID_VOLUME")
+        return {day:values}
+    except (UnicodeDecodeError,TypeError,ValueError,csv.Error) as exc:
+        raise SourceUnavailable("FINRA_INVALID_VOLUME_FILE") from exc
+
+
 def sample_stock_breadth(raw, asof):
     """Fixed liquid-stock sample only; never label as all-US breadth or PIT."""
     rows={}
@@ -342,6 +428,31 @@ class ExtendedPublicSources:
         body,stamp,digest=self.live.request(url,ttl=21600,refresh=refresh)
         return parse_cboe_equities_volume(body),self.receipt("CBOE_EQUITIES_VOLUME",stamp,digest)
 
+    def ici_weekly_etf(self,*,refresh=False):
+        body,stamp,digest=self.live.request(ICI_ETF,ttl=21600,refresh=refresh)
+        return parse_ici_weekly_etf_issuance(body),self.receipt(
+            "ICI_WEEKLY_ESTIMATED_ETF_ISSUANCE",stamp,digest)
+
+    def finra_short_volume(self,limit,*,refresh=False):
+        last=datetime.fromisoformat(limit).date()
+        failures=[]
+        for n in range(8):
+            day=last-timedelta(days=n)
+            if day.weekday()>4:continue
+            endpoint=FINRA_PREFIX+day.strftime("%Y%m%d")+".txt"
+            try:
+                body,stamp,digest=self.live.request(endpoint,ttl=7200,refresh=refresh)
+                report=parse_finra_consolidated_short_volume(body)
+                if day.isoformat() not in report:
+                    raise SourceUnavailable("FINRA_REPORT_DATE_MISMATCH")
+                return report,self.receipt("FINRA_CNMS_SHORT_VOLUME",stamp,digest)
+            except SourceUnavailable as exc:
+                failures.append(exc.code)
+                if exc.code!="HTTP_404":
+                    break
+        raise SourceUnavailable("FINRA_SHORT_VOLUME_UNAVAILABLE_"+failures[-1]
+                                if failures else "FINRA_NO_REPORT")
+
     def stock_breadth(self,limit,*,refresh=False):
         raw,receipts=self.live.bars(days=55,refresh=refresh,symbols=EQUITY_SAMPLE)
         output=sample_stock_breadth(raw,limit)
@@ -372,9 +483,11 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
         "cftc_wti":lambda:provider.cftc_commodity("wti",refresh=refresh),
         "cboe_equity_volume":lambda:provider.cboe_equity_volume(limit,refresh=refresh),
         "stock_sample":lambda:provider.stock_breadth(limit,refresh=refresh),
+        "ici_etf":lambda:provider.ici_weekly_etf(refresh=refresh),
+        "finra_short_volume":lambda:provider.finra_short_volume(limit,refresh=refresh),
     }
     health,features,calendar_events={},[],[]
-    with ThreadPoolExecutor(max_workers=8) as pool:
+    with ThreadPoolExecutor(max_workers=10) as pool:
         future={name:pool.submit(fn) for name,fn in jobs.items()}
         for name,job in future.items():
             try:
@@ -390,6 +503,12 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
                         day:{"bls_scheduled_next_7d":sum(1 for x in values if stamp<=x["dt"]<=stamp+timedelta(days=7))}
                     }
                 eligible=[(d,v) for d,v in values.items() if d<=limit]
+                if name=="ici_etf":
+                    # Use source article's publication day, not its Wednesday week-end,
+                    # and hold until that publication date has fully elapsed in UTC.
+                    eligible=[(d,v) for d,v in eligible if
+                        stamp>=datetime.fromisoformat(v["source_published_date"]).replace(
+                            tzinfo=timezone.utc)+timedelta(days=1)]
                 if name.startswith("cftc_"):
                     # The Tuesday position report may not be published until
                     # Friday afternoon; do not predate this in the model UI.
@@ -400,7 +519,7 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
                     raise SourceUnavailable("NO_RELEASED_OBSERVATION")
                 day,value=max(eligible)
                 lag=(datetime.fromisoformat(limit)-datetime.fromisoformat(day)).days
-                max_lag=21 if name.startswith("cftc_") else 12 if name=="ofr_fsi" else 7
+                max_lag=28 if name=="ici_etf" else 21 if name.startswith("cftc_") else 12 if name=="ofr_fsi" else 7
                 if lag>max_lag:
                     raise SourceUnavailable("STALE_OBSERVATION")
                 health[name]={"status":"OBSERVED","source":receipt["source"],
@@ -438,6 +557,21 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
                         "全市场场外报告成交额占比 (TRF)",
                         value["cboe_trf_notional_share"],"%",
                         "TRADE_REPORTING_FACILITY_NOT_DIRECTIONAL_ORDER_FLOW")
+                elif name=="ici_etf":
+                    add("positioning","ici_weekly_etf_net_issuance_bn_usd",
+                        "ICI 全美 ETF 周度净发行估算",value["ici_weekly_etf_net_issuance_bn_usd"],
+                        "十亿美元","ICI_WEEKLY_ESTIMATE_PUBLISHED_AFTER_WEEK_END_NOT_DAILY_FLOW")
+                    features[-1]["published_date"]=value["source_published_date"]
+                    health[name]["published_date"]=value["source_published_date"]
+                elif name=="finra_short_volume":
+                    for field,title in (
+                        ("finra_spy_short_volume_pct","FINRA报告SPY卖空成交占比"),
+                        ("finra_qqq_short_volume_pct","FINRA报告QQQ卖空成交占比"),
+                        ("finra_iwm_short_volume_pct","FINRA报告IWM卖空成交占比"),
+                    ):
+                        if field in value:
+                            add("microstructure",field,title,value[field],"%",
+                                "FINRA_TRF_AND_ADF_SHORT_TRADE_VOLUME_NOT_SHORT_INTEREST")
                 elif name=="stock_sample":
                     for field,title,unit in (
                         ("stock_sample_advance_share","30只大盘股样本当日上涨占比","%"),
