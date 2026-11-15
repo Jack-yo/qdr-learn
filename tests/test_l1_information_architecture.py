@@ -57,8 +57,9 @@ assert.match(html,/19\.30 点/);
 assert.match(html,/2\.40 bps/);
 assert.doesNotMatch(html,/0 \/ 0 项特征/);
 assert.match(html,/当前待补数据：/);
-assert.equal(requests.length,1);
+assert.equal(requests.length,2);
 assert.match(requests[0],/\/l1\/v2\/overview\?horizon=3/);
+assert.match(requests[1],/\/l1\/v2\/official/);
 console.log('PASS grouped evidence, source gaps, units and lazy loading');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 """

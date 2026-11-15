@@ -226,3 +226,8 @@ button.l1-domain[aria-pressed="true"]{border-color:#4bafaa;box-shadow:inset 0 0 
 
 .l1-evidence-gap{border-radius:8px;padding:9px 12px;background:#252638;color:#c9bfc4;border:1px solid rgba(230,192,117,.16);font-size:11px;line-height:1.8;margin:8px 0 14px}
 .l1-evidence-gap b{color:#e5c183}
+
+/* Independent official data-source health follows the compact coverage summary. */
+.l1-official-state{margin:13px 0 6px;border:1px solid #345168;border-radius:8px;
+  background:#182a3e;padding:11px 13px;font-size:11px;line-height:1.75;
+  color:#a2c1ce;overflow-wrap:anywhere}

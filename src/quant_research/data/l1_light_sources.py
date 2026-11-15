@@ -116,7 +116,11 @@ class LiveSources:
         host=urlsplit(endpoint).hostname
         if endpoint not in {self.CBOE_VIX,'https://data.alpaca.markets/v2/stocks/bars',
                             'https://data.alpaca.markets/v2/stocks/snapshots',
-                            'https://api.stlouisfed.org/fred/series/observations'}:
+                            'https://api.stlouisfed.org/fred/series/observations',
+                            'https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml',
+                            'https://markets.newyorkfed.org/api/rates/secured/sofr/last/10.json',
+                            'https://markets.newyorkfed.org/api/rates/unsecured/effr/last/10.json',
+                            'https://publicreporting.cftc.gov/resource/gpe5-46if.json'}:
             raise SourceUnavailable('UNAPPROVED_SOURCE')
         key=self.cache.identity(endpoint,params,feed=feed)
         if not refresh:
