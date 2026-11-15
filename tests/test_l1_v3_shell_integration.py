@@ -42,8 +42,8 @@ assert.match(root.innerHTML,/H3 · 这次概率如何算出/);
 assert.match(root.innerHTML,/市场原始数据监测/);
 assert.match(root.innerHTML,/v4-pending-banner/);
 assert.doesNotMatch(root.innerHTML,/研究数据暂不可用/);
-assert.equal(requestCount,5);
-console.log('PASS V4 shell, V2 preservation, V3 override, nonblocking lazy loading');
+assert.equal(requestCount,6);
+console.log('PASS V4 shell, V2 preservation, V3 override, nonblocking lazy loading and read-only V3');
 })().catch(err=>{console.error(err);process.exitCode=1});
 """
     res=subprocess.run([node,"-e",runner,*[str(ASSETS/p) for p in SCRIPTS]],

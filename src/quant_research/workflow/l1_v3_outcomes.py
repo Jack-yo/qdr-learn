@@ -87,10 +87,16 @@ def settle_due_research(root, bars, *, latest_session, limit=30):
                 }
                 dest=root/"outputs"/"l1_v3_outcomes"/asof
                 dest.mkdir(parents=True,exist_ok=True)
-                outfile=dest/(outcome["frozen_sha256"][:24]+"_H"+str(h)+".json")
+                prefix=outcome["frozen_sha256"][:24]+"_H"+str(h)
+                body=_json_bytes(outcome)
+                # First verified outcome wins; never retroactively replace
+                # the historical label after a later corporate-action update.
+                if list(dest.glob(prefix+"*.json")):
+                    continue
+                outfile=dest/(prefix+"_"+sha256(body).hexdigest()[:16]+".json")
                 try:
                     with outfile.open("xb") as f:
-                        f.write(_json_bytes(outcome))
+                        f.write(body)
                     written+=1
                 except FileExistsError:
                     pass
@@ -106,7 +112,14 @@ def recent_v3_outcomes(root,limit=30):
     rows=[]
     for path in sorted(folder.glob("20??-??-??/*.json"),reverse=True):
         try:
-            r=json.loads(path.read_text(encoding="utf-8"))
+            body=path.read_bytes()
+            # Show only forward outcomes with their own immutable digest.
+            # Legacy unsealed records remain on disk but cannot masquerade
+            # as a verified settlement in the UI.
+            suffix=path.stem.rsplit("_",1)[-1]
+            if len(suffix)!=16 or sha256(body).hexdigest()[:16]!=suffix:
+                continue
+            r=json.loads(body)
             if (r.get("schema")!="qdr.l1.v3.outcome.v1" or
                 r.get("execution_eligible") is not False):
                 continue
