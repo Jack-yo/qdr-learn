@@ -9,6 +9,7 @@ from quant_research.workflow.l1_v3 import save_research_snapshot
 from quant_research.workflow.l1_v3_outcomes import (
     settle_due_research, recent_v3_outcomes,
 )
+from quant_research.workflow.l1_v3_scorecard import forward_scorecard
 
 
 def _fixture(clock):
@@ -31,6 +32,7 @@ def _fixture(clock):
         "horizons":{
             str(h):{"horizon":h,"status":"RESEARCH_ONLY",
                     "research_estimates":{"UP":.35,"FLAT":.45,"DOWN":.20},
+                    "baseline_probabilities":{"UP":.30,"FLAT":.40,"DOWN":.30},
                     "admitted_probabilities":None,"boundary_return":.004}
             for h in (1,3,5)
         }
@@ -73,3 +75,26 @@ def test_reject_modified_frozen_source(tmp_path):
          latest_session=window[6].date().isoformat())
     assert result["new_outcomes"]==0
     assert recent_v3_outcomes(tmp_path)==[]
+
+
+def test_forward_scorecard_accepts_only_digest_linked_outcomes(tmp_path):
+    clock=TradingClock()
+    window,bars,frozen=_fixture(clock)
+    save_research_snapshot(tmp_path,frozen)
+    settled=settle_due_research(tmp_path,bars,
+        latest_session=window[6].date().isoformat())
+    assert settled["new_outcomes"]==3
+    score=forward_scorecard(tmp_path,minimum_samples=1)
+    assert score["schema"]=="qdr.l1.v3.forward.scorecard.v1"
+    for h in (1,3,5):
+        x=score["horizons"][str(h)]
+        assert x["samples"]==1
+        assert x["status"]=="FORWARD_RESEARCH_REPORT_ONLY"
+        assert x["admitted"] is False
+        assert x["brier"]>=0
+    # Altering one settlement invalidates its content digest and score.
+    first=next((tmp_path/"outputs"/"l1_v3_outcomes").glob("*/*_H1_*.json"))
+    first.write_bytes(first.read_bytes()+b" ")
+    bad=forward_scorecard(tmp_path,minimum_samples=1)
+    assert bad["horizons"]["1"]["samples"]==0
+    assert bad["horizons"]["3"]["samples"]==1

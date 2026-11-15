@@ -243,6 +243,14 @@ function rawPanel(rows,official,extended,v3){
 function outcomePanel(result){
  const data=result?.ok&&result.data?.schema==='qdr.l1.v3.outcomes'?result.data:null;
  const records=Array.isArray(data?.records)?data.records:[];
+ const aggregate=data?.forward_scorecard?.horizons||{};
+ const scoreCards=[1,3,5].map(h=>{
+   const x=aggregate[String(h)]||{};
+   const enough=Number(x.samples)>0&&isNum(x.brier)&&isNum(x.baseline_brier);
+   return '<div class="lv3-score-item"><span>H'+h+' · 已到期 '+(isNum(x.samples)?fmt(x.samples,0):'0')+' 条</span>'+
+    '<strong>'+ (enough?fmt(x.brier,4):'—')+'</strong>'+
+    '<small>三类 Brier'+(enough?' / 历史基准 '+fmt(x.baseline_brier,4):' · 暂无可核验结果')+'</small></div>';
+ }).join('');
  const content=records.length?
    '<div class="lv3-outcome-table-wrap"><table class="lv3-outcome-table"><thead>'+
     '<tr><th>预测交易日</th><th>期限</th><th>已发生情景</th><th>实际收益</th><th>三分类 Brier</th></tr>'+
@@ -253,9 +261,10 @@ function outcomePanel(result){
       '<td class="mono">'+fmt(item.brier_3class,4)+'</td></tr>').join('')+
     '</tbody></table></div>':
    '<div class="lv3-outcome-empty">'+e(errorText(result?.pending?result:{error:{message:
-      '目前没有到期且已冻结的研究预测；收盘后访问页面会保存轻量快照，到期后才追加实际结果。'}}))+'</div>';
+      '目前没有到期且已冻结的研究预测；本地每日任务负责生成快照，到期后才追加实际结果。'}}))+'</div>';
  return box('lv3-outcomes',title('前向冻结与到期核验',
     '<span class="lv3-soft">仅已完成的实际交易日 · 不代表实盘收益</span>')+
+    '<div class="lv3-forward-score-grid">'+scoreCards+'</div>'+
     content+
     '<p class="lv3-small">Brier 衡量三类概率与实际结果的距离，越小越好；只有历史归档与结果数据同时存在才会显示评分。</p>');
 }
@@ -283,6 +292,20 @@ function evidence(v2,official,extended){
     '<span class="lv3-soft">BLS 官方排程 · UTC</span>')+
    (eventRows||'<div class="lv3-empty">当前没有已核验的近期发布日程。</div>'))+'</div>';
 }
+function pipelineLine(status,p){
+ const current=status?.status==='CURRENT_RESEARCH';
+ const model=status?.model_reference?.asof_session;
+ const job=status?.last_job;
+ const parts=[
+   p?.status==='RESEARCH_ONLY'?('已冻结研究 · '+p.asof_session):'最新研究待生成',
+   model?('模型训练 '+model):'模型尚未建立',
+   status?.model_retrain_due?'待训练/更新':'模型在更新周期内',
+   job?.status==='BLOCKED'?('上次任务失败：'+String(job.code||'见运行日志')):''
+ ].filter(Boolean);
+ return '<div class="lv3-pipeline-state">'+
+   pill(current?'最新研究已就绪':'研究数据待更新',current?'ok':'warn')+
+   '<span>'+e(parts.join(' · '))+'</span></div>';
+}
 pages.market=async()=>{
  if(S.legacyMode && typeof legacyMarket==='function'){
    const old=await legacyMarket();
@@ -296,27 +319,29 @@ pages.market=async()=>{
  }
  const suffix=S.force?'?refresh=1':'';
  S.force=false;
- const [pRaw,v2Raw,officialRaw,extendedRaw,outcomesRaw]=await Promise.all([
-   // The first successful as-of scan archives a compact, immutable research-only
-   // record; repeated views produce the same content hash and never overwrite.
-   settle('/api/v1/l1/v3/overview?archive=1'+(suffix?'&refresh=1':'')),
+ const [pRaw,statusRaw,v2Raw,officialRaw,extendedRaw,outcomesRaw]=await Promise.all([
+   // Read-only: this GET never trains a model or downloads historical prices.
+   settle('/api/v1/l1/v3/latest'),
+   settle('/api/v1/l1/v3/status'),
    settle('/api/v1/l1/v2/overview?horizon=3'+(suffix?'&refresh=1':'')),
    settle('/api/v1/l1/v2/official'+suffix),
    settle('/api/v1/l1/v2/extended'+suffix),
    settle('/api/v1/l1/v3/outcomes')
  ]);
- const p=pRaw?.ok&&pRaw.data?.schema==='qdr.l1.probability.v3'?pRaw.data:null;
+ const p=pRaw?.ok&&pRaw.data?.schema==='qdr.l1.probability.v3'&&pRaw.data.status==='RESEARCH_ONLY'?pRaw.data:null;
+ const pipeline=statusRaw?.ok&&statusRaw.data?.schema==='qdr.l1.v3.pipeline.status'?statusRaw.data:null;
  const v2=v2Raw?.ok&&v2Raw.data?.schema==='qdr.l1.v2'?v2Raw.data:null;
  const official=officialRaw?.ok&&officialRaw.data?.schema==='qdr.l1.official.v1'?officialRaw.data:null;
  const extended=extendedRaw?.ok&&extendedRaw.data?.schema==='qdr.l1.extended.v1'?extendedRaw.data:null;
  const raw=fromSources(p,v2,official,extended);
  const selected=p?.horizons?.[String(S.horizon)]||null;
- const waiting=[pRaw,v2Raw,officialRaw,extendedRaw,outcomesRaw].filter(x=>x?.pending).length;
+ const waiting=[pRaw,statusRaw,v2Raw,officialRaw,extendedRaw,outcomesRaw].filter(x=>x?.pending).length;
  const html='<div class="lv3">'+
    '<div class="lv3-heading"><div><small>L1 / MARKET INTELLIGENCE</small>'+
    '<h1>市场状态与情景研究 <span>V3</span></h1></div>'+
    '<div class="lv3-heading-actions">'+pill(p?'研究估计 · 尚未发布':'模型数据待核验','warn')+
-   '<button type="button" data-lv3-refresh class="lv3-button">↻ 重新获取数据</button></div></div>'+
+   '<button type="button" data-lv3-refresh class="lv3-button">↻ 刷新数据</button></div></div>'+
+   pipelineLine(pipeline,p)+
    statusBar(v2,p,raw)+
    (waiting?'<div class="lv3-loading" role="status">'+waiting+' 项数据模块正在独立加载，已返回部分可先查看。</div>':'')+
    forecast(p,pRaw)+

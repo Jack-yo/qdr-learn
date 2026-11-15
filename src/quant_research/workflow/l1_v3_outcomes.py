@@ -87,10 +87,16 @@ def settle_due_research(root, bars, *, latest_session, limit=30):
                 }
                 dest=root/"outputs"/"l1_v3_outcomes"/asof
                 dest.mkdir(parents=True,exist_ok=True)
-                outfile=dest/(outcome["frozen_sha256"][:24]+"_H"+str(h)+".json")
+                prefix=outcome["frozen_sha256"][:24]+"_H"+str(h)
+                body=_json_bytes(outcome)
+                # First verified outcome wins; never retroactively replace
+                # the historical label after a later corporate-action update.
+                if list(dest.glob(prefix+"*.json")):
+                    continue
+                outfile=dest/(prefix+"_"+sha256(body).hexdigest()[:16]+".json")
                 try:
                     with outfile.open("xb") as f:
-                        f.write(_json_bytes(outcome))
+                        f.write(body)
                     written+=1
                 except FileExistsError:
                     pass

@@ -150,35 +150,88 @@ class LiveSources:
         result=self.fetch(url,headers or {})
         return self.cache.put(key,result)
 
-    def bars(self, *, days=530, refresh=False, symbols=None):
+    def bars(self, *, days=530, refresh=False, symbols=None,
+             start_date=None, end_date=None, adjustment='raw',
+             history_feed=None):
+        """Historical 1Day stock bars: SIP/IEX only; never delayed_sip.
+
+        end_date is inclusive. Feed, adjustment, window, and page SHA are
+        explicit source receipts, and all requests are size/row bounded.
+        """
         key=self.env.get('ALPACA_API_KEY'); secret=self.env.get('ALPACA_SECRET_KEY')
         if not key or not secret:
             raise SourceUnavailable('MISSING_ALPACA_CREDENTIALS')
-        feed=self.env.get('QDR_L1_FEED','delayed_sip').lower()
-        if feed not in {'delayed_sip','sip','iex'}:raise SourceUnavailable('INVALID_FEED')
-        end=self._now().date()+timedelta(days=1)
-        start=end-timedelta(days=int(days))
+        feed=(history_feed or self.env.get('QDR_L1_HISTORY_FEED','sip')).lower()
+        if feed not in {'sip','iex'}:
+            raise SourceUnavailable('INVALID_HISTORICAL_FEED')
+        if adjustment not in {'raw','split'}:
+            raise SourceUnavailable('INVALID_HISTORICAL_ADJUSTMENT')
+        if type(days) is not int or not 10<=days<=5000:
+            raise SourceUnavailable('INVALID_HISTORY_WINDOW')
+        try:
+            end=(datetime.fromisoformat(str(end_date)).date() if end_date
+                 else self._now().date())
+            start=(datetime.fromisoformat(str(start_date)).date() if start_date
+                   else end-timedelta(days=days-1))
+            if start>end or (end-start).days>5000:
+                raise ValueError('Bad history date window')
+        except (TypeError,ValueError,OverflowError):
+            raise SourceUnavailable('INVALID_HISTORY_DATES')
         symbols=tuple(symbols or self.ETF_SYMBOLS)
-        if not symbols or len(symbols)>50 or any(not re.fullmatch(r'[A-Z][A-Z0-9.-]{0,13}',x) for x in symbols):
+        if (not symbols or len(symbols)>50 or
+                any(not re.fullmatch(r'[A-Z][A-Z0-9.-]{0,13}',x) for x in symbols)):
             raise SourceUnavailable('INVALID_SYMBOLS')
         headers={'APCA-API-KEY-ID':key,'APCA-API-SECRET-KEY':secret}
-        query={'symbols':','.join(sorted(set(symbols))),'start':start.isoformat(),'end':end.isoformat(),
-               'timeframe':'1Day','adjustment':'raw','feed':feed,'sort':'asc','limit':10000}
-        merged={sym:[] for sym in symbols}; receipts=[]
-        for page in range(6):
-            body,stamp,digest=self.request('https://data.alpaca.markets/v2/stocks/bars',query,headers,
-                                           ttl=900,refresh=refresh,feed=feed)
-            try:doc=json.loads(body)
-            except ValueError as exc:raise SourceUnavailable('INVALID_ALPACA_JSON') from exc
-            if not isinstance(doc.get('bars'),dict):raise SourceUnavailable('INVALID_ALPACA_RESPONSE')
+        query={'symbols':','.join(sorted(set(symbols))),
+               'start':start.isoformat(),
+               'end':(end+timedelta(days=1)).isoformat(),
+               'timeframe':'1Day','adjustment':adjustment,
+               'feed':feed,'sort':'asc','limit':10000}
+        merged={sym:[] for sym in symbols}
+        receipts=[]; known_tokens=set(); count=0
+        for page in range(15):
+            body,stamp,digest=self.request('https://data.alpaca.markets/v2/stocks/bars',
+                                          query,headers,ttl=900,
+                                          refresh=refresh,feed=feed)
+            try:
+                doc=json.loads(body)
+            except (ValueError,TypeError) as exc:
+                raise SourceUnavailable('INVALID_ALPACA_JSON') from exc
+            if not isinstance(doc,dict) or not isinstance(doc.get('bars'),dict):
+                raise SourceUnavailable('INVALID_ALPACA_RESPONSE')
             for symbol,rows in doc['bars'].items():
-                if symbol not in merged or not isinstance(rows,list):raise SourceUnavailable('INVALID_ALPACA_SYMBOL')
-                merged[symbol].extend(rows)
-            receipts.append({'fetched_at':stamp,'sha256':digest,'feed':feed})
+                if symbol not in merged or not isinstance(rows,list):
+                    raise SourceUnavailable('INVALID_ALPACA_SYMBOL')
+                for record in rows:
+                    if not isinstance(record,dict) or not isinstance(record.get('t'),str):
+                        raise SourceUnavailable('INVALID_ALPACA_BAR')
+                    day=record['t'][:10]
+                    if len(day)!=10 or not start.isoformat()<=day<=end.isoformat():
+                        raise SourceUnavailable('BAR_OUTSIDE_REQUEST_WINDOW')
+                    merged[symbol].append(record)
+                    count+=1
+                    if count>150_000:
+                        raise SourceUnavailable('HISTORY_ROW_CAP')
+            receipts.append({'fetched_at':stamp,'sha256':digest,'feed':feed,
+                             'adjustment':adjustment,'start':start.isoformat(),
+                             'end':end.isoformat(),'page':page+1})
             token=doc.get('next_page_token')
-            if not token:break
+            if not token:
+                break
+            if not isinstance(token,str) or len(token)>1024 or token in known_tokens:
+                raise SourceUnavailable('ALPACA_PAGINATION_INVALID')
+            known_tokens.add(token)
             query['page_token']=token
-        else:raise SourceUnavailable('ALPACA_PAGINATION_LIMIT')
+        else:
+            raise SourceUnavailable('ALPACA_PAGINATION_LIMIT')
+        if not count:
+            raise SourceUnavailable('HISTORICAL_BARS_EMPTY')
+        for symbol,rows in merged.items():
+            markers=[r['t'] for r in rows]
+            if len(markers)!=len(set(markers)):
+                raise SourceUnavailable('DUPLICATE_ALPACA_BARS')
+            if markers!=sorted(markers):
+                raise SourceUnavailable('UNSORTED_ALPACA_BARS')
         return merged,receipts
 
     def snapshots(self, *, refresh=False, symbols=('SPY','QQQ','IWM','RSP','HYG','LQD')):
