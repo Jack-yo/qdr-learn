@@ -7,10 +7,10 @@
   const V = window.V4;
   if (!V) throw Error('QDR L1 must load after the V4 UI core');
   const {pages, state, e, n, pct, date, settle, show} = V;
-  const S = { horizon: state.marketHorizon || 3, dimension: 'all', selectedDomain: null, view: 'distribution', expanded: false, replayDate: '', legacyOpen: false, refreshRequested: false };
+  const S = { horizon: state.marketHorizon || 3, dimension: 'all', selectedDomain: null, view: 'distribution', expanded: false, replayDate: '', legacyOpen: false, refreshRequested: false, evidenceOpen: false };
   const DOMAINS = [
     ['price', '价格与趋势', '走势、速度、隔夜与盘中结构', '价格'],
-    ['breadth', '真实市场广度', '上涨参与率、创新高低、广度背离', '内部结构'],
+    ['breadth', '市场广度', '股票参与度、ETF 代理与背离', '内部结构'],
     ['volatility', '波动率结构', '实现波动、隐含波动与期限结构', '风险'],
     ['options_pricing', '期权风险定价', '偏斜、方差溢价、保护成本', '衍生品'],
     ['options_positioning', '期权仓位与对冲', '到期集中、Gamma 情景与仓位', '衍生品'],
@@ -127,21 +127,190 @@
         :empty('尚无经过审计的特征变化', '后续接入 12 维日频观测。若因子未经过增量验证，只展示变化，不标记为有效领先信号。')}
       <div class="l1-driver-footer">支持未来展开历史条件检索、相似环境、模型贡献与条件情景；本阶段不伪造解释性数值。</div>`);
   }
-  function domainsGrid(data) {
-    const raw=Array.isArray(data?.domains)?data.domains:[];
-    const lookup=new Map(raw.filter(x=>x&&x.id).map(x=>[x.id,x]));
-    const displayed=DOMAINS.filter(([id,, ,group])=>S.dimension==='all'||S.dimension===group);
-    const observed=DOMAINS.filter(([id])=>lookup.get(id)?.status==='OBSERVED').length;
-    const partial=DOMAINS.filter(([id])=>lookup.get(id)?.status==='PARTIAL').length;
-    return panel('l1-monitor', `${header('04 / MARKET OBSERVATORY', '12 维市场自动观测', `<span class="l1-kicker">已观测 ${observed} / 12 · 部分覆盖 ${partial}</span>`)}
-      <div class="l1-subtitle">每个维度独立校验数据来源、发布时间及股票池覆盖率；未接入维度不计算为零。</div>
-      <div class="l1-filters" role="group" aria-label="观测维度筛选">${FILTERS.map(([id,name])=>`<button type="button" data-l1-domain="${e(id)}" class="${S.dimension===id?'active':''}" aria-pressed="${S.dimension===id}">${e(name)}</button>`).join('')}</div>
-      <div class="l1-domain-grid">${displayed.map(([id,name,desc,group],i)=>{
-        const item=lookup.get(id), status=item?.status||'MISSING';
-        const val=['OBSERVED','PARTIAL'].includes(status)&&isNum(item.value)?num(item.value,item.unit||'',item.precision??2):'—';
-        return `<button type="button" class="l1-domain" data-l1-open-domain="${e(id)}" aria-pressed="${S.selectedDomain===id}"><div class="l1-domain-h"><span class="l1-domain-icon">${String(DOMAINS.findIndex(x=>x[0]===id)+1).padStart(2,'0')}</span><span class="l1-domain-state ${e(status.toLowerCase())}">${label(status)}</span></div><strong>${e(name)}</strong><p>${e(desc)}</p><div class="l1-domain-number">${val}</div><small>${status==='OBSERVED'?asText(item.label||'已到达的数据观察值') : status==='PARTIAL'?'部分覆盖：仅显示已取得的实际数值': '数据或计算尚未完成'}<span class="l1-domain-coverage">${item?.coverage?e(item.coverage.available+' / '+item.coverage.registered+' 项特征'):''}</span></small></button>`;
-      }).join('')}</div>
-      ${S.selectedDomain ? `<div class="l1-domain-details"><h3>${e((DOMAINS.find(x=>x[0]===S.selectedDomain)||[])[1]||'指标明细')}</h3><p>数据、来源及可得时点，研究观察不代表领先预测有效。</p><div class="l1-domain-details-list">${(Array.isArray(data?.features)?data.features:[]).filter(x=>x.domain===S.selectedDomain).map(x=>`<div class="l1-research-row"><span>${e(x.id)} <small>${asText(x.status)} · ${asText(x.source)}</small></span><strong>${isNum(x.value)?n(x.value,4):'—'} <small>${asText(x.available_at)}</small></strong></div>`).join('')||'<p class="l1-no-features">该维度尚未取得可核验的指标明细</p>'}</div></div>` : ''}`);
+
+  const EVIDENCE_GROUPS = [
+    ['市场内部','走势 · 广度 · 市场同步性',['price','breadth','correlation']],
+    ['波动与衍生品','波动风险 · 期权定价 · 仓位 · 尾部路径',['volatility','options_pricing','options_positioning','path']],
+    ['交易与资金条件','市场交易流动性 · 资金拥挤 · 融资',['microstructure','positioning','funding']],
+    ['跨市场及事件','信用、利率与宏观催化',['cross_asset','events']]
+  ];
+  const SOURCE_HINTS = {
+    breadth:'需要可回溯的股票池及涨跌家数；ETF 相对强弱只是代理',
+    correlation:'目前以板块 ETF 离散度代理，缺少个股相关性',
+    options_pricing:'VIX 可观测，但期权偏斜、期限结构与保护成本仍需数据源',
+    options_positioning:'需要期权 OI/期限分布与可核验的持仓假设',
+    microstructure:'仅有 SPY 一档报价，缺少全市场订单流和盘口深度',
+    positioning:'需要真实 ETF 申赎、COT 或可核验持仓数据',
+    events:'需要宏观发布日期、已知事件日历及事前意外值',
+    funding:'需要 FRED 或其他授权融资利差数据，不可用 ETF 代替',
+    path:'仅覆盖过去回撤；未来尾部事件另由条件研究计算'
+  };
+  function showIndicator(id,v) {
+    if(!isNum(v))return '—';
+    if(['spy_return_5','spy_return_20','overnight','intraday','breadth_proxy_rsp_spy_5',
+       'sector_dispersion_1','credit_proxy_hyg_lqd_5','duration_proxy_5',
+       'drawdown20','rv5','downside_rv20'].includes(id))
+      return signed(Number(v)*100,2)+'%';
+    if(id==='sector_up_share_1')return n(Number(v)*100,1)+'%';
+    if(id==='vol_ratio')return n(v,2)+' 倍';
+    if(id==='vix')return n(v,2)+' 点';
+    if(id==='spy_level1_spread_bps')return n(v,2)+' bps';
+    if(id.startsWith('cboe_pcr_')||id==='cboe_spx_put_call_oi')
+      return n(v,2)+' 倍';
+    if(id==='ofr_fsi')return signed(v,2)+' 指数点';
+    if(id==='ici_weekly_etf_net_issuance_bn_usd')return signed(v,2)+' 十亿美元';
+    if(id==='bls_scheduled_next_7d')return n(v,0)+' 项';
+    if(id==='stock_sample_new_high20_count'||id==='stock_sample_new_low20_count')
+      return n(v,0)+' 家';
+    if(['stock_sample_advance_share','stock_sample_above_ma20_share',
+         'cboe_trf_notional_share','cftc_nasdaq_net_pct_oi',
+         'cftc_gold_net_pct_oi','cftc_wti_net_pct_oi',
+         'finra_spy_short_volume_pct','finra_qqq_short_volume_pct',
+         'finra_iwm_short_volume_pct'].includes(id))
+      return signed(v,2)+'%';
+    if(['treasury_2y_pct','treasury_10y_pct','nyfed_sofr','nyfed_effr',
+        'cftc_emini_sp500_lev_net_pct_oi'].includes(id))return signed(v,2)+'%';
+    if(['treasury_2s10s_bp','nyfed_sofr_minus_effr_bp'].includes(id))return signed(v,1)+' bps';
+    if(['treasury_yield','sofr','credit_spread'].includes(id))return n(v,2)+'%';
+    return n(v,4)+'（原始值）';
+  }
+  function domainsGrid(data, loading=false, extendedPending=false) {
+    if(loading)return panel('l1-monitor l1-evidence-hub',
+      header('03 / DATA EVIDENCE','12 维数据完整性','<span class="l1-kicker">独立加载中</span>')+
+      '<p class="l1-v2-muted">正在核查各类数据来源；暂不把尚未返回的维度标成缺失。</p>');
+    if(!data || !Array.isArray(data.domains))return panel('l1-monitor l1-evidence-hub',
+      header('03 / DATA EVIDENCE','12 维数据完整性','<span class="l1-kicker">无法核查</span>')+
+      empty('尚未取得数据覆盖报告','主扫描数据未就绪。请检查数据源权限与网络连接。'));
+    const raw=data.domains||[],lookup=new Map(raw.filter(x=>x&&x.id).map(x=>[x.id,x]));
+    const stats={OBSERVED:0,PARTIAL:0,MISSING:0};
+    for(const [id] of DOMAINS){
+      const status=lookup.get(id)?.status||'MISSING';
+      if(Object.hasOwn(stats,status))stats[status]++;
+    }
+    const supported=stats.OBSERVED+stats.PARTIAL;
+    const missingLabels=DOMAINS.filter(([id])=>!['OBSERVED','PARTIAL'].includes(lookup.get(id)?.status)).map(([,name])=>name);
+    const metricTotal=raw.reduce((sum,d)=>sum+(Number(d.coverage?.available)||0),0);
+    const feedStatus=data?.source_health?Object.entries(data.source_health):[];
+    const observedFeeds=feedStatus.filter(([,value])=>value.status==='OBSERVED').length;
+    const selection=S.selectedDomain&&lookup.get(S.selectedDomain);
+    const calendarEvents=Array.isArray(data?.calendar_events)?data.calendar_events:[];
+    const makeRow=(id)=>{
+      const meta=DOMAINS.find(x=>x[0]===id),item=lookup.get(id),status=item?.status||'MISSING';
+      const metrics=Array.isArray(item?.features)?item.features.filter(x=>x.status==='OBSERVED'):[];
+      const first=metrics[0];
+      const detail=first?e(first.label)+'：'+e(showIndicator(first.id,first.value)):
+        e(SOURCE_HINTS[id]||item?.reason||'数据源尚未接通');
+      return '<button type="button" class="l1-evidence-row'+(S.selectedDomain===id?' active':'')+'" data-l1-open-domain="'+e(id)+'" aria-expanded="'+(S.selectedDomain===id)+'">'+
+         '<span class="l1-evidence-label">'+e(meta?.[1]||id)+'</span>'+
+         '<span class="l1-evidence-inline">'+detail+'</span>'+
+         '<span class="l1-evidence-state '+e(status.toLowerCase())+'">'+label(status)+'</span>'+
+         '<span class="l1-evidence-arrow" aria-hidden="true">›</span></button>';
+    };
+    const groups=EVIDENCE_GROUPS.map(([title,desc,ids])=>{
+      const ok=ids.filter(id=>['OBSERVED','PARTIAL'].includes(lookup.get(id)?.status)).length;
+      return '<section class="l1-evidence-group"><div class="l1-evidence-group-title"><div><strong>'+e(title)+
+        '</strong><small>'+e(desc)+'</small></div><span>'+ok+'/'+ids.length+' 类有数据</span></div>'+
+        '<div class="l1-evidence-group-list">'+ids.map(makeRow).join('')+'</div></section>';
+    }).join('');
+    const detail=selection?'<div class="l1-evidence-detail"><h3>'+e(selection.name||'数据明细')+
+      ' · '+label(selection.status)+'</h3><p>'+e(selection.reason||SOURCE_HINTS[selection.id]||'来源与时点以实际数据回执为准')+'</p>'+
+      (selection.features?.length?selection.features.map(f=>
+        '<div class="l1-evidence-feature"><span>'+e(f.label||f.id)+'</span><strong>'+
+          showIndicator(f.id,f.value)+'</strong><small>'+e(f.source||'未知来源')+' · '+label(f.status)+
+          (f.observed_date?' · 观测 '+e(f.observed_date):'')+
+          (f.published_date?' · 公开 '+e(f.published_date):'')+'</small></div>').join(''):
+       '<div class="l1-evidence-unavailable">尚无可核验的该维度数据。'+e(SOURCE_HINTS[selection.id]||'需新增数据适配器及供应商权限')+'</div>')+
+      (selection.id==='events'&&calendarEvents.length?
+        '<div class="l1-upcoming-head">未来 14 天已排程的 BLS 数据发布</div>'+
+        calendarEvents.slice(0,12).map(event=>
+          '<div class="l1-upcoming-event"><span>'+e(event.name)+'</span>'+
+          '<strong>'+e(event.start_utc?.replace('T',' ').slice(0,16)||'—')+' UTC</strong></div>').join(''):'')+
+      '</div>':'';
+    return panel('l1-monitor l1-evidence-hub',
+      header('03 / DATA EVIDENCE','底层数据与覆盖情况','<span class="l1-kicker">不将缺失指标当作零</span>')+
+      '<div class="l1-evidence-health">'+
+        '<div><b>'+supported+'<small>/12</small></b><span>至少有一项真实观测</span></div>'+
+        '<div><b>'+stats.OBSERVED+'</b><span>当前检查项就绪</span></div>'+
+        '<div><b>'+stats.PARTIAL+'</b><span>部分覆盖维度</span></div>'+
+        '<div><b>'+stats.MISSING+'</b><span>待接入维度</span></div></div>'+
+      (feedStatus.length?'<div class="l1-official-state">新增官方数据源：'+observedFeeds+'/'+feedStatus.length+
+      ' 已取得观测 · '+feedStatus.map(([id,value])=>e(id)+': '+(value.status==='OBSERVED'?'就绪':e(value.code||'不可用'))).join(' · ')+'</div>':'')+
+      (extendedPending?'<p class="l1-public-pending">Cboe / OFR / BLS / CFTC 扩展数据仍在独立加载，暂不据此判断来源缺失。</p>':'')+
+      '<p class="l1-evidence-explain">目前共取得 '+metricTotal+
+       ' 项可用的观测值；维度有数据不等于该维度完整覆盖，ETF 代理也不等于真实股票广度。</p>'+ 
+      (missingLabels.length?'<p class="l1-evidence-gap"><b>当前待补数据：</b>'+e(missingLabels.join('、'))+'。展开查看各自缺口与来源。</p>':'')+
+      '<details class="l1-evidence-expander" '+(S.evidenceOpen?'open':'')+'><summary>查看全部 12 维数据与缺失原因 <span>按市场逻辑分为 4 组</span></summary>'+
+      '<div class="l1-evidence-groups">'+groups+'</div>'+detail+'</details>');
+  }
+  function crossMarketObservations(data) {
+    const fields=(Array.isArray(data?.domains)?data.domains:[]).flatMap(
+      d=>Array.isArray(d.features)?d.features:[]);
+    const lookup=new Map(fields.filter(f=>f?.status==='OBSERVED'&&isNum(f.value)).map(f=>[f.id,f]));
+    const items=[];
+    function push(id, heading, finding, qualification){
+      const source=lookup.get(id);
+      if(source)items.push({id,heading,finding,qualification,source});
+    }
+    const fsi=lookup.get('ofr_fsi');
+    if(fsi)push('ofr_fsi','系统性金融压力',
+      'OFR FSI '+showIndicator('ofr_fsi',fsi.value)+
+      (Number(fsi.value)>0?'，高于官方历史基准':'，低于或处于官方历史基准'),
+      '金融压力的已发布读数，不是次日市场方向');
+    const equity=lookup.get('cboe_pcr_equity'),index=lookup.get('cboe_pcr_index');
+    if(equity&&index)push('cboe_pcr_index','期权保护交易结构',
+      '指数成交 P/C '+showIndicator('cboe_pcr_index',index.value)+
+      '；个股成交 P/C '+showIndicator('cboe_pcr_equity',equity.value),
+      '不同期权品种交易结构对比，不能直接推导净方向');
+    const breadth=lookup.get('stock_sample_advance_share');
+    if(breadth)push('stock_sample_advance_share','股票样本参与度',
+      '固定 30 股样本中上涨占比 '+showIndicator(breadth.id,breadth.value),
+      '不是全美股上涨家数，也不具历史 PIT 股票池');
+    const issuance=lookup.get('ici_weekly_etf_net_issuance_bn_usd');
+    if(issuance)push(issuance.id,'全美 ETF 周度发行',
+      'ICI 全市场周度净发行估算 '+showIndicator(issuance.id,issuance.value),
+      '周频发行/赎回的净额估算，不是实时 ETF 二级市场净买入');
+    const finra=lookup.get('finra_spy_short_volume_pct');
+    if(finra)push(finra.id,'短卖成交结构',
+      'FINRA 设施报告的 SPY 卖空成交占比 '+showIndicator(finra.id,finra.value),
+      'ShortVolume 包含 exempt；非全市场空头持仓、非空头回补比例');
+    const funds=lookup.get('cftc_nasdaq_net_pct_oi')||lookup.get('cftc_gold_net_pct_oi');
+    if(funds)push(funds.id,'周频期货资金仓位',
+      funds.label+' '+showIndicator(funds.id,funds.value),
+      '披露的是周二持仓，周五发布；不是当日净买卖');
+    const liquidity=lookup.get('cboe_trf_notional_share');
+    if(liquidity)push(liquidity.id,'交易场所结构',
+      'TRF 场外报告成交额占比 '+showIndicator(liquidity.id,liquidity.value),
+      '不代表大单主动买入或卖出');
+    const near=lookup.get('bls_scheduled_next_7d');
+    if(near)push(near.id,'未来事件日程',
+      '未来 7 日 BLS 已排程发布 '+showIndicator(near.id,near.value),
+      '只是事件倒计时，不含公布值或市场预期');
+    if(!items.length)return '';
+    return panel('l1-insights',
+      header('02A / CROSS MARKET OBSERVATIONS','跨市场自动观测',
+        '<span class="l1-kicker">已观测事实 · 非预测贡献</span>')+
+      '<div class="l1-insight-rows">'+items.slice(0,6).map(item=>
+        '<div class="l1-insight-row"><strong>'+e(item.heading)+'</strong>'+
+        '<span>'+e(item.finding)+'</span>'+
+        '<small>'+e(item.qualification)+' · '+e(item.source.source||'来源待核验')+
+        (item.source.observed_date?' · 观测 '+e(item.source.observed_date):'')+
+        (item.source.published_date?' · 发布 '+e(item.source.published_date):'')+
+        '</small></div>').join('')+'</div>'+
+      '<p class="l1-insight-note">本区只汇总跨维度的最新实际观察；数据不足时不填补虚构值。要把这些变量用于 H1/H3/H5 预测，必须先证明历史时点有效性和样本外增量。</p>');
+  }
+  function scoreReading(scores) {
+    const mom=Number(scores?.momentum),pressure=Number(scores?.sell_pressure),decay=Number(scores?.pressure_decay);
+    if(![scores?.momentum,scores?.sell_pressure,scores?.pressure_decay].every(isNum))
+      return ['市场结构待计算','数据未就绪，暂不提供方向判断。'];
+    if(pressure>=65&&mom<45)
+      return ['卖压较强，暂以风险观察为主','上涨动能偏弱，压力评分偏高。该判断属于市场结构描述，不是未来下跌预测。'];
+    if(decay>=60&&pressure>=50)
+      return ['卖压出现缓和迹象','压力衰减评分较高，但仍不能据此确认价格见底。'];
+    if(mom>=65&&pressure<50)
+      return ['上涨动能相对占优','趋势与市场宽度代理支持动能观察，尚不代表未来上涨概率。'];
+    if(pressure>=60)
+      return ['下跌压力偏高','需要重点关注波动、信用与内部市场强弱是否继续恶化。'];
+    return ['市场结构暂未形成清晰单边优势','三个评分处于混合状态，继续跟踪真实市场变化与风险。'];
   }
   function v2Cockpit(data, horizon, error) {
     if (!data || data.schema!=='qdr.l1.v2') {
@@ -150,11 +319,12 @@
         ${empty('实时扫描尚未就绪', '本地供应商凭证或数据不可用：'+reason+'。请检查 ALPACA_API_KEY / ALPACA_SECRET_KEY 和行情权限；系统不会生成虚构指标。')}`);
     }
     const scores=data.scores||{}, out=data.horizons?.[String(horizon)]||{}, anal=out.analog;
+    const [readingTitle,readingNote]=scoreReading(scores);
     const quickQuotes=data.latest_quotes||{};
     const snapshot=Object.entries(quickQuotes).filter(([key])=>['SPY','QQQ','IWM'].includes(key)).map(([key,val])=>`${e(key)} ${n(val.price,2)}`).join(' · ');
     const valid=anal && out.status==='HISTORICAL_ANALOG_RESEARCH_ONLY';
     const formats=[['momentum','上涨动能','gain'],['sell_pressure','下跌压力','loss'],['pressure_decay','压力衰减','neutral']];
-    const cards=formats.map(([key,title,tone])=>`<div class="l1-v2-score ${tone}"><span>${title}</span><strong>${isNum(scores[key])?n(scores[key],1):'—'}<small> / 100</small></strong><i class="l1-v2-meter"><b style="width:${isNum(scores[key])?Math.max(0,Math.min(100,Number(scores[key]))):0}%"></b></i></div>`).join('');
+    const cards=formats.map(([key,title,tone])=>`<div class="l1-v2-score ${tone}"><span>${title}</span><strong>${isNum(scores[key])?n(scores[key],1):'—'}<small> / 100</small></strong><i class="l1-v2-meter"><b style="width:${isNum(scores[key])?Math.max(0,Math.min(100,Number(scores[key]))):0}%"></b></i><small class="l1-v2-score-help">50 为相对中性位 · 非概率</small></div>`).join('');
     const first=anal?.first_touch;
     const path=first ? `<div class="l1-v2-event-grid">${[
       ['UP','历史先反弹频率'],['DOWN','历史先下跌频率'],['NEITHER','历史未触及频率']]
@@ -170,13 +340,16 @@
     const partial=domainStatus.filter(x=>x.status==='PARTIAL').length;
     const anomalyRows=Array.isArray(data.anomalies)&&data.anomalies.length?data.anomalies.slice(0,3).map(x=>`<div class="l1-v2-anomaly"><span>异常 · ${e(x.label)}</span><strong>${signed(x.z_score,2)}σ</strong></div>`).join(''):'';
     const driverRows=Array.isArray(data.drivers)?data.drivers.slice(0,5).map(x=>`<div class="l1-v2-driver"><span>${e(x.label)}</span><strong>${x.id==='vol_ratio'?n(x.value,2):signed(Number(x.value)*100,2)+'%'}</strong></div>`).join(''):'';
-    return panel('l1-v2-lead', `${header('L1 V2 / AUTOMATED MARKET SCAN', '市场自动扫描与综合研判', '<span class="l1-kicker">ON-DEMAND · BOUNDED CACHE</span>')}
+    return panel('l1-v2-lead', `${header('01 / MARKET SUMMARY', '今日市场怎么了？', '<span class="l1-kicker">实际观测 · 非交易信号</span>')}
+      <div class="l1-reading"><div><span class="l1-reading-kicker">当前市场结构</span><h3>${e(readingTitle)}</h3><p>${e(readingNote)}</p></div><div class="l1-reading-tag">相对历史评分<br><b>非上涨概率</b></div></div>
       <div class="l1-v2-summary">最新已完成交易日：<strong>${asText(data.asof_session)}</strong> · 行情 ${asText(data.data_feed)} · 已完整观察 ${complete}/12，部分覆盖 ${partial}/12
       <span> · 不使用全量历史仓库 · 数据于 ${stamp(data.fetched_at)} 获取 · 最近报价 ${snapshot||'尚不可用'}</span></div>
       <div class="l1-v2-period" role="group" aria-label="历史条件研究期限">${[1,3,5].map(x=>`<button type="button" data-l1-horizon="${x}" aria-pressed="${x===horizon}" class="${x===horizon?'active':''}">H${x} · ${x}日</button>`).join('')}</div>
       <div class="l1-v2-score-grid">${cards}</div>
+      <div class="l1-score-scope">目前三项评分使用 SPY 价格/波动、RSP 与 IWM 的相对强弱、HYG/LQD 信用代理；未接通的维度尚不参与计算。<b>不是完整 12 维综合预测。</b></div>
+      <div class="l1-v2-part-heading"><strong>02 · 未来 1 / 3 / 5 日</strong><span>历史相似条件参考，未完成预测资格验证</span></div>
       <div class="l1-v2-analysis-grid">
-        <div class="l1-v2-analysis"><h3>H${horizon} · 历史相似条件研究</h3>
+        <div class="l1-v2-analysis"><h3>H${horizon} · 历史相似行情如何演变？</h3>
           ${valid?`<div class="l1-v2-pair"><span>历史相似场景上涨频率</span><strong>${pct(anal.up_frequency)}</strong></div>
                   <div class="l1-v2-pair"><span>相似样本</span><strong>${n(anal.sample_count,0)} 个 · 有效 ${n(anal.effective_samples,1)}</strong></div>
                   <div class="l1-v2-pair"><span>平均收益</span><strong>${signed(anal.expected_return*100)}%</strong></div>${bounds}${path}`:
@@ -225,8 +398,10 @@
     const whenExpanded=(url)=>S.legacyOpen?settle(url):Promise.resolve(deferred);
     // One scanned dataset serves H1/H3/H5, so switching horizons does not re-fetch.
     // Research-only panels are not requested until the user expands their section.
-    const [v2Raw,forecast,freshRaw,statusRaw,oldRaw,anomalyRaw,validationRaw,replayRaw] = await Promise.all([
+    const [v2Raw,officialRaw,extendedRaw,forecast,freshRaw,statusRaw,oldRaw,anomalyRaw,validationRaw,replayRaw] = await Promise.all([
       settle('/api/v1/l1/v2/overview?horizon=3'+(S.refreshRequested?'&refresh=1':'')),
+      settle('/api/v1/l1/v2/official'+(S.refreshRequested?'?refresh=1':'')),
+      settle('/api/v1/l1/v2/extended'+(S.refreshRequested?'?refresh=1':'')),
       whenExpanded('/api/v1/l1/market/overview?horizon='+S.horizon),
       whenExpanded('/api/v1/v4/freshness'),whenExpanded('/api/status'),
       whenExpanded('/api/v1/market/research?horizon='+S.horizon),
@@ -235,21 +410,59 @@
     ]);
     const fresh=freshRaw.ok?freshRaw.data:null, system=statusRaw.ok?statusRaw.data:null;
     const v2=v2Raw?.ok&&v2Raw.data?.schema==='qdr.l1.v2'?v2Raw.data:null;
+    const official=officialRaw?.ok && officialRaw.data?.schema==='qdr.l1.official.v1' &&
+      (!v2||officialRaw.data?.asof_session===v2?.asof_session)?officialRaw.data:null;
+    const extended=extendedRaw?.ok&&extendedRaw.data?.schema==='qdr.l1.extended.v1' &&
+      (!v2||extendedRaw.data.asof_session===v2.asof_session)?extendedRaw.data:null;
+    const extra=[...(Array.isArray(official?.features)?official.features:[]),
+                 ...(Array.isArray(extended?.features)?extended.features:[])];
+    const fullHealth={...(official?.source_health||{}),...(extended?.source_health||{})};
+    const enriched=v2?{...v2,source_health:fullHealth,
+      calendar_events:extended?.calendar_events||[],
+      domains:(v2.domains||[]).map(domain=>{
+        const supplemental=extra.filter(feature=>feature.domain===domain.id);
+        const features=[...(domain.features||[]),...supplemental];
+        const observed=features.filter(f=>f?.status==='OBSERVED');
+        const first=observed[0]||null;
+        const status=domain.id==='price' && domain.status==='OBSERVED'?'OBSERVED':
+          observed.length?'PARTIAL':'MISSING';
+        const reason=domain.id==='positioning'&&supplemental.length?
+          '已取得部分 CFTC TFF 持仓；仍缺 ETF 申赎及其他市场的真实持仓':
+          domain.reason;
+        return {...domain,status,reason,features,
+          value:first?.value??null,label:first?.label??null,
+          coverage:{available:observed.length,registered:features.length}};
+      })
+    }:null;
+
     const typed=forecast.ok&&forecast.data?.schema==='qdr.l1.market.v1'?forecast.data:null;
     const rec=extractForecast(forecast,fresh,S.horizon);
     const old=oldRaw.ok?oldRaw.data:null;
     const observationStatus=fresh?.modules?.market_observation?.freshness_status || 'BLOCKED';
-    const displayData=v2?{...typed,domains:v2.domains,features:v2.domains.flatMap(d=>(d.features||[]).map(f=>({...f,domain:d.id,available_at:f.fetched_at||v2.fetched_at})))}:typed;
+    // If Alpaca is unavailable, standalone official public observations must
+    // still appear under evidence, without inventing any market-model score.
+    const standalone=(!enriched&&(official||extended))?{
+      schema:'qdr.l1.v2',source_health:fullHealth,
+      calendar_events:extended?.calendar_events||[],
+      domains:DOMAINS.map(([id,name])=>{
+        const features=extra.filter(f=>f.domain===id);
+        return {id,name,features,status:features.length?'PARTIAL':'MISSING',
+          coverage:{available:features.length,registered:features.length},
+          reason:features.length?'独立公开市场观察（核心行情未取得）':'该维度数据尚不可用'};
+      })
+    }:null;
+    const displayData=enriched||standalone||typed;
     const html=`<div class="l1-cockpit">
       <div class="l1-head"><div><div class="l1-breadcrumb">L1 / MARKET FORECAST <span>· 01</span></div><h1>市场未来展望 <span class="l1-beta">RESEARCH</span></h1><p>从市场内部变化推断未来收益与风险分布；对每个预测提供真实证据，不把过去行情包装成未来信号。</p></div>
       <div class="l1-head-actions"><span class="l1-access ${rec?'good':''}"><i></i>${rec?'已读取冻结预测':v2?'已更新市场观察 · 预测待验收':'数据源待检查'}</span><button class="l1-refresh" type="button" data-l1-refresh>↻ 重新核查</button></div></div>
-      ${v2Raw?.pending?panel('l1-v2-lead l1-v2-loading',header('L1 V2 / AUTOMATED MARKET SCAN','市场自动扫描与综合研判','<span class="l1-kicker">数据正在获取</span>')+'<div class="l1-loading-score"><span></span><span></span><span></span></div><p class="l1-v2-muted">独立获取市场行情、计算综合指标；无需等待其他模块。</p>'):v2Cockpit(v2,S.horizon,v2Raw)}
+      ${v2Raw?.pending?panel('l1-v2-lead l1-v2-loading',header('L1 V2 / AUTOMATED MARKET SCAN','市场自动扫描与综合研判','<span class="l1-kicker">数据正在获取</span>')+'<div class="l1-loading-score"><span></span><span></span><span></span></div><p class="l1-v2-muted">独立获取市场行情、计算综合指标；无需等待其他模块。</p>'):v2Cockpit(enriched,S.horizon,v2Raw)}
+      ${crossMarketObservations(displayData)}
       <details class="l1-v2-legacy" ${S.legacyOpen?'open':''}><summary>展开完整研究视图：收益分布、路径模型与验证</summary>
       ${indicatorCards(fresh,system,observationStatus)}
       <div class="l1-top-grid">${currentForecast(rec,S.horizon)}${firstPassage(rec)}</div>
       ${driversAndSignals(typed)}${validation(old,rec)}${researchTools(anomalyRaw?.ok?anomalyRaw.data:null, validationRaw?.ok?validationRaw.data:null, replayRaw?.ok?replayRaw.data:null)}
       </details>
-      ${domainsGrid(displayData)}
+      ${domainsGrid(displayData,Boolean(v2Raw?.pending&&!standalone),Boolean(extendedRaw?.pending))}
       <div class="l1-bottom-note"><span>QDR · MARKET RESEARCH · L1</span><span>观察 / 回溯 / 前向预测分级 · 真实订单关闭</span></div></div>`;
     return {title:'L1 市场未来展望',html,mount(){
       document.querySelectorAll('[data-l1-horizon]').forEach(btn=>btn.addEventListener('click',()=>{
@@ -260,9 +473,12 @@
       document.querySelectorAll('[data-l1-domain]').forEach(btn=>btn.addEventListener('click',()=>{
         S.dimension=btn.dataset.l1Domain;show('market');
       }));
+      document.querySelector('.l1-evidence-expander')?.addEventListener('toggle',event=>{
+        S.evidenceOpen=event.target.open;
+      });
       document.querySelectorAll('[data-l1-open-domain]').forEach(btn=>btn.addEventListener('click',()=>{
         const d=btn.dataset.l1OpenDomain;
-        S.selectedDomain=S.selectedDomain===d?null:d;show('market');
+        S.selectedDomain=S.selectedDomain===d?null:d;S.evidenceOpen=true;show('market');
       }));
       document.querySelector('.l1-v2-legacy')?.addEventListener('toggle',event=>{
         if(event.target.open!==S.legacyOpen){S.legacyOpen=event.target.open;if(S.legacyOpen)show('market');}

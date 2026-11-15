@@ -629,6 +629,30 @@ def handler(console):
                     return self.send(200,account_summary(console.root/'data/paper.sqlite3',config))
                 except (OSError,ValueError,KeyError):
                     return self.send(409,{'status':'BLOCKED','code':'PAPER_CONFIG_MISSING'})
+            if path == '/api/v1/l1/v2/official':
+                from .data.l1_official_sources import scan_official_l1
+                q = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+                if set(q) - {'refresh'} or any(len(v) != 1 for v in q.values()) or q.get('refresh', ['0'])[0] not in ('0','1'):
+                    return self.send(400, {'schema':'qdr.l1.official.v1',
+                                           'status':'BLOCKED','code':'INVALID_QUERY'})
+                try:
+                    return self.send(200, scan_official_l1(console.root,
+                        refresh=q.get('refresh', ['0'])[0] == '1'))
+                except (ValueError, OSError, TypeError):
+                    return self.send(409, {'schema':'qdr.l1.official.v1',
+                                           'status':'BLOCKED','code':'OFFICIAL_DATA_INVALID'})
+            if path == '/api/v1/l1/v2/extended':
+                from .data.l1_public_extended import scan_extended_public
+                q = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+                if set(q)-{'refresh'} or any(len(v)!=1 for v in q.values()) or q.get('refresh',['0'])[0] not in ('0','1'):
+                    return self.send(400,{'schema':'qdr.l1.extended.v1',
+                                          'status':'BLOCKED','code':'INVALID_QUERY'})
+                try:
+                    return self.send(200, scan_extended_public(console.root,
+                        refresh=q.get('refresh',['0'])[0]=='1'))
+                except (ValueError,OSError,TypeError,KeyError):
+                    return self.send(409,{'schema':'qdr.l1.extended.v1',
+                                          'status':'BLOCKED','code':'EXTENDED_PUBLIC_DATA_INVALID'})
             if path == '/api/v1/l1/v2/overview':
                 from .workflow.l1_v2 import current_l1_v2
                 from .data.l1_light_sources import SourceUnavailable
