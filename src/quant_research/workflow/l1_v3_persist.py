@@ -105,7 +105,8 @@ def build_model_bundle(bars, *, receipts, asof):
     return {
         "schema":BUNDLE_SCHEMA,"status":"RESEARCH_MODEL_ONLY",
         "execution_eligible":False,"historical_pit_verified":False,
-        "model_family":MODEL_FAMILY,"model_version":"L1_V3_ETF7.2",
+        "model_family":MODEL_FAMILY,"model_version":"L1_V3_ETF7.3",
+        "minimum_embargo_sessions":5,
         "feature_version":PARAMS["feature_version"],
         "asof_session":asof,
         "training_rows":len(close),
@@ -220,7 +221,7 @@ def find_model_bundle(root, *, asof):
     for path in paths[:40]:
         try:
             model=read_model_bundle(path)
-            if model["asof_session"]==path.parent.name:
+            if model["asof_session"]==path.parent.name and model.get("minimum_embargo_sessions",0)>=5:
                 return model,{"model_sha256":path.stem,
                               "path":str(path.relative_to(Path(root))),
                               "asof_session":model["asof_session"]}

@@ -61,6 +61,8 @@ def forward_scorecard(root, *, max_records=1600, minimum_samples=60):
                 if (row.get("schema")!="qdr.l1.v3.outcome.v1" or
                     row.get("historical_pit_verified") is not False or
                     row.get("execution_eligible") is not False or
+                    row.get("corporate_action_status")!="VERIFIED_NO_ACTION_CURRENT_VINTAGE" or
+                    not row.get("corporate_action_receipts_sha256") or
                     row.get("asof_session")!=path.parent.name or
                     row.get("actual_scenario") not in CLASSES):
                     continue

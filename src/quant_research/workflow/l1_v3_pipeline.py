@@ -140,7 +140,14 @@ def frozen_for_session(root,session):
     folder=Path(root)/"outputs"/"l1_v3_research"/session
     if not folder.is_dir():
         return None
-    paths=sorted(folder.glob("*.json"))
+    paths=[]
+    for candidate in sorted(folder.glob("*.json")):
+        try:
+            item=_read_frozen(candidate)
+        except (OSError,ValueError,TypeError,KeyError,SourceUnavailable):
+            raise SourceUnavailable("V3_FROZEN_UNVERIFIABLE")
+        if item.get("snapshot_status")=="IMMUTABLE_DAILY_FROZEN":
+            paths.append(candidate)
     if not paths:
         return None
     # More than one daily freeze is a contract violation; never silently choose
@@ -163,6 +170,8 @@ def latest_frozen(root, *, now=None):
             continue
         try:
             data=_read_frozen(path)
+            if data.get("snapshot_status")!="IMMUTABLE_DAILY_FROZEN":
+                continue
             out=dict(data)
             out["served_from"]="IMMUTABLE_FROZEN_RESEARCH"
             out["source_snapshot_sha256"]=sha256(path.read_bytes()).hexdigest()
@@ -184,6 +193,14 @@ def current_pipeline_status(root, *, now=None):
     current=latest_completed_session(now)
     model_info=find_model_bundle(root,asof=current)
     frozen=latest_frozen(root,now=now)
+    daily_count=0
+    for record in recent_research_snapshots(root,limit=15):
+        try:
+            entry=frozen_for_session(root,record['asof_session'])
+            if entry and entry[1]['sha256']==record['sha256']:
+                daily_count+=1
+        except (OSError,ValueError,TypeError,KeyError,SourceUnavailable):
+            continue
     jobs=sorted(_job_folder(root).glob("*.json"),reverse=True)
     last_job=None
     for path in jobs[:5]:
@@ -203,7 +220,7 @@ def current_pipeline_status(root, *, now=None):
         "model_retrain_due":should_retrain(model_info[0],current) if model_info else True,
         "frozen_session":frozen.get("asof_session"),
         "frozen_current":frozen.get("freshness_status")=="CURRENT",
-        "frozen_count_recent":len(recent_research_snapshots(root,limit=15)),
+        "frozen_count_recent":daily_count,
         "settled_count_recent":len(recent_v3_outcomes(root,limit=30)),
         "last_job":last_job,
         "status":"CURRENT_RESEARCH" if frozen.get("freshness_status")=="CURRENT"
@@ -238,33 +255,73 @@ def _settlements_pending(root,asof):
         current_pos=clock.calendar.sessions.get_loc(clock.session(asof))
     except (ValueError,KeyError):
         return False
-    settled={(r["asof_session"],int(r["horizon"]))
+    settled={(r["frozen_sha256"],int(r["horizon"]))
              for r in recent_v3_outcomes(root,limit=400)}
+    visited=set()
     for item in recent_research_snapshots(root,limit=30):
         try:
+            session=item["asof_session"]
+            if session in visited:
+                continue
+            visited.add(session)
+            frozen=frozen_for_session(root,session)
+            if not frozen:
+                continue
+            snapshot,reference=frozen
             origin=clock.calendar.sessions.get_loc(
-                clock.session(item["asof_session"]))
-            for h in item["horizons_available"]:
-                if origin+h<=current_pos and (item["asof_session"],h) not in settled:
+                clock.session(session))
+            for key,row in snapshot["horizons"].items():
+                h=int(key)
+                if row.get("research_estimates") is not None and origin+h<=current_pos and (reference["sha256"],h) not in settled:
                     return True
         except (KeyError,ValueError,TypeError):
             continue
     return False
 
 
-def _settle_existing(root,feed,asof, *,refresh=False):
+def _check_no_actions(root, start, end):
+    """Require a complete, archived empty provider event chain; never infer it."""
+    from quant_research.data.http import DataUnavailable, HttpCache
+    from quant_research.data.providers.actions import ActionProvider
+    provider=ActionProvider(HttpCache(Path(root)/'data/raw',refresh=True))
+    try:
+        events=provider.events(['SPY'],start,end)
+        if events or not provider.pages:
+            raise SourceUnavailable('V3_CORPORATE_ACTION_RECONCILIATION_REQUIRED')
+        for page in provider.pages:
+            digest=page['raw_sha256']
+            raw=(Path(root)/'data/raw/objects'/digest).read_bytes()
+            body=json.loads(raw)
+            groups=body.get('corporate_actions')
+            if (sha256(raw).hexdigest()!=digest or not isinstance(groups,dict) or
+                    not groups or any(not isinstance(v,list) or v for v in groups.values())):
+                raise SourceUnavailable('V3_ACTION_COVERAGE_UNVERIFIED')
+        # Alpaca filters by process date and may publish events late; even a
+        # complete empty page cannot prove the absence of an ex-date action
+        # during this holding window. Keep it pending until independent
+        # ex-date coverage and an entitlement method are available.
+        raise SourceUnavailable('V3_ACTION_EX_DATE_COVERAGE_UNVERIFIED')
+    except DataUnavailable as exc:
+        raise SourceUnavailable('V3_ACTION_SOURCE_'+exc.code) from exc
+    except (OSError,ValueError,TypeError,KeyError) as exc:
+        raise SourceUnavailable('V3_ACTION_RECEIPT_INVALID') from exc
+
+
+def _settle_existing(root,feed,asof, *,refresh=False,action_checker=None):
     """Only download short history when a real horizon has actually matured."""
     if not _settlements_pending(root,asof):
         return {"checked":0,"new_outcomes":0,"status":"NO_DUE_OUTCOMES"}
     bars,_=_bar_request(feed,days=90,session=asof,
-                        adjustment="split",refresh=refresh)
-    return settle_due_research(root,bars,latest_session=asof,limit=30)
+                        adjustment="raw",refresh=refresh)
+    checker=action_checker or (lambda start,end:_check_no_actions(root,start,end))
+    return settle_due_research(root,bars,latest_session=asof,limit=30,action_checker=checker)
 
 
 def run_pipeline(root, *, mode="daily", now=None, sources=None,
-                 refresh=False, force_train=False):
+                 refresh=False, force_train=False, action_checker=None):
     """Execute on user's host. Results are never promoted to live trading."""
     root=Path(root)
+    live_clock=now is None
     now=now or datetime.now(timezone.utc)
     if now.tzinfo is None or now.utcoffset() is None:
         raise ValueError("Time zone required")
@@ -278,7 +335,7 @@ def run_pipeline(root, *, mode="daily", now=None, sources=None,
             existing=frozen_for_session(root,asof) if mode=="daily" else None
             if mode=="daily" and existing and not force_train:
                 try:
-                    outcome=_settle_existing(root,feed,asof,refresh=refresh)
+                    outcome=_settle_existing(root,feed,asof,refresh=refresh,action_checker=action_checker)
                 except SourceUnavailable as exc:
                     outcome={"status":"PENDING_SOURCE","code":exc.code}
                 result={"mode":mode,"status":"ALREADY_FROZEN",
@@ -286,7 +343,7 @@ def run_pipeline(root, *, mode="daily", now=None, sources=None,
                         "frozen_sha256":existing[1]["sha256"],
                         "outcomes":outcome}
             elif mode=="settle":
-                outcome=_settle_existing(root,feed,asof,refresh=refresh)
+                outcome=_settle_existing(root,feed,asof,refresh=refresh,action_checker=action_checker)
                 result={"mode":mode,"status":"SETTLEMENT_CHECKED",
                         "asof_session":asof,"outcomes":outcome}
             else:
@@ -314,6 +371,12 @@ def run_pipeline(root, *, mode="daily", now=None, sources=None,
                         receipts=receipts,asof=asof)
                     research["pipeline_version"]="L1_V3_DAILY_V1"
                     research["snapshot_status"]="IMMUTABLE_DAILY_FROZEN"
+                    clock=TradingClock()
+                    next_session=clock.calendar.next_session(clock.session(asof))
+                    frozen_at=datetime.now(timezone.utc) if live_clock else now.astimezone(timezone.utc)
+                    if frozen_at>=clock.calendar.session_open(next_session).to_pydatetime():
+                        raise SourceUnavailable("V3_NEXT_SESSION_ALREADY_OPEN")
+                    research["frozen_at_utc"]=frozen_at.isoformat()
                     # Never overwrite a prior official daily freeze. Even with
                     # force_train, preserve any earlier prediction.
                     if existing:
@@ -328,8 +391,7 @@ def run_pipeline(root, *, mode="daily", now=None, sources=None,
                                 "frozen_sha256":frozen["sha256"],
                                 "model_sha256":ref["model_sha256"]}
                     try:
-                        result["outcomes"]=settle_due_research(
-                            root,bars,latest_session=asof,limit=30)
+                        result["outcomes"]=_settle_existing(root,feed,asof,refresh=refresh,action_checker=action_checker)
                     except (OSError,SourceUnavailable) as exc:
                         result["outcomes"]={"status":"PENDING",
                                             "code":getattr(exc,"code",type(exc).__name__)}
@@ -372,6 +434,10 @@ def main(argv=None):
     sub.add_parser("daemon").add_argument("--interval",type=int,default=900)
     args=parser.parse_args(argv)
     try:
+        credentials=args.root / '.env'
+        if credentials.is_file():
+            from quant_research.cli import load_local_credentials
+            load_local_credentials(credentials)
         if args.command=="status":
             data=current_pipeline_status(args.root)
         elif args.command=="latest":

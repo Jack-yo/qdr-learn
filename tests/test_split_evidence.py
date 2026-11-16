@@ -87,15 +87,21 @@ def test_web_evidence_requires_matching_snapshot_and_all_artifact_hashes(evidenc
     source = next((p for p in manifests if json.loads(p.read_text()).get('issuer_review')),None)
     if source is None:
         pytest.skip('BLOCKED_REAL_ISSUER_AUDIT_RUN_MISSING')
+    manifest=json.loads(source.read_text())
+    # The live warehouse can gain rows after this archived report was made.
+    # Exercise its actual recorded snapshot identity instead of assuming the
+    # current warehouse still has the same hash.
+    archived={**bundle.metadata,'snapshot_sha256':manifest['raw_snapshot_sha256'],
+              'asof_date_et':manifest['anchor_date_et']}
     target = tmp_path/'outputs/feature_prices'/source.parent.name
     shutil.copytree(source.parent,target)
-    result = feature_evidence(tmp_path,bundle.metadata)
-    expected=json.loads(source.read_text())['issuer_review']
+    result = feature_evidence(tmp_path,archived)
+    expected=manifest['issuer_review']
     assert result['strict_reference_status']=='BLOCKED' and result['issuer_matched']==expected['matched_splits']
     assert result['issuer_unverified_symbols']==[c['symbol'] for c in expected['checks'] if c['status']!='CASE_FIELDS_MATCH']
     assert not result['execution_enabled']
-    stale = bundle.metadata
+    stale = dict(archived)
     stale['snapshot_sha256']='REJECTED_STALE_SNAPSHOT'
     assert feature_evidence(tmp_path,stale)['code']=='NO_MATCHING_FEATURE_EVIDENCE'
     (target/'issuer_checks.json').write_text('tampered audit')
-    assert feature_evidence(tmp_path,bundle.metadata)['code']=='FEATURE_EVIDENCE_ARTIFACT_HASH_MISMATCH'
+    assert feature_evidence(tmp_path,archived)['code']=='FEATURE_EVIDENCE_ARTIFACT_HASH_MISMATCH'

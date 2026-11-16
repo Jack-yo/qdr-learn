@@ -296,9 +296,15 @@ function pipelineLine(status,p){
  const current=status?.status==='CURRENT_RESEARCH';
  const model=status?.model_reference?.asof_session;
  const job=status?.last_job;
+ const frozenModel=p?.model_reference?.model_sha256;
+ const currentModel=status?.model_reference?.model_sha256;
+ const priorModel=Boolean(frozenModel&&currentModel&&frozenModel!==currentModel);
  const parts=[
    p?.status==='RESEARCH_ONLY'?('已冻结研究 · '+p.asof_session):'最新研究待生成',
    model?('模型训练 '+model):'模型尚未建立',
+   p?.frozen_at_utc?('实际冻结 '+p.frozen_at_utc):'',
+   priorModel?'当前预测使用先前模型；新模型将在后续预测使用':'',
+   p?.model_version==='L1_V3_ETF7.2'?'旧版 H1/H3 未满足五交易日隔离，研究结果不符合当前准入规则':'',
    status?.model_retrain_due?'待训练/更新':'模型在更新周期内',
    job?.status==='BLOCKED'?('上次任务失败：'+String(job.code||'见运行日志')):''
  ].filter(Boolean);

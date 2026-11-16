@@ -50,6 +50,9 @@ def test_receipt_and_response_both_required(tmp_path):
     bundle=real_bundle()
     frame=bundle.prices
     digest=frame.raw_sha256.iloc[0]
+    # Newer warehouses can contain multiple raw responses; this test copies
+    # one response and must validate only rows belonging to that response.
+    frame=frame.loc[frame.raw_sha256.eq(digest)].copy()
     root=tmp_path/'raw';(root/'objects').mkdir(parents=True)
     shutil.copyfile(Path('data/raw/objects')/digest,root/'objects'/digest)
     with pytest.raises(PolicyError,match='receipt'):verify_lineage(frame,root)

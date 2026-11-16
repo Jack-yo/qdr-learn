@@ -114,7 +114,8 @@ def test_daily_job_trains_once_then_loads_saved_model(tmp_path,daily_bars):
     assert second["frozen_sha256"]==first["frozen_sha256"]
     assert sum(call[0]==2500 for call in feed.calls)==1
     nxt=run_pipeline(tmp_path,mode="daily",sources=feed,
-                now=datetime(2026,11,16,23,30,tzinfo=timezone.utc))
+                now=datetime(2026,11,16,23,30,tzinfo=timezone.utc),
+                action_checker=lambda start,end:['a'*64])
     assert nxt["status"]=="FROZEN_RESEARCH_ONLY"
     assert sum(call[0]==2500 for call in feed.calls)==1
     assert any(call[0]==420 for call in feed.calls)
@@ -128,6 +129,21 @@ def test_daily_job_trains_once_then_loads_saved_model(tmp_path,daily_bars):
            now=datetime(2026,11,16,23,30,tzinfo=timezone.utc))
     assert status["model_available"] and status["frozen_current"]
     assert status["settled_count_recent"]>=1
+
+
+def test_legacy_on_demand_snapshots_do_not_count_as_daily_freezes(tmp_path,daily_bars):
+    from quant_research.workflow.l1_v3 import save_research_snapshot
+    feed=StubAlpaca(daily_bars)
+    run_pipeline(tmp_path,mode="daily",sources=feed,
+                 now=datetime(2026,11,13,22,30,tzinfo=timezone.utc))
+    frozen,_=frozen_for_session(tmp_path,"2026-11-13")
+    frozen["snapshot_status"]="ON_DEMAND_NOT_DAILY_SCHEDULED"
+    save_research_snapshot(tmp_path,frozen)
+    frozen["notice"]="another legacy research snapshot"
+    save_research_snapshot(tmp_path,frozen)
+    assert frozen_for_session(tmp_path,"2026-11-13")[0]["snapshot_status"]=="IMMUTABLE_DAILY_FROZEN"
+    assert run_pipeline(tmp_path,mode="daily",sources=feed,
+                        now=datetime(2026,11,13,23,30,tzinfo=timezone.utc))["status"]=="ALREADY_FROZEN"
 
 
 def test_no_model_or_frozen_predictions_are_fabricated(tmp_path):
@@ -152,6 +168,27 @@ def test_data_completeness_blocks_stale_etf(daily_bars):
     with pytest.raises(SourceUnavailable,match="V3_STALE_CORE_ETF_BAR"):
         _validated_source_bars(bars,"2026-11-13")
     bars["HYG"].append(last)
+
+
+def test_no_action_requires_hashed_complete_grouped_evidence(tmp_path,monkeypatch):
+    from quant_research.workflow.l1_v3_pipeline import _check_no_actions
+    import quant_research.data.providers.actions as action_module
+    class StubProvider:
+        def __init__(self,http): self.pages=[]
+        def events(self,symbols,start,end):
+            raw=json.dumps({'corporate_actions':self.groups,'next_page_token':None}).encode()
+            digest=sha256(raw).hexdigest()
+            folder=tmp_path/'data/raw/objects';folder.mkdir(parents=True,exist_ok=True)
+            (folder/digest).write_bytes(raw)
+            self.pages=[{'raw_sha256':digest}]
+            return []
+    monkeypatch.setattr(action_module,'ActionProvider',StubProvider)
+    StubProvider.groups={}
+    with pytest.raises(SourceUnavailable,match='V3_ACTION_COVERAGE_UNVERIFIED'):
+        _check_no_actions(tmp_path,'2026-11-03','2026-11-04')
+    StubProvider.groups={'dividend':[],'split':[]}
+    with pytest.raises(SourceUnavailable,match='V3_ACTION_EX_DATE_COVERAGE_UNVERIFIED'):
+        _check_no_actions(tmp_path,'2026-11-03','2026-11-04')
 
 
 def test_model_aging_is_explicit(trained):
