@@ -7,7 +7,11 @@ import json
 
 import pytest
 
-from quant_research.web import Console,handler
+from quant_research.web import Console,handler,LocalConsoleServer
+
+
+def test_console_accept_queue_covers_concurrent_page_requests():
+    assert LocalConsoleServer.request_queue_size>=32
 
 
 def test_all_v3_browser_get_routes_are_read_only(tmp_path,monkeypatch):

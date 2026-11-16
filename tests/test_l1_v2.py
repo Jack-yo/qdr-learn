@@ -113,7 +113,7 @@ def test_web_startup_loads_local_credentials_without_printing_them(tmp_path,monk
         def server_close(self):pass
     monkeypatch.setattr(web,'Console',make_console)
     monkeypatch.setattr(web,'handler',lambda console:object())
-    monkeypatch.setattr(web,'ThreadingHTTPServer',Server)
+    monkeypatch.setattr(web,'LocalConsoleServer',Server)
     web.main(['--env-file',str(env_file),'--port','8766'])
     assert seen=={'key':'test-key','secret':'test-secret'}
     output=capsys.readouterr().out

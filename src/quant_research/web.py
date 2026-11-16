@@ -21,6 +21,11 @@ from .data.bundle import load_real_bundle
 PRIVATE_OUTPUTS = {"pytest-tmp", "ops_backups", "ops_restore"}
 
 
+class LocalConsoleServer(ThreadingHTTPServer):
+    """Absorb the browser's concurrent asset and API requests during startup."""
+    request_queue_size = 64
+
+
 def allowed_artifact(root, target):
     """Legacy/synthetic and unmanifested artifacts are never served by the product."""
     try:
@@ -1024,7 +1029,7 @@ def main(argv=None):
     root = Path.cwd()
     if not (root / "configs/sources.yaml").is_file():
         parser.error("Start from project root")
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), handler(Console(root,args.source,args.db)))
+    server = LocalConsoleServer(("127.0.0.1", args.port), handler(Console(root,args.source,args.db)))
     print(f"Real-data console: http://127.0.0.1:{server.server_port} (Ctrl+C stops)", flush=True)
     try: server.serve_forever()
     except KeyboardInterrupt: pass

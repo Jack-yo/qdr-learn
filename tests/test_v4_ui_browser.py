@@ -173,7 +173,9 @@ def _server():
         def log_message(self,*args):
             pass
 
-    server=ThreadingHTTPServer(("127.0.0.1",0),Handler)
+    class TestBrowserServer(ThreadingHTTPServer):
+        request_queue_size=64
+    server=TestBrowserServer(("127.0.0.1",0),Handler)
     t=threading.Thread(target=server.serve_forever,daemon=True)
     t.start()
     try:
