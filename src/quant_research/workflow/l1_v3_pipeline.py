@@ -268,6 +268,8 @@ def _settlements_pending(root,asof):
             if not frozen:
                 continue
             snapshot,reference=frozen
+            if snapshot.get("minimum_embargo_sessions",0)<5:
+                continue  # Older models remain archived but cannot enter scorecard.
             origin=clock.calendar.sessions.get_loc(
                 clock.session(session))
             for key,row in snapshot["horizons"].items():
@@ -279,42 +281,17 @@ def _settlements_pending(root,asof):
     return False
 
 
-def _check_no_actions(root, start, end):
-    """Require a complete, archived empty provider event chain; never infer it."""
-    from quant_research.data.http import DataUnavailable, HttpCache
-    from quant_research.data.providers.actions import ActionProvider
-    provider=ActionProvider(HttpCache(Path(root)/'data/raw',refresh=True))
-    try:
-        events=provider.events(['SPY'],start,end)
-        if events or not provider.pages:
-            raise SourceUnavailable('V3_CORPORATE_ACTION_RECONCILIATION_REQUIRED')
-        for page in provider.pages:
-            digest=page['raw_sha256']
-            raw=(Path(root)/'data/raw/objects'/digest).read_bytes()
-            body=json.loads(raw)
-            groups=body.get('corporate_actions')
-            if (sha256(raw).hexdigest()!=digest or not isinstance(groups,dict) or
-                    not groups or any(not isinstance(v,list) or v for v in groups.values())):
-                raise SourceUnavailable('V3_ACTION_COVERAGE_UNVERIFIED')
-        # Alpaca filters by process date and may publish events late; even a
-        # complete empty page cannot prove the absence of an ex-date action
-        # during this holding window. Keep it pending until independent
-        # ex-date coverage and an entitlement method are available.
-        raise SourceUnavailable('V3_ACTION_EX_DATE_COVERAGE_UNVERIFIED')
-    except DataUnavailable as exc:
-        raise SourceUnavailable('V3_ACTION_SOURCE_'+exc.code) from exc
-    except (OSError,ValueError,TypeError,KeyError) as exc:
-        raise SourceUnavailable('V3_ACTION_RECEIPT_INVALID') from exc
-
-
 def _settle_existing(root,feed,asof, *,refresh=False,action_checker=None):
     """Only download short history when a real horizon has actually matured."""
     if not _settlements_pending(root,asof):
         return {"checked":0,"new_outcomes":0,"status":"NO_DUE_OUTCOMES"}
-    bars,_=_bar_request(feed,days=90,session=asof,
-                        adjustment="raw",refresh=refresh)
-    checker=action_checker or (lambda start,end:_check_no_actions(root,start,end))
-    return settle_due_research(root,bars,latest_session=asof,limit=30,action_checker=checker)
+    # The model's target is price-only and SPLIT-adjusted, not portfolio P&L.
+    # Alpaca corporate-actions process_date cannot certify an empty ex-date
+    # window, so relying on it would block every honest forward score.
+    bars,receipts=_bar_request(feed,days=90,session=asof,
+                               adjustment="split",refresh=refresh)
+    return settle_due_research(root,bars,latest_session=asof,limit=30,
+                               price_receipts=receipts)
 
 
 def run_pipeline(root, *, mode="daily", now=None, sources=None,

@@ -256,7 +256,7 @@ function outcomePanel(result){
  }).join('');
  const content=records.length?
    '<div class="lv3-outcome-table-wrap"><table class="lv3-outcome-table"><thead>'+
-    '<tr><th>预测交易日</th><th>期限</th><th>已发生情景</th><th>实际收益</th><th>三分类 Brier</th></tr>'+
+    '<tr><th>预测交易日</th><th>期限</th><th>已发生情景</th><th>价格收益（不含分红）</th><th>三分类 Brier</th></tr>'+
     '</thead><tbody>'+records.slice(0,12).map(item=>
       '<tr><td>'+e(item.asof_session)+'</td><td>H'+e(item.horizon)+'</td>'+
       '<td>'+e(pName[item.actual_scenario]||'—')+'</td>'+
@@ -269,7 +269,7 @@ function outcomePanel(result){
     '<span class="lv3-soft">仅已完成的实际交易日 · 不代表实盘收益</span>')+
     '<div class="lv3-forward-score-grid">'+scoreCards+'</div>'+
     content+
-    '<p class="lv3-small">Brier 衡量三类概率与实际结果的距离，越小越好；只有历史归档与结果数据同时存在才会显示评分。</p>');
+    '<p class="lv3-small">结算以 SPY 拆股调整后、下一交易日开盘至期限末收盘的价格收益为准，不含分红、税费及交易滑点；不是实际可成交盈亏。Brier 越低越好；仅具有来源收据且满足五日隔离的前向冻结计入统计。</p>');
 }
 function evidence(v2,official,extended){
  const lookup=new Map((v2?.domains||[]).map(x=>[x.id,x]));

@@ -170,25 +170,26 @@ def test_data_completeness_blocks_stale_etf(daily_bars):
     bars["HYG"].append(last)
 
 
-def test_no_action_requires_hashed_complete_grouped_evidence(tmp_path,monkeypatch):
-    from quant_research.workflow.l1_v3_pipeline import _check_no_actions
-    import quant_research.data.providers.actions as action_module
-    class StubProvider:
-        def __init__(self,http): self.pages=[]
-        def events(self,symbols,start,end):
-            raw=json.dumps({'corporate_actions':self.groups,'next_page_token':None}).encode()
-            digest=sha256(raw).hexdigest()
-            folder=tmp_path/'data/raw/objects';folder.mkdir(parents=True,exist_ok=True)
-            (folder/digest).write_bytes(raw)
-            self.pages=[{'raw_sha256':digest}]
-            return []
-    monkeypatch.setattr(action_module,'ActionProvider',StubProvider)
-    StubProvider.groups={}
-    with pytest.raises(SourceUnavailable,match='V3_ACTION_COVERAGE_UNVERIFIED'):
-        _check_no_actions(tmp_path,'2026-11-03','2026-11-04')
-    StubProvider.groups={'dividend':[],'split':[]}
-    with pytest.raises(SourceUnavailable,match='V3_ACTION_EX_DATE_COVERAGE_UNVERIFIED'):
-        _check_no_actions(tmp_path,'2026-11-03','2026-11-04')
+def test_split_bar_settlement_requires_real_source_window_and_retrieval_time():
+    from quant_research.workflow.l1_v3_outcomes import _receipt_evidence
+    due_after=datetime(2026,11,16,21,15,tzinfo=timezone.utc)
+    sample={"feed":"sip","adjustment":"split","sha256":"b"*64,
+            "start":"2026-11-02","end":"2026-11-16",
+            "fetched_at":"2026-11-16T22:00:00Z"}
+    result=_receipt_evidence([sample],entry_day="2026-11-16",
+        exit_day="2026-11-16",asof_feed="sip",due_after=due_after)
+    assert result["price_basis"]=="SPLIT_ADJUSTED_PRICE_RETURN"
+    with pytest.raises(ValueError,match="V3_SETTLEMENT_FEED_CHANGED"):
+        _receipt_evidence([sample],entry_day="2026-11-16",
+            exit_day="2026-11-16",asof_feed="iex",due_after=due_after)
+    with pytest.raises(ValueError,match="V3_PRICE_BASIS_NOT_SPLIT"):
+        _receipt_evidence([{**sample,"adjustment":"raw"}],
+            entry_day="2026-11-16",exit_day="2026-11-16",
+            asof_feed="sip",due_after=due_after)
+    with pytest.raises(ValueError,match="V3_SETTLEMENT_BAR_FETCH_PREMATURE"):
+        _receipt_evidence([{**sample,"fetched_at":"2026-11-16T20:00:00Z"}],
+            entry_day="2026-11-16",exit_day="2026-11-16",
+            asof_feed="sip",due_after=due_after)
 
 
 def test_model_aging_is_explicit(trained):

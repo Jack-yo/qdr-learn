@@ -268,6 +268,8 @@ def infer_market_from_bundle(bars, *, model, model_ref, receipts, asof):
         "fetched_at":receipts[-1].get("fetched_at") if receipts else None,
         "source_receipts":receipts,
         "model_reference":model_ref,
+        "minimum_embargo_sessions":model.get("minimum_embargo_sessions",0),
+        "outcome_definition":"SPLIT_ADJUSTED_PRICE_RETURN_EXCLUDES_DIVIDENDS",
         "raw_observations":_market_observations(features,close,asof),
         "horizons":{},
         "notice":"Frozen forward research with stored model parameters. Historical PIT and verified trading edge are not established."

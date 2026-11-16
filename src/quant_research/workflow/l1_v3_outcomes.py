@@ -5,8 +5,9 @@ append-only, separate from frozen estimates; no retroactive edits.
 """
 from __future__ import annotations
 from hashlib import sha256
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -21,7 +22,52 @@ def _json_bytes(data):
                       allow_nan=False, separators=(",", ":")).encode("utf-8")
 
 
-def settle_due_research(root, bars, *, latest_session, limit=30, action_checker=None):
+PRICE_BASIS = "SPLIT_ADJUSTED_PRICE_RETURN"
+# Price-only outcome: split-adjusted open(T+1) -> close(T+H).
+# Dividends, distributions, transaction costs and executable P&L excluded.
+# This is exactly the same TARGET as the V3 training labels.
+
+
+def _receipt_evidence(receipts, *, entry_day, exit_day, asof_feed, due_after):
+    """Verify *source provenance*, not an unverifiable corporate-action absence.
+
+    Alpaca historical stock-bars adjustment='split' preserves continuity
+    through splits; dividend ex-date price changes remain part of the
+    price-only target, NOT total shareholder return. Require a freshly
+    fetched, complete adjusted-bar window that includes both target days.
+    """
+    if not isinstance(receipts,list) or not receipts:
+        raise ValueError("V3_SPLIT_BAR_RECEIPTS_MISSING")
+    hashes=[]; feed=None; fetched=[]
+    for item in receipts:
+        if not isinstance(item,dict) or item.get("adjustment")!="split":
+            raise ValueError("V3_PRICE_BASIS_NOT_SPLIT")
+        f=item.get("feed")
+        if f not in ("sip","iex") or (feed is not None and f!=feed):
+            raise ValueError("V3_SETTLEMENT_FEED_INVALID")
+        feed=f
+        digest=item.get("sha256")
+        if not isinstance(digest,str) or not re.fullmatch(r"[0-9a-f]{64}",digest):
+            raise ValueError("V3_SETTLEMENT_RECEIPT_HASH_INVALID")
+        if not (date.fromisoformat(str(item["start"]))<=date.fromisoformat(entry_day) and
+                date.fromisoformat(str(item["end"]))>=date.fromisoformat(exit_day)):
+            raise ValueError("V3_SETTLEMENT_RECEIPT_WINDOW_INCOMPLETE")
+        stamp=datetime.fromisoformat(str(item["fetched_at"]).replace("Z","+00:00"))
+        if stamp.tzinfo is None or stamp.utcoffset() is None:
+            raise ValueError("V3_SETTLEMENT_RECEIPT_TIME_INVALID")
+        fetched.append(stamp.astimezone(timezone.utc))
+        hashes.append(digest)
+    if asof_feed not in ("sip","iex") or asof_feed!=feed:
+        raise ValueError("V3_SETTLEMENT_FEED_CHANGED")
+    if min(fetched)<due_after.astimezone(timezone.utc):
+        raise ValueError("V3_SETTLEMENT_BAR_FETCH_PREMATURE")
+    return {"feed":feed,"receipt_sha256":hashes,
+            "retrieved_at_utc":max(fetched).isoformat(),
+            "adjustment":"split","price_basis":PRICE_BASIS}
+
+
+def settle_due_research(root, bars, *, latest_session, limit=30,
+                        price_receipts=None, action_checker=None):
     root = Path(root)
     home = root / "outputs" / "l1_v3_research"
     if not home.is_dir():
@@ -32,7 +78,7 @@ def settle_due_research(root, bars, *, latest_session, limit=30, action_checker=
     market = normalize_bars(bars) if isinstance(bars, dict) else bars.copy()
     spy = market.loc[(market.symbol == "SPY") & (market.date <= str(latest_session))]
     spy = spy.set_index("date")
-    written, checked, blocked_actions = 0, 0, 0
+    written, checked, blocked_price_evidence = 0, 0, 0
     for path in sorted(home.glob("20??-??-??/*.json"), reverse=True)[:limit]:
         try:
             body = path.read_bytes()
@@ -63,15 +109,28 @@ def settle_due_research(root, bars, *, latest_session, limit=30, action_checker=
                 exit_day = dates[position+h].date().isoformat()
                 if entry_day not in spy.index or exit_day not in spy.index:
                     continue
-                if action_checker is None:
-                    blocked_actions += 1
+                # Old research freezes without the H1/H3 five-session
+                # embargo are retained but excluded from current forward KPIs.
+                if payload.get("minimum_embargo_sessions",0)<5:
+                    blocked_price_evidence += 1
                     continue
-                evidence=action_checker(entry_day,exit_day)
-                if not isinstance(evidence,list) or not evidence or any(
-                        not isinstance(v,str) or len(v)!=64 or
-                        any(ch not in '0123456789abcdef' for ch in v)
-                        for v in evidence):
-                    blocked_actions += 1
+                frozen_receipts=payload.get("source_receipts") or []
+                frozen_feed=payload.get("data_feed")
+                if (frozen_feed not in ("sip","iex") or not frozen_receipts or
+                    any(not isinstance(r,dict) or
+                        r.get("feed")!=frozen_feed or
+                        r.get("adjustment")!="split"
+                        for r in frozen_receipts)):
+                    blocked_price_evidence += 1
+                    continue
+                due_after=clock.close(dates[position+h])+clock.delay
+                try:
+                    evidence=_receipt_evidence(price_receipts,
+                        entry_day=entry_day,exit_day=exit_day,
+                        asof_feed=payload.get("data_feed"),
+                        due_after=due_after)
+                except (ValueError,TypeError,KeyError,OverflowError):
+                    blocked_price_evidence += 1
                     continue
                 entry = float(spy.loc[entry_day,"open"])
                 exit_ = float(spy.loc[exit_day,"close"])
@@ -98,9 +157,17 @@ def settle_due_research(root, bars, *, latest_session, limit=30, action_checker=
                     "actual_scenario":label,
                     "research_probabilities":p,
                     "brier_3class":round(float(np.square(arr-truth).sum()),8),
-                    "source":"ALPACA_RAW_DAILY_PRICES_CURRENT_VINTAGE",
-                    "corporate_action_status":"VERIFIED_NO_ACTION_CURRENT_VINTAGE",
-                    "corporate_action_receipts_sha256":evidence,
+                    "source":"ALPACA_SPLIT_ADJUSTED_DAILY_CURRENT_VINTAGE",
+                    "price_basis":PRICE_BASIS,
+                    "settlement_status":"VERIFIED_SOURCE_PRICE_ONLY_NOT_TOTAL_RETURN",
+                    "settlement_receipts_sha256":evidence["receipt_sha256"],
+                    "settlement_feed":evidence["feed"],
+                    "settlement_adjustment":"split",
+                    "settlement_fetched_at_utc":evidence["retrieved_at_utc"],
+                    "entry_open_split_adjusted":round(entry,8),
+                    "exit_close_split_adjusted":round(exit_,8),
+                    "cash_dividends_included":False,
+                    "market_execution_pnl_verified":False,
                     "historical_pit_verified":False,
                     "execution_eligible":False
                 }
@@ -122,7 +189,8 @@ def settle_due_research(root, bars, *, latest_session, limit=30, action_checker=
         except (OSError,KeyError,ValueError,TypeError,IndexError,OverflowError):
             continue
     return {"checked":checked,"new_outcomes":written,
-            "blocked_action_evidence":blocked_actions}
+            "blocked_price_evidence":blocked_price_evidence,
+            "price_basis":PRICE_BASIS}
 
 
 def recent_v3_outcomes(root,limit=30):
@@ -142,8 +210,10 @@ def recent_v3_outcomes(root,limit=30):
             r=json.loads(body)
             if (r.get("schema")!="qdr.l1.v3.outcome.v1" or
                 r.get("execution_eligible") is not False or
-                r.get("corporate_action_status")!="VERIFIED_NO_ACTION_CURRENT_VINTAGE" or
-                not r.get("corporate_action_receipts_sha256")):
+                r.get("settlement_status")!="VERIFIED_SOURCE_PRICE_ONLY_NOT_TOTAL_RETURN" or
+                r.get("price_basis")!=PRICE_BASIS or
+                r.get("settlement_adjustment")!="split" or
+                not r.get("settlement_receipts_sha256")):
                 continue
             rows.append({k:r[k] for k in
                 ("asof_session","horizon","exit_session","actual_scenario",
