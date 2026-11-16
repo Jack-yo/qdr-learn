@@ -1,4 +1,4 @@
-"""V3 UI: model numeric trace, dark-theme shell, no fake results, independent loading."""
+"""V3 UI: numeric trace, shared light shell, no fake results, independent loading."""
 from pathlib import Path
 import shutil
 import subprocess
@@ -10,11 +10,14 @@ HTML=ROOT/"src/quant_research/v4_shell.html"
 WEB=ROOT/"src/quant_research/web.py"
 
 
-def test_dark_shell_new_assets_and_strict_api():
+def test_light_shell_new_assets_and_strict_api():
     shell=HTML.read_text(encoding="utf-8")
     api=WEB.read_text(encoding="utf-8")
-    assert "--bg:#0a1020" in shell
-    for suffix in ("v4_ui_market_v3.js","v4_ui_market_v3.css"):
+    assert 'href="/assets/v4_ui_light.css"' in shell
+    assert 'src="/assets/v4_ui_theme.js"' in shell
+    assert 'id="v4-color-mode"' in shell
+    assert shell.index("v4_ui_market_v3.css") < shell.index("v4_ui_light.css")
+    for suffix in ("v4_ui_market_v3.js","v4_ui_market_v3.css","v4_ui_light.css","v4_ui_theme.js"):
         assert "/assets/"+suffix in shell
         assert "/assets/"+suffix in api
     assert "if path in ('/api/v1/l1/v3/latest'," in api
@@ -103,6 +106,7 @@ assert.match(html,/OFR/);
 assert.match(html,/2026-11-10/);
 assert.match(html,/0\.1500/);
 assert.match(html,/实际近20次观测变化/);
+assert.match(html,/lv3-change is-up/);
 assert.match(html,/未取得正式预测资格/);
 assert.doesNotMatch(html,/62\.0%/);
 assert.doesNotMatch(html,/第二屏/);
