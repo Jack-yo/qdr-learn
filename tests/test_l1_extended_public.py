@@ -421,6 +421,7 @@ def test_scan_extended_public_emits_fomc_feature_and_event(monkeypatch,tmp_path)
     class FakeProvider:
         def __init__(self,live): pass
         def fomc_calendar(self,refresh=False): return [event],receipt
+        def fred_cross_asset(self,*args,**kwargs): raise SourceUnavailable("OFFLINE")
         def cboe_options(self,*args,**kwargs): raise SourceUnavailable("OFFLINE")
         def ofr_fsi(self,*args,**kwargs): raise SourceUnavailable("OFFLINE")
         def bls_calendar(self,*args,**kwargs): raise SourceUnavailable("OFFLINE")
