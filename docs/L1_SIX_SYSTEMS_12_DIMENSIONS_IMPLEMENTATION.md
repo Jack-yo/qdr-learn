@@ -85,6 +85,18 @@
 - Alpaca 真实账户的资产目录、快照批次和历史 Bars 权限仍需在用户本机运行 `scan-live` / 历史回补任务验收。
 - 当前快照只代表 Alpaca 当前 active/tradable universe，不构成历史 PIT 股票池，也不具备模型或交易资格。
 
+### 5.2 历史 PIT Universe 导入契约
+
+已增加 schema v3 和受控导入路径：
+- Universe membership 可保存 `pit_attestation_id`、manifest SHA256 和 attestation provider。
+- `PIT_ATTESTED` 必须提供 JSON manifest，manifest 的 `source_data_sha256` 必须精确匹配导入 CSV 的 SHA256。
+- Manifest 必须声明 point-in-time membership、delisted coverage、security identity scheme、known-at 语义、覆盖日期、license scope，并由操作者标记为 `OPERATOR_REVIEWED`。
+- 特征引擎会把 attestation ID 传递到广度指标 metadata，供覆盖审计追溯。
+- `PIT_ATTESTED` 只表示有绑定数据文件的操作员审阅记录，不等于独立验证，不具备模型资格。
+- `PIT_VERIFIED` 当前被明确拒绝；只有完成独立供应商签名/身份核验后，才允许进入该状态。
+
+仍未解决的外部依赖：必须取得真实历史上市/退市证券身份与逐日历史成分数据。当前 Alpaca 活跃资产目录不能替代 CRSP、Norgate 或同等质量的历史 PIT security master。
+
 ## 6. 本地使用
 
 \`\`\`bash
@@ -92,6 +104,7 @@ python -m quant_research.workflow.l1_market_data catalog
 python -m quant_research.workflow.l1_market_data init --root .
 python -m quant_research.workflow.l1_market_data status --root .
 python -m quant_research.workflow.l1_market_data import-bars --root . --input path/to/bars.parquet --provider alpaca --price-basis raw --available-at 2026-11-17T22:00:00Z
+python -m quant_research.workflow.l1_market_data import-universe --root . --input path/to/pit_universe.csv --provider CRSP --universe-id US_COMMON_STOCKS --membership-basis PIT_VENDOR_MEMBERSHIP --pit-status PIT_ATTESTED --pit-attestation-file path/to/pit_manifest.json --snapshot-complete
 \`\`\`
 
 输入文件必须包含 date 或 session_date、symbol、OHLCV。若没有 security_id，系统显式使用 SYMBOL:<ticker> 并标记 SYMBOL_ONLY_UNVERIFIED，不会伪造永久身份。available_at 必须由操作者提供真实时点，不使用本机当前时间替代。
