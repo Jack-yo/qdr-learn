@@ -377,3 +377,33 @@ def test_pit_attested_features_are_not_mistaken_for_pit_verified():
     price=next(x for x in result["dimensions"] if x["id"]=="price")
     assert price["historical_pit_verified"] is False
     assert price["model_eligible"] is False
+
+def test_store_schema_v2_migrates_pit_attestation_columns(tmp_path):
+    duckdb=pytest.importorskip("duckdb")
+    from datetime import datetime,timezone
+    from quant_research.data.l1_market_store import L1MarketStore
+
+    db_path=tmp_path/"data"/"l1_market"/"market_data.duckdb"
+    db_path.parent.mkdir(parents=True,exist_ok=True)
+    conn=duckdb.connect(str(db_path))
+    conn.execute("""CREATE TABLE l1_market_schema(
+        version INTEGER PRIMARY KEY,installed_at TIMESTAMPTZ NOT NULL)""")
+    now=datetime(2026,11,17,22,0,tzinfo=timezone.utc)
+    conn.executemany("INSERT INTO l1_market_schema VALUES (?,?)",[(1,now),(2,now)])
+    conn.execute("""CREATE TABLE l1_market_universe(
+        session_date DATE NOT NULL,universe_id VARCHAR NOT NULL,
+        security_id VARCHAR NOT NULL,symbol VARCHAR NOT NULL,
+        is_member BOOLEAN NOT NULL,provider VARCHAR NOT NULL,
+        membership_basis VARCHAR NOT NULL,snapshot_complete BOOLEAN NOT NULL,
+        pit_status VARCHAR NOT NULL,known_at TIMESTAMPTZ NOT NULL,
+        receipt_sha256 VARCHAR NOT NULL,ingested_at TIMESTAMPTZ NOT NULL,
+        PRIMARY KEY(session_date,universe_id,security_id,provider,receipt_sha256))""")
+    conn.close()
+    with L1MarketStore(tmp_path) as store:
+        columns={row[1] for row in store.conn.execute(
+            "PRAGMA table_info('l1_market_universe')").fetchall()}
+        versions={row[0] for row in store.conn.execute(
+            "SELECT version FROM l1_market_schema").fetchall()}
+        assert {"pit_attestation_id","pit_attestation_sha256",
+                "pit_attestation_provider"} <= columns
+        assert 3 in versions
