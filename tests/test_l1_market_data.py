@@ -310,3 +310,11 @@ def test_latest_missing_observation_supersedes_older_valid_value():
     volatility=next(x for x in result["dimensions"] if x["id"]=="volatility")
     assert "vix_close" in volatility["missing_features"]
     assert volatility["coverage"]["available"]==0
+
+def test_fomc_calendar_is_registered_as_partial_non_pit_source():
+    from quant_research.data.l1_market_catalog import FEATURE_BY_KEY,SOURCE_BY_KEY
+    feature=FEATURE_BY_KEY["days_to_fomc"]
+    source=SOURCE_BY_KEY["fed_calendar"]
+    assert feature.implementation=="PARTIAL"
+    assert source.code_status=="IMPLEMENTED_PARTIAL"
+    assert source.pit_status=="CURRENT_PUBLISHED_SCHEDULE_NOT_HISTORICAL_PIT"
