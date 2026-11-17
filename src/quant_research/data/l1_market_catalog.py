@@ -342,15 +342,21 @@ def coverage_matrix(observations: Iterable[dict] = (), *,
                     metadata={}
             value=metadata.get("pit_attestation_id") if isinstance(metadata,dict) else None
             return str(value) if value is not None and str(value).strip() else None
+        pit_attested = bool(rows_for_pit) and len(observed) == total and all(
+            x.get("pit_status") in ("PIT_ATTESTED","PIT_VERIFIED") and pit_attestation_id(x)
+            for x in rows_for_pit)
         pit = bool(rows_for_pit) and len(observed) == total and all(
             x.get("pit_status") == "PIT_VERIFIED" and pit_attestation_id(x)
             for x in rows_for_pit)
+        pit_status = ("PIT_VERIFIED" if pit else
+                      "PIT_ATTESTED_PENDING_VERIFICATION" if pit_attested else "UNVERIFIED")
         dimensions.append({
             "id": dimension.key, "name": dimension.name, "role": dimension.role,
             "status": status, "coverage": {"available": count, "registered": total},
             "observed_features": [x.key for x in observed],
             "missing_features": [x.key for x in specs if x.key not in feature_rows],
             "blocked_sources": sorted(set(blocked_sources)),
+            "pit_attestation_status": pit_status,
             "historical_pit_verified": pit,
             "model_eligible": pit and status == "OBSERVED",
             "forecast_eligible": False,
