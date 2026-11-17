@@ -311,11 +311,20 @@ class LiveSources:
         return clean,{'fetched_at':stamp,'sha256':digest,'source':'ALPACA_ACTIVE_US_EQUITY_ASSETS',
                       'asset_count':len(clean),'scope':'ACTIVE_TRADABLE_NON_OTC_CURRENT_DIRECTORY_NOT_PIT'}
 
-    def snapshots(self, *, refresh=False, symbols=('SPY','QQQ','IWM','RSP','HYG','LQD')):
+    def snapshots(self, *, refresh=False, symbols=None):
+        """Fetch the L1 core ETF basket by default; caller may request a smaller set.
+
+        The basket is deliberately limited to liquid index, sector, style and
+        risk ETFs. Broad current-universe breadth is handled separately by
+        snapshots_for_symbols through the market_breadth scanner.
+        """
         key=self.env.get('ALPACA_API_KEY');secret=self.env.get('ALPACA_SECRET_KEY')
         if not key or not secret:raise SourceUnavailable('MISSING_ALPACA_CREDENTIALS')
         feed=self.env.get('QDR_L1_FEED','delayed_sip').lower()
         if feed not in {'delayed_sip','sip','iex'}:raise SourceUnavailable('INVALID_FEED')
+        symbols=tuple(symbols or self.ETF_SYMBOLS)
+        if not symbols or len(symbols)>500:
+            raise SourceUnavailable('INVALID_SNAPSHOT_SYMBOLS')
         params={'symbols':','.join(sorted(set(symbols))),'feed':feed}
         body,stamp,digest=self.request('https://data.alpaca.markets/v2/stocks/snapshots',params,
             {'APCA-API-KEY-ID':key,'APCA-API-SECRET-KEY':secret},ttl=60,refresh=refresh,feed=feed)
