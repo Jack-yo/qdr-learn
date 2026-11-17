@@ -223,7 +223,7 @@ def _compute(store, args):
         raise ValueError("NO_BARS_FOR_SELECTED_PRICE_BASIS_AND_PROVIDER")
     if bars.provider.nunique() != 1:
         raise ValueError("MULTIPLE_BAR_PROVIDERS_REQUIRE_PROVIDER_FILTER")
-    if bars.symbol.duplicated().any() and bars.duplicated(["session_date","symbol"]).any():
+    if bars.duplicated(["session_date","symbol"]).any():
         raise ValueError("DUPLICATE_SYMBOL_BARS_REVIEW_PROVIDER_OR_PRICE_BASIS")
     if not bars.symbol.eq("SPY").any():
         raise ValueError("SPY_BENCHMARK_REQUIRED")
@@ -327,7 +327,7 @@ def main(argv=None) -> int:
         print(json.dumps(_scan_live(args.root,args.refresh),ensure_ascii=False,default=str))
         return 0
     if args.command=="status":
-        print(json.dumps(market_data_snapshot(args.root,asof=None),ensure_ascii=False,default=str))
+        print(json.dumps(market_data_snapshot(args.root,asof=None,db_path=args.db),ensure_ascii=False,default=str))
         return 0
     with L1MarketStore(args.root,db_path=getattr(args,"db",None)) as store:
         if args.command=="init":

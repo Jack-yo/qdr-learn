@@ -43,7 +43,7 @@ _SOURCE_ALIASES = {
     "cftc_wti": "cftc",
     "cboe_options": "cboe_daily_options",
     "cboe_equity_volume": "cboe_market_volume",
-    "market_breadth": "alpaca_snapshots",
+    "market_breadth": "market_breadth",
     "stock_sample": "alpaca_bars",
 }
 _VALUE_SCALE = {
@@ -107,11 +107,32 @@ def persist_public_scan(root, payload, *, scan_kind):
                     dataset=scan_kind + "_source_health", fetched_at=fetched,
                     available_at=fetched, metadata={"source_key": source_key,
                     "pit": item.get("pit"), "effective_date": item.get("effective_date")})
-            for input_digest in item.get("input_receipts") or []:
+            input_receipts=item.get("input_receipts") or []
+            for input_index,input_digest in enumerate(input_receipts):
                 if input_digest and input_digest != digest:
-                    _register_receipt(store,input_digest,provider=item.get("source") or source_key,
+                    input_source=("alpaca_assets" if name=="market_breadth" and input_index==0
+                                  else "alpaca_snapshots" if name=="market_breadth"
+                                  else source_key)
+                    _register_receipt(store,input_digest,provider=input_source,
                         dataset=scan_kind+"_input_source_receipt",fetched_at=fetched,
-                        available_at=fetched,metadata={"derived_parent":digest,"source_key":source_key})
+                        available_at=fetched,metadata={"derived_parent":digest,"source_key":input_source})
+            if name=="market_breadth" and input_receipts:
+                health_rows.append({"source_key":"alpaca_assets","asof_session":asof,
+                    "fetched_at":fetched,"status":"OBSERVED","error_code":None,
+                    "receipt_sha256":input_receipts[0],
+                    "metadata":{"scope":"CURRENT_ACTIVE_TRADABLE_NON_OTC_DIRECTORY"}})
+                health_rows.append({"source_key":"alpaca_snapshots","asof_session":asof,
+                    "fetched_at":fetched,"status":item.get("status") or "MISSING",
+                    "error_code":item.get("code"),"receipt_sha256":digest,
+                    "metadata":{"coverage_n":item.get("coverage_n"),
+                        "expected_n":item.get("expected_n"),
+                        "observation_mode":item.get("observation_mode")}})
+                health_rows.append({"source_key":"market_breadth","asof_session":asof,
+                    "fetched_at":fetched,"status":item.get("status") or "MISSING",
+                    "error_code":item.get("code"),"receipt_sha256":digest,
+                    "metadata":{"coverage_n":item.get("coverage_n"),
+                        "expected_n":item.get("expected_n")}})
+                continue
             health_rows.append({
                 "source_key": source_key, "asof_session": asof,
                 "fetched_at": fetched, "status": item.get("status") or "MISSING",
@@ -254,9 +275,9 @@ def persist_l1_v2(root, payload):
             "source_receipts":len(input_hashes)}
 
 
-def market_data_snapshot(root, *, asof=None):
+def market_data_snapshot(root, *, asof=None, db_path=None):
     """Read the actual stored six-system / twelve-dimension coverage and provenance."""
-    with L1MarketStore(root) as store:
+    with L1MarketStore(root,db_path=db_path) as store:
         status = store.status()
         observations = store.read_observations(asof=asof)
         security = store.read_security_features(asof=asof)

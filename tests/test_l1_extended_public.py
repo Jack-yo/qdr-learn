@@ -298,3 +298,34 @@ def test_broad_market_breadth_does_not_call_a_partial_snapshot_full_coverage():
     assert row["coverage_n"]==60 and row["expected_n"]==100
     assert row["market_snapshot_coverage_pct"]==60
     assert row["batch_error_count"]==1
+
+
+def test_alpaca_asset_directory_and_batched_snapshots_are_bounded(tmp_path):
+    calls=[]
+    def fetch(url,headers):
+        calls.append(url)
+        p=urlparse(url)
+        if p.path.endswith("/v2/assets"):
+            assets=[{"symbol":f"SYM{i:03d}","class":"us_equity","status":"active",
+                     "tradable":True,"exchange":"NYSE"} for i in range(205)]
+            assets.extend([
+                {"symbol":"INACTIVE","class":"us_equity","status":"inactive","tradable":True,"exchange":"NYSE"},
+                {"symbol":"OTC1","class":"us_equity","status":"active","tradable":True,"exchange":"OTC"},
+            ])
+            return json.dumps(assets).encode()
+        if p.path.endswith("/stocks/snapshots"):
+            symbols=parse_qs(p.query)["symbols"][0].split(",")
+            return json.dumps({"snapshots":{x:{"dailyBar":{"t":"2026-11-13T21:00:00Z","c":100,"v":1},
+                "prevDailyBar":{"t":"2026-11-12T21:00:00Z","c":99}} for x in symbols}}).encode()
+        raise AssertionError(url)
+    source=LiveSources(tmp_path,fetch=fetch,
+        env={"ALPACA_API_KEY":"fixture","ALPACA_SECRET_KEY":"fixture"},
+        now=lambda:CLOCK)
+    assets,asset_receipt=source.assets()
+    snapshots,receipts,errors=source.snapshots_for_symbols(
+        [x["symbol"] for x in assets],batch_size=100)
+    assert len(assets)==205
+    assert asset_receipt["asset_count"]==205
+    assert len(snapshots)==205
+    assert len(receipts)==3 and errors==[]
+    assert len(calls)==4
