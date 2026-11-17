@@ -227,7 +227,7 @@ DIMENSION_BY_KEY = {x.key: x for x in DIMENSIONS}
 SYSTEM_BY_KEY = {x.key: x for x in SYSTEMS}
 
 SOURCES = (
-    SourceSpec("alpaca_bars","Alpaca 历史股票 Bars","market_data_vendor",("1Day OHLCV","ETF/股票快照"),"daily","当前代码 19 只 ETF；股票扩展受批次/行数/授权约束","credentialed","IMPLEMENTED_PARTIAL","NOT_HISTORICAL_PIT_ATTESTED","历史 SIP/IEX 权限需本机账户验证；symbol 映射不等于永久证券身份。"),
+    SourceSpec("alpaca_bars","Alpaca 历史股票 Bars","market_data_vendor",("1Day OHLCV","ETF/股票快照"),"daily","默认 28 个核心指数/行业/风格/风险 ETF；不代表全市场股票历史","credentialed","IMPLEMENTED_PARTIAL","NOT_HISTORICAL_PIT_ATTESTED","历史 SIP/IEX 权限需目标机账户验证；symbol 映射不等于永久证券身份。"),
     SourceSpec("alpaca_assets","Alpaca US Equity Assets","broker_asset_directory",("当前资产目录",),"daily","当前供应商资产响应，含 ETF，不是历史成分表","credentialed","IMPLEMENTED","CURRENT_SNAPSHOT_ONLY","现有资产快照明确不具备历史 PIT 或股票/ETF 分类证明。"),
     SourceSpec("alpaca_snapshots","Alpaca US Equity Snapshots","market_data_vendor",("dailyBar","prevDailyBar","latestTrade","latestQuote"),"intraday/daily","当前活跃可交易 US equity 资产批量快照；覆盖取决于权限和返回完整度","credentialed","IMPLEMENTED_PARTIAL","CURRENT_SNAPSHOT_ONLY","可计算当前活跃资产的盘中/最近日线广度；不是历史 PIT、不是完整盘口深度。"),
     SourceSpec("cboe_vix","Cboe VIX 历史","exchange_public",("VIX close",),"daily","VIX 单一指数历史序列","public","IMPLEMENTED_PARTIAL","CURRENT_VINTAGE","现有适配器不提供 VIX 期限结构、VVIX 全家族及历史 vintage。"),
