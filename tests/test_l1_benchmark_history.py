@@ -144,14 +144,20 @@ def test_macro_history_is_current_download_not_historical_pit(tmp_path):
 
     from quant_research.data.l1_market_store import L1MarketStore
     with L1MarketStore(tmp_path) as store:
-        obs = store.read_observations()
-        selected = obs.loc[obs.feature_id.isin(
-            ["vix_close", "hy_oas", "dxy_return_5", "treasury_2s10s_bp"])]
-        assert not selected.empty
-        assert selected.pit_status.eq(
+        refs = store.read_reference_series(feature_ids=[
+            "vix_close", "hy_oas", "dxy_return_5", "treasury_2s10s_bp"])
+        assert not refs.empty
+        assert refs.pit_status.eq(
             "CURRENT_VINTAGE_NOT_HISTORICAL_PIT").all()
-        assert selected.available_at.astype(str).str.startswith(
+        assert refs.available_at.astype(str).str.startswith(
             "2026-11-17 23:00:00").all()
+        # Reference history is intentionally isolated from live observation
+        # coverage and cannot silently become a model input.
+        obs = store.read_observations()
+        assert not obs.feature_id.isin(
+            ["vix_close", "hy_oas", "dxy_return_5", "treasury_2s10s_bp"]).any()
+        status = store.status()
+        assert status["reference_series"]["series"] >= 4
 
 
 def test_missing_fred_does_not_block_etf_history_or_vix(tmp_path):
