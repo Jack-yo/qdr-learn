@@ -645,6 +645,11 @@ class ExtendedPublicSources:
                 "batch_error_count":max(1,len(errors)),
                 "feed_sources":sorted({x.get("source","UNKNOWN") for x in snapshot_receipts}),
                 "batch_errors":errors[:10],
+                "spy_level1_spread_bps":None,
+                "spy_quote_timestamp":None,
+                "spy_quote_age_seconds":None,
+                "spy_quote_coverage_n":0,
+                "spy_quote_expected_n":1,
                 "asset_receipt_sha256":asset_receipt["sha256"],
                 "snapshot_receipt_sha256":[x["sha256"] for x in snapshot_receipts],
                 "snapshot_error_code":code,
@@ -685,9 +690,38 @@ class ExtendedPublicSources:
             return missing_snapshot_result("ALPACA_BROAD_SNAPSHOT_HAS_NO_VALID_DAILY_BARS",
                 snapshot_receipts=snapshot_receipts,batch_errors=batch_errors,
                 observation_mode="NO_VALID_DAILY_BARS")
-        # Use the most populated latest session; mixed/stale dates reduce coverage.
-        latest_day=max(by_day,key=lambda day:(len(by_day[day]),day))
+        # Freshness takes precedence over breadth: never fall back to an older,
+        # more populated session when even one newer session is present.
+        # The resulting low coverage is meaningful evidence, not a reason to backdate.
+        latest_day=max(by_day)
         rows=by_day[latest_day]
+        session_observation_counts={
+            day:len(by_day[day]) for day in sorted(by_day)[-5:]
+        }
+        # Alpaca snapshots also carry a Level-1 latestQuote. Keep SPY's quote
+        # separate from daily-bar breadth; it is not full depth or a real-time guarantee.
+        spy_quote = None
+        quote_record = snapshots.get("SPY") or {}
+        quote = quote_record.get("latestQuote") or quote_record.get("latest_quote") or {}
+        if isinstance(quote,dict):
+            try:
+                bid = _finite(quote.get("bp",quote.get("bidPrice",quote.get("bid_price"))),0.000001)
+                ask = _finite(quote.get("ap",quote.get("askPrice",quote.get("ask_price"))),0.000001)
+                quote_time = datetime.fromisoformat(
+                    str(quote.get("t") or quote.get("timestamp")).replace("Z","+00:00"))
+                if quote_time.tzinfo is None or quote_time.utcoffset() is None:
+                    raise ValueError("quote timestamp must include timezone")
+                quote_time = quote_time.astimezone(timezone.utc)
+                quote_age = (stamp-quote_time).total_seconds()
+                if ask >= bid and 0 <= quote_age <= 86400:
+                    mid = (ask+bid)/2
+                    spy_quote = {
+                        "spread_bps":(ask-bid)/mid*10000 if mid>0 else None,
+                        "timestamp":quote_time.isoformat(),
+                        "age_seconds":round(quote_age,1),
+                    }
+            except (SourceUnavailable,ValueError,TypeError,OverflowError):
+                spy_quote = None
         expected=len(assets)
         covered=len(rows)
         coverage=covered/expected if expected else 0.0
@@ -724,6 +758,12 @@ class ExtendedPublicSources:
             "coverage_n":covered,"expected_n":expected,
             "observation_mode":mode,"observed_date":latest_day,
             "batch_count":len(snapshot_receipts),"batch_error_count":len(batch_errors),
+            "session_observation_counts":session_observation_counts,
+            "spy_level1_spread_bps":spy_quote["spread_bps"] if spy_quote else None,
+            "spy_quote_timestamp":spy_quote["timestamp"] if spy_quote else None,
+            "spy_quote_age_seconds":spy_quote["age_seconds"] if spy_quote else None,
+            "spy_quote_coverage_n":1 if spy_quote else 0,
+            "spy_quote_expected_n":1,
             "feed_sources":sorted({x.get("source","UNKNOWN") for x in snapshot_receipts}),
             "batch_errors":batch_errors[:10],
             "asset_receipt_sha256":asset_receipt["sha256"],
@@ -974,6 +1014,20 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
                         add(domain,field,title,value[field],unit,scope,status=status,
                             observed_day=observed_day,coverage_n=coverage_n,
                             expected_n=expected_n,metadata=meta)
+                    if value.get("spy_level1_spread_bps") is not None:
+                        add("microstructure","spy_level1_spread_bps",
+                            "SPY Level-1 报价买卖价差",
+                            value["spy_level1_spread_bps"],"bps",
+                            "LEVEL1_QUOTE_NOT_FULL_DEPTH",
+                            observed_day=(value.get("spy_quote_timestamp") or "")[:10] or observed_day,
+                            coverage_n=value.get("spy_quote_coverage_n",0),
+                            expected_n=value.get("spy_quote_expected_n",1),
+                            metadata={
+                                "quote_timestamp":value.get("spy_quote_timestamp"),
+                                "quote_age_seconds":value.get("spy_quote_age_seconds"),
+                                "feed_sources":value.get("feed_sources"),
+                                "scope":"ALPACA_LEVEL1_LATEST_QUOTE_NOT_FULL_DEPTH",
+                            })
             except (SourceUnavailable,ValueError,KeyError,TypeError,OverflowError) as exc:
                 health[name]={"status":"MISSING","code":getattr(exc,"code",type(exc).__name__),
                               "fetched_at":stamp.isoformat()}

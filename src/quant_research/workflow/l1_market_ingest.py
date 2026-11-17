@@ -12,6 +12,8 @@ import re
 from pathlib import Path
 import threading
 
+import pandas as pd
+
 from quant_research.data.l1_market_catalog import (
     FEATURE_BY_KEY, catalog_payload, coverage_matrix,
 )
@@ -255,6 +257,9 @@ def persist_l1_v2(root, payload):
                 value = item.get("value")
                 if value is not None:
                     value = float(value) * _VALUE_SCALE.get(raw_id, 1.0)
+                feature_metadata = item.get("metadata")
+                if not isinstance(feature_metadata, dict):
+                    feature_metadata = {}
                 digest = _json_digest({"session":asof,"feature":feature_id,
                     "value":value,"inputs":sorted(input_hashes),"engine":"L1_V2_DERIVED_V1"})
                 _register_receipt(store, digest, provider="QDR_L1_V2_DERIVED",
@@ -271,9 +276,12 @@ def persist_l1_v2(root, payload):
                     "vintage_id":"l1_v2:"+asof,
                     "pit_status":item.get("pit") or "CURRENT_OBSERVATION_NOT_HISTORICAL_PIT",
                     "quality_status":item.get("status") or "OBSERVED",
+                    "coverage_n":item.get("coverage_n"),
+                    "expected_n":item.get("expected_n"),
                     "receipt_sha256":digest,
                     "metadata":{"label":item.get("label"),"domain":domain.get("id"),
-                                "fetched_at":item.get("fetched_at")},
+                                "fetched_at":item.get("fetched_at"),
+                                **feature_metadata},
                 })
         written = store.write_observations(rows)
         health = []
@@ -298,11 +306,85 @@ def market_data_snapshot(root, *, asof=None, db_path=None):
         security = store.read_security_features(asof=asof)
         health = store.read_source_health(asof=asof)
         labels = store.read_path_labels(asof=asof)
+        reference = store.read_reference_series(end=asof)
         benchmark_checks = store.read_quality_checks(
             asof=asof, reason="CORE_BENCHMARK_HISTORY_SYNC")
+        if asof and not benchmark_checks.empty:
+            cutoff = pd.Timestamp(asof)
+            cutoff = (cutoff.tz_localize("UTC") if cutoff.tzinfo is None
+                      else cutoff.tz_convert("UTC"))
+            cutoff = cutoff.normalize() + pd.Timedelta(days=1) - pd.Timedelta(nanoseconds=1)
+            checked_at = pd.to_datetime(benchmark_checks["checked_at"], utc=True, errors="coerce")
+            benchmark_checks = benchmark_checks.loc[checked_at.le(cutoff)].copy()
         obs_rows = observations.to_dict("records") if not observations.empty else []
         sec_rows = security.to_dict("records") if not security.empty else []
-        combined = obs_rows + sec_rows
+        # Reference-series history (e.g. current-download VIX/FRED) is a
+        # separate historical asset. It must never inflate live feature coverage.
+        if asof and not reference.empty:
+            cutoff = pd.Timestamp(asof)
+            cutoff = (cutoff.tz_localize("UTC") if cutoff.tzinfo is None
+                      else cutoff.tz_convert("UTC"))
+            cutoff = cutoff.normalize() + pd.Timedelta(days=1) - pd.Timedelta(nanoseconds=1)
+            available = pd.to_datetime(reference["available_at"], utc=True, errors="coerce")
+            reference = reference.loc[available.le(cutoff)].copy()
+        reference_features = []
+        if not reference.empty:
+            reference = reference.loc[reference["feature_id"].notna()].copy()
+            for feature_id, group in reference.groupby("feature_id", sort=True):
+                group = group.sort_values(["observation_date", "available_at", "ingested_at"])
+                latest = group.iloc[-1]
+                latest_date = latest.get("observation_date")
+                latest_available = latest.get("available_at")
+                reference_features.append({
+                    "feature_id":str(feature_id),
+                    "rows":len(group),
+                    "series_ids":sorted({str(x) for x in group["series_id"].dropna().tolist()}),
+                    "latest_observation_date":str(latest_date)[:10] if latest_date is not None else None,
+                    "latest_value":float(latest["value"]) if pd.notna(latest.get("value")) else None,
+                    "unit":str(latest.get("unit") or ""),
+                    "provider":str(latest.get("provider") or ""),
+                    "source":str(latest.get("source") or ""),
+                    "latest_available_at":latest_available.isoformat() if hasattr(latest_available,"isoformat") else str(latest_available),
+                    "pit_status":str(latest.get("pit_status") or "CURRENT_VINTAGE_NOT_HISTORICAL_PIT"),
+                    "vintage_count":int(group["vintage_id"].nunique()),
+                })
+        reference_history = {
+            "status":"CURRENT_VINTAGE_ONLY" if reference_features else "MISSING",
+            "rows":len(reference),
+            "series_count":int(reference["series_id"].nunique()) if not reference.empty else 0,
+            "oldest_observation_date":str(reference["observation_date"].min())[:10] if not reference.empty else None,
+            "latest_observation_date":str(reference["observation_date"].max())[:10] if not reference.empty else None,
+            "providers":sorted({str(x) for x in reference["provider"].dropna().tolist()}) if not reference.empty else [],
+            "historical_pit_verified":False,
+            "model_input_eligible":False,
+            "features":reference_features,
+        }
+        # Path outcomes are included in the coverage audit only. They remain in
+        # their dedicated outcome table and are never written as predictor rows.
+        path_feature_map = {
+            1: (("fwd_return_h1", "forward_return", "%"),),
+            3: (("fwd_return_h3", "forward_return", "%"),),
+            5: (("fwd_return_h5", "forward_return", "%"),
+                ("mfe_h5", "mfe", "%"), ("mae_h5", "mae", "%"),
+                ("first_touch_h5", "first_touch", "class")),
+        }
+        path_rows = []
+        if not labels.empty:
+            for item in labels.to_dict("records"):
+                for feature_id, field, unit in path_feature_map.get(int(item.get("horizon") or 0), ()):
+                    path_rows.append({
+                        "session_date": item.get("session_date"),
+                        "feature_id": feature_id,
+                        "value": item.get(field),
+                        "unit": unit,
+                        "provider": "QDR_OUTCOME_LABELS",
+                        "source": "L1_FORWARD_PATH_LABELS",
+                        "available_at": item.get("available_at"),
+                        "receipt_sha256": item.get("receipt_sha256"),
+                        "pit_status": "OUTCOME_ONLY_NOT_PREDICTOR",
+                        "quality_status": "OBSERVED",
+                    })
+        combined = obs_rows + sec_rows + path_rows
         latest_health = []
         health_map = {}
         if not health.empty:
@@ -334,6 +416,15 @@ def market_data_snapshot(root, *, asof=None, db_path=None):
         coverage = coverage_matrix(
             combined, source_health=health_map, asof=asof,
             freshness_asof=reference_date)
+        if asof and not labels.empty:
+            # Outcome labels are only knowable after their forward window closes.
+            # A historical snapshot must not expose labels ingested after its as-of day.
+            cutoff = pd.Timestamp(asof)
+            cutoff = (cutoff.tz_localize("UTC") if cutoff.tzinfo is None
+                      else cutoff.tz_convert("UTC"))
+            cutoff = cutoff.normalize() + pd.Timedelta(days=1) - pd.Timedelta(nanoseconds=1)
+            available = pd.to_datetime(labels["available_at"], utc=True, errors="coerce")
+            labels = labels.loc[available.le(cutoff)].copy()
         path_summary = {
             "rows":len(labels),
             "horizons":sorted({int(x) for x in labels.horizon.tolist()}) if not labels.empty else [],
@@ -375,6 +466,7 @@ def market_data_snapshot(root, *, asof=None, db_path=None):
             "coverage":coverage,
             "source_health":latest_health,
             "benchmark_history":benchmark_history,
+            "reference_history":reference_history,
             "path_labels":path_summary,
             "policy":{"historical_pit_verified":False,"forecast_eligible":False,
                       "trade_eligible":False},

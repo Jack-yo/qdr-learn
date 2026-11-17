@@ -184,6 +184,80 @@ def _bar_quality(store, start, end):
     }
 
 
+def _optional_number(value):
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _same_optional_number(left, right):
+    a, b = _optional_number(left), _optional_number(right)
+    if a is None or b is None:
+        return a is None and b is None
+    return math.isclose(a, b, rel_tol=1e-12, abs_tol=1e-12)
+
+
+def _utc_timestamp(value):
+    if hasattr(value, "to_pydatetime"):
+        value = value.to_pydatetime()
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+        return None
+    return value.astimezone(timezone.utc)
+
+
+def _same_bar_payload(existing, incoming):
+    for field in ("security_id", "symbol", "provider", "price_basis", "identity_status"):
+        if str(existing.get(field) or "") != str(incoming.get(field) or ""):
+            return False
+    for field in ("open", "high", "low", "close", "volume", "vwap", "trade_count"):
+        if not _same_optional_number(existing.get(field), incoming.get(field)):
+            return False
+    old_available = _utc_timestamp(existing.get("available_at"))
+    new_available = _utc_timestamp(incoming.get("available_at"))
+    return old_available is not None and old_available == new_available
+
+
+def _filter_unchanged_bars(existing, records):
+    """Skip identical overlap rows while preserving changed provider revisions."""
+    by_key = {}
+    if existing is not None and not existing.empty:
+        for row in existing.to_dict("records"):
+            key = (
+                str(row.get("session_date"))[:10],
+                str(row.get("security_id") or ""),
+                str(row.get("provider") or ""),
+                str(row.get("price_basis") or ""),
+            )
+            by_key[key] = row
+
+    pending, unchanged, revised = [], 0, 0
+    for row in records:
+        key = (
+            str(row.get("session_date") or row.get("date"))[:10],
+            str(row.get("security_id") or ""),
+            str(row.get("provider") or ""),
+            str(row.get("price_basis") or ""),
+        )
+        previous = by_key.get(key)
+        if previous is None:
+            pending.append(row)
+        elif _same_bar_payload(previous, row):
+            unchanged += 1
+        else:
+            # A corrected price/volume payload remains an append-only revision
+            # with its own source receipt; only byte-for-byte equivalent
+            # observations are suppressed.
+            revised += 1
+            pending.append(row)
+    return pending, unchanged, revised
+
+
 def _sync_bars(store, sources, *, years, refresh, history_feed, asof, stamp,
                force_bootstrap=False):
     full_start = date.fromisoformat(asof) - timedelta(days=int(years * 366))
@@ -249,7 +323,9 @@ def _sync_bars(store, sources, *, years, refresh, history_feed, asof, stamp,
                   "historical_pit_verified": False},
     )
     records = _normalize_alpaca_bars(raw, aggregate)
-    written = store.write_bars(records)
+    pending_records, unchanged_rows, revised_rows = _filter_unchanged_bars(
+        existing, records)
+    written = store.write_bars(pending_records)
     quality = _bar_quality(store, full_start.isoformat(), asof)
     store.write_quality_checks([{
         "session_date": asof, "dimension": "price",
@@ -279,7 +355,10 @@ def _sync_bars(store, sources, *, years, refresh, history_feed, asof, stamp,
         "request_start": start.isoformat(), "window_start": full_start.isoformat(),
         "repairing_gap_from": repairing_gap_from,
         "asof_session": asof, "rows_received": len(records),
-        "rows_written": written, "source_pages": len(receipts),
+        "rows_written": written, "rows_unchanged": unchanged_rows,
+        "rows_revised": revised_rows,
+        "rows_new": written - revised_rows,
+        "source_pages": len(receipts),
         "coverage": quality,
         "receipt_sha256": aggregate,
         "historical_pit_verified": False,

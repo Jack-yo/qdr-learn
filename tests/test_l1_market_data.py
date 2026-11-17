@@ -172,6 +172,201 @@ def test_public_scan_persists_features_and_source_health(tmp_path):
     assert health_by_key["alpaca_snapshots"]["metadata"]["snapshot_receipt_count"] == 1
 
 
+def test_market_snapshot_includes_reference_and_outcome_coverage_without_promoting_inputs(tmp_path):
+    pytest.importorskip("duckdb")
+    from datetime import datetime, timezone
+    from quant_research.data.l1_market_store import L1MarketStore
+    from quant_research.workflow.l1_market_ingest import market_data_snapshot
+
+    digest=hashlib.sha256(b"reference history and path label receipts").hexdigest()
+    fetched=datetime(2026,11,17,23,0,tzinfo=timezone.utc)
+    with L1MarketStore(tmp_path) as store:
+        store.write_receipt(
+            provider="fixture",dataset="reference_and_labels",
+            fetched_at=fetched,available_at=fetched,receipt_sha256=digest,
+            payload=b"reference history and path label receipts")
+        store.write_reference_series([{
+            "observation_date":"2026-11-16","series_id":"CBOE:VIX",
+            "feature_id":"vix_close","value":20.5,"unit":"点",
+            "provider":"CBOE","source":"CBOE_VIX_CURRENT_DOWNLOAD",
+            "available_at":fetched,"receipt_sha256":digest,
+            "vintage_id":"CURRENT_DOWNLOAD:test",
+            "pit_status":"CURRENT_VINTAGE_NOT_HISTORICAL_PIT",
+            "quality_status":"OBSERVED","metadata":{"current_vintage":True},
+        }])
+        store.write_path_labels([
+            {
+                "session_date":"2026-11-13","horizon":horizon,
+                "entry_date":"2026-11-16","exit_date":"2026-11-16",
+                "forward_return":0.01,"mfe":0.02,"mae":-0.01,
+                "first_touch":"NO_TOUCH","status":"OUTCOME_ONLY_NOT_PREDICTOR",
+                "receipt_sha256":digest,"available_at":fetched,
+                "up_barrier":0.02,"down_barrier":-0.015,
+            }
+            for horizon in (1,3,5)
+        ])
+
+    snapshot=market_data_snapshot(tmp_path)
+    by_feature={x["id"]:x for x in snapshot["coverage"]["feature_health"]}
+    assert by_feature["vix_close"]["status"]=="MISSING"
+    assert snapshot["reference_history"]["status"]=="CURRENT_VINTAGE_ONLY"
+    assert snapshot["reference_history"]["rows"]==1
+    assert snapshot["reference_history"]["model_input_eligible"] is False
+    assert snapshot["reference_history"]["features"][0]["feature_id"]=="vix_close"
+    assert snapshot["reference_history"]["features"][0]["pit_status"]=="CURRENT_VINTAGE_NOT_HISTORICAL_PIT"
+    assert by_feature["fwd_return_h1"]["status"]=="OBSERVED"
+    assert by_feature["mfe_h5"]["status"]=="OBSERVED"
+    assert by_feature["first_touch_h5"]["status"]=="OBSERVED"
+    path=next(x for x in snapshot["coverage"]["dimensions"] if x["id"]=="path")
+    assert path["role"]=="outcome_validation_not_input"
+    assert path["coverage"]["available"]==6
+    assert path["model_eligible"] is False
+    assert snapshot["policy"]["forecast_eligible"] is False
+    with L1MarketStore(tmp_path) as store:
+        assert store.read_observations().empty
+        assert len(store.read_reference_series())==1
+        assert len(store.read_path_labels())==3
+
+    # Later downloads/outcomes cannot be backdated into a historical as-of view.
+    historical=market_data_snapshot(tmp_path,asof="2026-11-16")
+    hist={x["id"]:x for x in historical["coverage"]["feature_health"]}
+    assert hist["vix_close"]["status"]=="MISSING"
+    assert historical["reference_history"]["rows"]==0
+    assert hist["fwd_return_h1"]["status"]=="MISSING"
+
+
+def test_per_security_feature_coverage_aggregates_symbols_instead_of_one_row():
+    from quant_research.data.l1_market_catalog import coverage_matrix
+
+    rows=[
+        {"feature_id":"security_return_1","session_date":"2026-11-16",
+         "security_id":"ID:AAA","symbol":"AAA","value":1.2,
+         "quality_status":"OBSERVED","pit_status":"PIT_UNVERIFIED",
+         "available_at":"2026-11-16T22:00:00Z"},
+        {"feature_id":"security_return_1","session_date":"2026-11-16",
+         "security_id":"ID:BBB","symbol":"BBB","value":None,
+         "quality_status":"MISSING","pit_status":"PIT_UNVERIFIED",
+         "available_at":"2026-11-16T22:00:00Z"},
+        {"feature_id":"security_return_5","session_date":"2026-11-16",
+         "security_id":"ID:AAA","symbol":"AAA","value":2.0,
+         "quality_status":"OBSERVED","pit_status":"PIT_UNVERIFIED",
+         "available_at":"2026-11-16T22:00:00Z"},
+        {"feature_id":"security_return_5","session_date":"2026-11-15",
+         "security_id":"ID:BBB","symbol":"BBB","value":1.0,
+         "quality_status":"OBSERVED","pit_status":"PIT_UNVERIFIED",
+         "available_at":"2026-11-15T22:00:00Z"},
+        {"feature_id":"atr14_pct","session_date":"2026-11-16",
+         "security_id":"ID:AAA","symbol":"AAA","value":1.0,
+         "quality_status":"OBSERVED","pit_status":"PIT_UNVERIFIED",
+         "available_at":"2026-11-16T22:00:00Z"},
+        {"feature_id":"atr14_pct","session_date":"2026-11-16",
+         "security_id":"ID:BBB","symbol":"BBB","value":1.1,
+         "quality_status":"OBSERVED","pit_status":"PIT_UNVERIFIED",
+         "available_at":"2026-11-16T22:00:00Z"},
+        {"feature_id":"atr14_pct","session_date":"2026-11-16",
+         "value":1.05,"quality_status":"OBSERVED","pit_status":"PIT_UNVERIFIED",
+         "available_at":"2026-11-16T22:00:00Z"},
+    ]
+    result=coverage_matrix(rows,asof="2026-11-16",freshness_asof="2026-11-16")
+    health={x["id"]:x for x in result["feature_health"]}
+    assert health["security_return_1"]["status"]=="PARTIAL"
+    assert health["security_return_1"]["entity_coverage"]["entity_count"]==2
+    assert health["security_return_1"]["entity_coverage"]["observed_entity_count"]==1
+    assert health["security_return_1"]["entity_coverage"]["missing_entity_count"]==1
+    assert health["security_return_5"]["status"]=="PARTIAL"
+    assert health["security_return_5"]["entity_coverage"]["lagging_entity_count"]==1
+    # SPY-level ATR remains the aggregate feature value while per-security
+    # coverage is exposed independently rather than replacing the benchmark row.
+    assert health["atr14_pct"]["status"]=="OBSERVED"
+    assert health["atr14_pct"]["entity_coverage"]["entity_count"]==2
+    assert health["atr14_pct"]["entity_coverage"]["observed_entity_count"]==2
+
+
+def test_historical_path_label_summary_excludes_outcomes_not_yet_available(tmp_path):
+    pytest.importorskip("duckdb")
+    from datetime import datetime, timezone
+    from quant_research.data.l1_market_store import L1MarketStore
+    from quant_research.workflow.l1_market_ingest import market_data_snapshot
+
+    payload=b"future path label"
+    digest=hashlib.sha256(payload).hexdigest()
+    stamp=datetime(2026,11,17,23,0,tzinfo=timezone.utc)
+    with L1MarketStore(tmp_path) as store:
+        store.write_receipt(provider="fixture",dataset="labels",
+            fetched_at=stamp,available_at=stamp,receipt_sha256=digest,payload=payload)
+        store.write_path_labels([{
+            "session_date":"2026-11-13","horizon":5,
+            "entry_date":"2026-11-16","exit_date":"2026-11-20",
+            "forward_return":0.01,"mfe":0.02,"mae":-0.01,
+            "first_touch":"NO_TOUCH","status":"OUTCOME_ONLY_NOT_PREDICTOR",
+            "receipt_sha256":digest,"available_at":stamp,
+            "up_barrier":0.02,"down_barrier":-0.015,
+        }])
+    historical=market_data_snapshot(tmp_path,asof="2026-11-16")
+    assert historical["path_labels"]["rows"]==0
+    latest=market_data_snapshot(tmp_path)
+    assert latest["path_labels"]["rows"]==1
+
+
+def test_historical_snapshot_hides_future_benchmark_sync_audit(tmp_path):
+    pytest.importorskip("duckdb")
+    from quant_research.data.l1_market_store import L1MarketStore
+    from quant_research.workflow.l1_market_ingest import market_data_snapshot
+
+    with L1MarketStore(tmp_path) as store:
+        store.write_quality_checks([{
+            "session_date":"2026-11-16","dimension":"price",
+            "status":"OBSERVED","reason":"CORE_BENCHMARK_HISTORY_SYNC",
+            "coverage_n":500,"expected_n":500,
+            "checked_at":"2026-11-17T01:00:00Z",
+            "metadata":{"window_start":"2021-11-16","window_end":"2026-11-16"},
+        }])
+    historical=market_data_snapshot(tmp_path,asof="2026-11-16")
+    latest=market_data_snapshot(tmp_path)
+    assert historical["benchmark_history"]["status"]=="NOT_SYNCED"
+    assert latest["benchmark_history"]["status"]=="OBSERVED"
+    assert latest["benchmark_history"]["coverage_pct"]==100.0
+
+
+def test_persist_l1_v2_retains_feature_coverage_denominator_and_inputs(tmp_path):
+    pytest.importorskip("duckdb")
+    from quant_research.workflow.l1_market_ingest import market_data_snapshot,persist_l1_v2
+
+    source_payload=b"fixture ETF source receipt"
+    source_digest=hashlib.sha256(source_payload).hexdigest()
+    payload={
+        "schema":"qdr.l1.v2","asof_session":"2026-11-16",
+        "fetched_at":"2026-11-16T22:30:00Z",
+        "source_receipts":[{
+            "source":"ALPACA_sip","fetched_at":"2026-11-16T22:30:00Z",
+            "sha256":source_digest,"feed":"sip",
+        }],
+        "domains":[{
+            "id":"breadth","status":"PARTIAL",
+            "coverage":{"available":2,"registered":2},
+            "features":[{
+                "id":"breadth_proxy_rsp_spy_5","label":"RSP relative to SPY",
+                "value":0.25,"status":"OBSERVED","source":"ALPACA_ETF_PROXY",
+                "coverage_n":2,"expected_n":2,
+                "metadata":{"input_symbols":["RSP","SPY"],
+                            "coverage_scope":"CORE_ETF_INPUTS_NOT_FULL_MARKET"},
+            }],
+        }],
+    }
+    result=persist_l1_v2(tmp_path,payload)
+    assert result["features"]==1
+    snapshot=market_data_snapshot(tmp_path)
+    feature=next(x for x in snapshot["coverage"]["feature_health"]
+                 if x["id"]=="breadth_proxy_rsp_spy_5")
+    assert feature["coverage_n"]==2
+    assert feature["expected_n"]==2
+    assert feature["input_symbols"]==["RSP","SPY"]
+    assert feature["proxy"] is True  # Registry semantics identify this as an ETF breadth proxy.
+    with __import__("quant_research.data.l1_market_store",fromlist=["L1MarketStore"]).L1MarketStore(tmp_path) as store:
+        row=store.read_observations().iloc[0]
+        assert row.coverage_n==2 and row.expected_n==2
+
+
 def test_registry_blocked_pit_universe_is_visible_without_runtime_failure():
     from quant_research.data.l1_market_catalog import coverage_matrix
     result=coverage_matrix([],source_health={})
