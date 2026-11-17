@@ -229,14 +229,33 @@ def current_pipeline_status(root, *, now=None):
     }
 
 
-def _bar_request(feed, *, days, session, adjustment="split", refresh=False):
+def _bar_request(feed, *, days, session, adjustment="split", refresh=False,
+                 preserve_source_evidence=False):
     try:
         return feed.bars(days=days, symbols=CORE_SYMBOLS,
-                         end_date=session, adjustment=adjustment,refresh=refresh)
+                         end_date=session, adjustment=adjustment,refresh=refresh,
+                         preserve_source_evidence=preserve_source_evidence)
     except TypeError as exc:
         # Do not hide incompatible adapter signatures or silently fall back
         # to raw / delayed-sip data.
         raise SourceUnavailable("V3_SOURCE_ADAPTER_INCOMPATIBLE") from exc
+
+
+def _validate_receipt_times(receipts, frozen_at):
+    """Refuse to freeze a forecast using a source receipt from its future."""
+    if not isinstance(receipts,list) or not receipts:
+        raise SourceUnavailable("V3_SOURCE_RECEIPTS_MISSING")
+    for receipt in receipts:
+        if not isinstance(receipt,dict):
+            raise SourceUnavailable("V3_SOURCE_RECEIPT_INVALID")
+        try:
+            fetched=datetime.fromisoformat(str(receipt["fetched_at"]).replace("Z","+00:00"))
+        except (KeyError,TypeError,ValueError,OverflowError) as exc:
+            raise SourceUnavailable("V3_SOURCE_RECEIPT_TIME_INVALID") from exc
+        if fetched.tzinfo is None or fetched.utcoffset() is None:
+            raise SourceUnavailable("V3_SOURCE_RECEIPT_TIME_INVALID")
+        if fetched.astimezone(timezone.utc)>frozen_at.astimezone(timezone.utc):
+            raise SourceUnavailable("V3_SOURCE_RECEIPT_AFTER_FREEZE")
 
 
 def _train(root, feed, asof, *, refresh):
@@ -289,7 +308,8 @@ def _settle_existing(root,feed,asof, *,refresh=False,action_checker=None):
     # Alpaca corporate-actions process_date cannot certify an empty ex-date
     # window, so relying on it would block every honest forward score.
     bars,receipts=_bar_request(feed,days=90,session=asof,
-                               adjustment="split",refresh=refresh)
+                               adjustment="split",refresh=True,
+                               preserve_source_evidence=True)
     return settle_due_research(root,bars,latest_session=asof,limit=30,
                                price_receipts=receipts)
 
@@ -351,8 +371,13 @@ def run_pipeline(root, *, mode="daily", now=None, sources=None,
                     clock=TradingClock()
                     next_session=clock.calendar.next_session(clock.session(asof))
                     frozen_at=datetime.now(timezone.utc) if live_clock else now.astimezone(timezone.utc)
+                    try:
+                        clock.signal(asof,now=frozen_at)
+                    except ValueError as exc:
+                        raise SourceUnavailable("V3_ASOF_SESSION_NOT_CLOSED") from exc
                     if frozen_at>=clock.calendar.session_open(next_session).to_pydatetime():
                         raise SourceUnavailable("V3_NEXT_SESSION_ALREADY_OPEN")
+                    _validate_receipt_times(receipts,frozen_at)
                     research["frozen_at_utc"]=frozen_at.isoformat()
                     # Never overwrite a prior official daily freeze. Even with
                     # force_train, preserve any earlier prediction.

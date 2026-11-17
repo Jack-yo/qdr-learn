@@ -88,7 +88,7 @@ def test_cboe_current_canonical_csv_source(tmp_path):
         calls.append(url)
         return b'DATE,OPEN,HIGH,LOW,CLOSE\n11/13/2026,20,22,19,21\n'
     values,receipt=LiveSources(tmp_path,fetch=fetch,env={}).cboe_vix()
-    assert calls==['https://cdn-api.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv']
+    assert calls==['https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv']
     assert values['2026-11-13']==21 and receipt['pit']=='CURRENT_VINTAGE'
 
 

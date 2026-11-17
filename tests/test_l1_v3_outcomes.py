@@ -1,5 +1,6 @@
 """Forward research settlements are strictly due-date scoped and append-only."""
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from hashlib import sha256
 import json
 
 import numpy as np
@@ -12,14 +13,35 @@ from quant_research.workflow.l1_v3_outcomes import (
 from quant_research.workflow.l1_v3_scorecard import forward_scorecard
 
 
-def _receipt(bars, adjustment="split", fetched_at="2026-11-18T23:00:00Z"):
-    return [{"feed":"sip","adjustment":adjustment,"sha256":"a"*64,
-             "start":str(bars.date.min()),"end":str(bars.date.max()),
+def _receipt(root,bars,adjustment="split",fetched_at=None,end=None):
+    rows=[]
+    for row in bars.loc[bars.symbol.eq("SPY")].to_dict("records"):
+        rows.append({"t":str(row["date"])+"T05:00:00Z",
+            "o":float(row["open"]),"c":float(row["close"]),
+            "h":float(row["high"]),"l":float(row["low"]),
+            "v":int(row["volume"])})
+    body=json.dumps({"bars":{"SPY":rows}},sort_keys=True,
+                    separators=(",",":")).encode()
+    digest=sha256(body).hexdigest()
+    rel=f"l1_v3_source_evidence/sha256/{digest}.json"
+    evidence=root/"outputs"/rel
+    evidence.parent.mkdir(parents=True,exist_ok=True)
+    evidence.write_bytes(body)
+    end=end or str(bars.date.max())
+    if fetched_at is None:
+        clock=TradingClock()
+        close=clock.close(clock.session(end)).astimezone(timezone.utc)
+        fetched_at=(close+clock.delay+timedelta(minutes=1)).isoformat()
+    return [{"feed":"sip","adjustment":adjustment,"sha256":digest,
+             "evidence_path":rel,"start":str(bars.date.min()),"end":end,
              "fetched_at":fetched_at}]
 
 
 def settle_due_research(root,bars,**kwargs):
-    return _settle_due_research(root,bars,price_receipts=_receipt(bars),**kwargs)
+    latest=kwargs["latest_session"]
+    eligible=bars.loc[bars.date<=latest].copy()
+    return _settle_due_research(root,eligible,
+        price_receipts=_receipt(root,eligible,end=latest),**kwargs)
 
 
 def _fixture(clock):
@@ -171,9 +193,11 @@ def test_raw_or_premature_price_receipts_do_not_settle(tmp_path):
     clock=TradingClock()
     window,bars,frozen=_fixture(clock)
     save_research_snapshot(tmp_path,frozen)
+    observed=bars.loc[bars.date<=window[6].date().isoformat()].copy()
     for receipts in [
-        _receipt(bars,adjustment="raw"),
-        _receipt(bars,fetched_at="2026-11-03T12:00:00Z")
+        _receipt(tmp_path,observed,adjustment="raw",end=window[6].date().isoformat()),
+        _receipt(tmp_path,observed,fetched_at="2026-11-03T12:00:00Z",
+                 end=window[6].date().isoformat())
     ]:
         result=_settle_due_research(tmp_path,bars,
             latest_session=window[6].date().isoformat(),
@@ -194,11 +218,27 @@ def test_valid_price_only_settlement_does_not_claim_dividend_or_pnl(tmp_path):
     payload=json.loads(first.read_bytes())
     assert payload["price_basis"]=="SPLIT_ADJUSTED_PRICE_RETURN"
     assert payload["settlement_adjustment"]=="split"
-    assert payload["settlement_receipts_sha256"]==["a"*64]
+    assert len(payload["settlement_receipts_sha256"])==1
+    assert payload["settlement_receipts_sha256"][0]==payload["settlement_evidence_paths"][0].rsplit("/",1)[-1][:-5]
     assert payload["cash_dividends_included"] is False
     assert payload["market_execution_pnl_verified"] is False
     assert "VERIFIED_NO_ACTION" not in json.dumps(payload)
     assert forward_scorecard(tmp_path,minimum_samples=1)["horizons"]["3"]["samples"]==1
+
+
+def test_raw_source_evidence_remains_required_for_display_and_score(tmp_path):
+    clock=TradingClock()
+    window,bars,frozen=_fixture(clock)
+    save_research_snapshot(tmp_path,frozen)
+    settled=settle_due_research(tmp_path,bars,
+        latest_session=window[6].date().isoformat())
+    assert settled["new_outcomes"]==3
+    outcome_path=next((tmp_path/"outputs"/"l1_v3_outcomes").glob("*/*_H1_*.json"))
+    outcome=json.loads(outcome_path.read_bytes())
+    source_path=tmp_path/"outputs"/outcome["settlement_evidence_paths"][0]
+    source_path.write_bytes(source_path.read_bytes()+b" ")
+    assert all(item["horizon"]!=1 for item in recent_v3_outcomes(tmp_path))
+    assert forward_scorecard(tmp_path,minimum_samples=1)["horizons"]["1"]["samples"]==0
 
 
 def test_pre_embargo_frozen_model_not_silently_scored(tmp_path):

@@ -6,6 +6,7 @@ from __future__ import annotations
 from datetime import date,datetime,timedelta,timezone
 from hashlib import sha256
 import json
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -43,21 +44,30 @@ def daily_bars():
 
 
 class StubAlpaca:
-    def __init__(self,raw):
+    def __init__(self,raw,root=None):
         self.raw=raw
+        self.root=root
         self.calls=[]
-    def bars(self,*,days,symbols,end_date,adjustment,refresh=False):
+        self.fetched_at="2026-11-17T23:00:00Z"
+    def bars(self,*,days,symbols,end_date,adjustment,refresh=False,
+             preserve_source_evidence=False):
         end=date.fromisoformat(end_date)
         start=end-timedelta(days=days-1)
         records={sym:[r for r in self.raw[sym]
                       if start.isoformat()<=r["t"][:10]<=end_date]
                  for sym in symbols}
         self.calls.append((days,adjustment,end_date,tuple(symbols)))
-        content=json.dumps(records,sort_keys=True).encode()
-        return records,[{"feed":"sip","adjustment":adjustment,
-            "fetched_at":"2026-11-17T23:00:00Z",
-            "sha256":sha256(content).hexdigest(),
-            "start":start.isoformat(),"end":end_date,"page":1}]
+        content=json.dumps({"bars":records},sort_keys=True,separators=(",",":")).encode()
+        digest=sha256(content).hexdigest()
+        receipt={"feed":"sip","adjustment":adjustment,
+            "fetched_at":self.fetched_at,"sha256":digest,
+            "start":start.isoformat(),"end":end_date,"page":1}
+        if preserve_source_evidence:
+            evidence=self.root/"outputs"/"l1_v3_source_evidence"/"sha256"/(digest+".json")
+            evidence.parent.mkdir(parents=True,exist_ok=True)
+            evidence.write_bytes(content)
+            receipt["evidence_path"]=(Path("l1_v3_source_evidence")/"sha256"/(digest+".json")).as_posix()
+        return records,[receipt]
 
 
 @pytest.fixture(scope="module")
@@ -100,7 +110,8 @@ def test_persisted_coefficients_replay_actual_probabilities(tmp_path,trained):
 
 
 def test_daily_job_trains_once_then_loads_saved_model(tmp_path,daily_bars):
-    feed=StubAlpaca(daily_bars)
+    feed=StubAlpaca(daily_bars,root=tmp_path)
+    feed.fetched_at="2026-11-13T22:00:00Z"
     first=run_pipeline(tmp_path,mode="daily",sources=feed,
                 now=datetime(2026,11,13,22,30,tzinfo=timezone.utc))
     assert first["status"]=="FROZEN_RESEARCH_ONLY"
@@ -113,6 +124,7 @@ def test_daily_job_trains_once_then_loads_saved_model(tmp_path,daily_bars):
     assert second["status"]=="ALREADY_FROZEN"
     assert second["frozen_sha256"]==first["frozen_sha256"]
     assert sum(call[0]==2500 for call in feed.calls)==1
+    feed.fetched_at="2026-11-16T23:00:00Z"
     nxt=run_pipeline(tmp_path,mode="daily",sources=feed,
                 now=datetime(2026,11,16,23,30,tzinfo=timezone.utc),
                 action_checker=lambda start,end:['a'*64])
@@ -134,6 +146,7 @@ def test_daily_job_trains_once_then_loads_saved_model(tmp_path,daily_bars):
 def test_legacy_on_demand_snapshots_do_not_count_as_daily_freezes(tmp_path,daily_bars):
     from quant_research.workflow.l1_v3 import save_research_snapshot
     feed=StubAlpaca(daily_bars)
+    feed.fetched_at="2026-11-13T22:00:00Z"
     run_pipeline(tmp_path,mode="daily",sources=feed,
                  now=datetime(2026,11,13,22,30,tzinfo=timezone.utc))
     frozen,_=frozen_for_session(tmp_path,"2026-11-13")
@@ -173,23 +186,101 @@ def test_data_completeness_blocks_stale_etf(daily_bars):
 def test_split_bar_settlement_requires_real_source_window_and_retrieval_time():
     from quant_research.workflow.l1_v3_outcomes import _receipt_evidence
     due_after=datetime(2026,11,16,21,15,tzinfo=timezone.utc)
-    sample={"feed":"sip","adjustment":"split","sha256":"b"*64,
-            "start":"2026-11-02","end":"2026-11-16",
-            "fetched_at":"2026-11-16T22:00:00Z"}
-    result=_receipt_evidence([sample],entry_day="2026-11-16",
-        exit_day="2026-11-16",asof_feed="sip",due_after=due_after)
-    assert result["price_basis"]=="SPLIT_ADJUSTED_PRICE_RETURN"
-    with pytest.raises(ValueError,match="V3_SETTLEMENT_FEED_CHANGED"):
-        _receipt_evidence([sample],entry_day="2026-11-16",
-            exit_day="2026-11-16",asof_feed="iex",due_after=due_after)
-    with pytest.raises(ValueError,match="V3_PRICE_BASIS_NOT_SPLIT"):
-        _receipt_evidence([{**sample,"adjustment":"raw"}],
-            entry_day="2026-11-16",exit_day="2026-11-16",
-            asof_feed="sip",due_after=due_after)
-    with pytest.raises(ValueError,match="V3_SETTLEMENT_BAR_FETCH_PREMATURE"):
-        _receipt_evidence([{**sample,"fetched_at":"2026-11-16T20:00:00Z"}],
-            entry_day="2026-11-16",exit_day="2026-11-16",
-            asof_feed="sip",due_after=due_after)
+    from tempfile import TemporaryDirectory
+    from pathlib import Path
+    with TemporaryDirectory() as folder:
+        root=Path(folder)
+        raw=json.dumps({"bars":{"SPY":[
+            {"t":"2026-11-16T05:00:00Z","o":100.,"c":100.2}
+        ]}},sort_keys=True,separators=(",",":")).encode()
+        digest=sha256(raw).hexdigest()
+        rel=(Path("l1_v3_source_evidence")/"sha256"/(digest+".json")).as_posix()
+        evidence=root/"outputs"/rel
+        evidence.parent.mkdir(parents=True)
+        evidence.write_bytes(raw)
+        sample={"feed":"sip","adjustment":"split","sha256":digest,
+                "start":"2026-11-02","end":"2026-11-16",
+                "fetched_at":"2026-11-16T22:00:00Z","evidence_path":rel}
+        result=_receipt_evidence([sample],root=root,entry_day="2026-11-16",
+            exit_day="2026-11-16",asof_feed="sip",due_after=due_after,
+            expected_entry_open=100,expected_exit_close=100.2)
+        assert result["price_basis"]=="SPLIT_ADJUSTED_PRICE_RETURN"
+        assert result["receipt_sha256"]==[digest]
+        fake_digest="b"*64
+        fake_rel=(Path("l1_v3_source_evidence")/"sha256"/(fake_digest+".json")).as_posix()
+        fake_path=root/"outputs"/fake_rel
+        fake_path.write_bytes(raw)
+        with pytest.raises(ValueError,match="V3_SETTLEMENT_RAW_EVIDENCE_HASH_MISMATCH"):
+            _receipt_evidence([{**sample,"sha256":fake_digest,
+                                "evidence_path":fake_rel}],root=root,
+                entry_day="2026-11-16",exit_day="2026-11-16",
+                asof_feed="sip",due_after=due_after,
+                expected_entry_open=100,expected_exit_close=100.2)
+        with pytest.raises(ValueError,match="V3_SETTLEMENT_RAW_EVIDENCE_PRICE_MISMATCH"):
+            _receipt_evidence([sample],root=root,entry_day="2026-11-16",
+                exit_day="2026-11-16",asof_feed="sip",due_after=due_after,
+                expected_entry_open=99,expected_exit_close=100.2)
+        with pytest.raises(ValueError,match="V3_SETTLEMENT_FEED_CHANGED"):
+            _receipt_evidence([sample],root=root,entry_day="2026-11-16",
+                exit_day="2026-11-16",asof_feed="iex",due_after=due_after,
+                expected_entry_open=100,expected_exit_close=100.2)
+        with pytest.raises(ValueError,match="V3_PRICE_BASIS_NOT_SPLIT"):
+            _receipt_evidence([{**sample,"adjustment":"raw"}],root=root,
+                entry_day="2026-11-16",exit_day="2026-11-16",
+                asof_feed="sip",due_after=due_after,
+                expected_entry_open=100,expected_exit_close=100.2)
+        with pytest.raises(ValueError,match="V3_SETTLEMENT_BAR_FETCH_PREMATURE"):
+            _receipt_evidence([{**sample,"fetched_at":"2026-11-16T20:00:00Z"}],
+                root=root,entry_day="2026-11-16",exit_day="2026-11-16",
+                asof_feed="sip",due_after=due_after,
+                expected_entry_open=100,expected_exit_close=100.2)
+        altered=evidence.read_bytes()+b" "
+        evidence.write_bytes(altered)
+        with pytest.raises(ValueError,match="V3_SETTLEMENT_RAW_EVIDENCE_HASH_MISMATCH"):
+            _receipt_evidence([sample],root=root,entry_day="2026-11-16",
+                exit_day="2026-11-16",asof_feed="sip",due_after=due_after,
+                expected_entry_open=100,expected_exit_close=100.2)
+    with TemporaryDirectory() as folder:
+        root=Path(folder)
+        with pytest.raises(ValueError,match="V3_SETTLEMENT_RAW_EVIDENCE_MISSING"):
+            _receipt_evidence([sample],root=root,entry_day="2026-11-16",
+                exit_day="2026-11-16",asof_feed="sip",due_after=due_after,
+                expected_entry_open=100,expected_exit_close=100.2)
+    with TemporaryDirectory() as folder:
+        root=Path(folder)
+        raw=json.dumps({"bars":{"SPY":[]}},sort_keys=True,
+                       separators=(",",":")).encode()
+        digest=sha256(raw).hexdigest()
+        rel=(Path("l1_v3_source_evidence")/"sha256"/(digest+".json")).as_posix()
+        evidence=root/"outputs"/rel
+        evidence.parent.mkdir(parents=True)
+        evidence.write_bytes(raw)
+        missing={**sample,"sha256":digest,"evidence_path":rel}
+        with pytest.raises(ValueError,match="V3_SETTLEMENT_RAW_EVIDENCE_PRICE_MISSING_OR_DUPLICATE"):
+            _receipt_evidence([missing],root=root,entry_day="2026-11-16",
+                exit_day="2026-11-16",asof_feed="sip",due_after=due_after,
+                expected_entry_open=100,expected_exit_close=100.2)
+
+
+def test_pipeline_rejects_source_receipt_after_freeze(tmp_path,daily_bars):
+    feed=StubAlpaca(daily_bars)
+    with pytest.raises(SourceUnavailable,match="V3_SOURCE_RECEIPT_AFTER_FREEZE"):
+        run_pipeline(tmp_path,mode="daily",sources=feed,
+            now=datetime(2026,11,13,22,30,tzinfo=timezone.utc))
+    assert frozen_for_session(tmp_path,"2026-11-13") is None
+
+
+def test_source_receipt_time_must_be_timezone_aware():
+    from quant_research.workflow.l1_v3_pipeline import _validate_receipt_times
+    frozen_at=datetime(2026,11,13,22,30,tzinfo=timezone.utc)
+    with pytest.raises(SourceUnavailable,match="V3_SOURCE_RECEIPT_TIME_INVALID"):
+        _validate_receipt_times([{"fetched_at":"2026-11-13T22:00:00"}],frozen_at)
+
+
+def test_valid_earlier_source_receipt_passes_freeze_gate():
+    from quant_research.workflow.l1_v3_pipeline import _validate_receipt_times
+    _validate_receipt_times([{"fetched_at":"2026-11-13T22:30:00Z"}],
+        datetime(2026,11,13,22,30,tzinfo=timezone.utc))
 
 
 def test_model_aging_is_explicit(trained):

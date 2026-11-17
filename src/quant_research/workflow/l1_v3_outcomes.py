@@ -6,6 +6,7 @@ append-only, separate from frozen estimates; no retroactive edits.
 from __future__ import annotations
 from hashlib import sha256
 from datetime import datetime, timezone, date
+import math
 import json
 import re
 from pathlib import Path
@@ -28,7 +29,8 @@ PRICE_BASIS = "SPLIT_ADJUSTED_PRICE_RETURN"
 # This is exactly the same TARGET as the V3 training labels.
 
 
-def _receipt_evidence(receipts, *, entry_day, exit_day, asof_feed, due_after):
+def _receipt_evidence(receipts, *, root, entry_day, exit_day, asof_feed,
+                      due_after, expected_entry_open, expected_exit_close):
     """Verify *source provenance*, not an unverifiable corporate-action absence.
 
     Alpaca historical stock-bars adjustment='split' preserves continuity
@@ -38,7 +40,9 @@ def _receipt_evidence(receipts, *, entry_day, exit_day, asof_feed, due_after):
     """
     if not isinstance(receipts,list) or not receipts:
         raise ValueError("V3_SPLIT_BAR_RECEIPTS_MISSING")
-    hashes=[]; feed=None; fetched=[]
+    hashes=[]; feed=None; fetched=[]; entry_prices=[]; exit_prices=[]; paths=[]
+    verified_receipts=[]
+    evidence_home=(Path(root)/"outputs"/"l1_v3_source_evidence"/"sha256").resolve()
     for item in receipts:
         if not isinstance(item,dict) or item.get("adjustment")!="split":
             raise ValueError("V3_PRICE_BASIS_NOT_SPLIT")
@@ -57,13 +61,79 @@ def _receipt_evidence(receipts, *, entry_day, exit_day, asof_feed, due_after):
             raise ValueError("V3_SETTLEMENT_RECEIPT_TIME_INVALID")
         fetched.append(stamp.astimezone(timezone.utc))
         hashes.append(digest)
+        expected_path=Path("l1_v3_source_evidence")/"sha256"/(digest+".json")
+        if item.get("evidence_path")!=expected_path.as_posix():
+            raise ValueError("V3_SETTLEMENT_RAW_EVIDENCE_MISSING")
+        evidence_path=(Path(root)/"outputs"/expected_path).resolve()
+        try:
+            evidence_path.relative_to(evidence_home)
+        except ValueError as exc:
+            raise ValueError("V3_SETTLEMENT_RAW_EVIDENCE_PATH_INVALID") from exc
+        try:
+            raw=evidence_path.read_bytes()
+        except OSError as exc:
+            raise ValueError("V3_SETTLEMENT_RAW_EVIDENCE_MISSING") from exc
+        if sha256(raw).hexdigest()!=digest:
+            raise ValueError("V3_SETTLEMENT_RAW_EVIDENCE_HASH_MISMATCH")
+        try:
+            source=json.loads(raw)
+        except (ValueError,TypeError) as exc:
+            raise ValueError("V3_SETTLEMENT_RAW_EVIDENCE_INVALID") from exc
+        if not isinstance(source,dict) or not isinstance(source.get("bars"),dict):
+            raise ValueError("V3_SETTLEMENT_RAW_EVIDENCE_INVALID")
+        rows=source["bars"].get("SPY",[])
+        if not isinstance(rows,list):
+            raise ValueError("V3_SETTLEMENT_RAW_EVIDENCE_INVALID")
+        for row in rows:
+            if not isinstance(row,dict) or not isinstance(row.get("t"),str):
+                raise ValueError("V3_SETTLEMENT_RAW_EVIDENCE_INVALID")
+            day=row["t"][:10]
+            try:
+                if day==entry_day: entry_prices.append(float(row["o"]))
+                if day==exit_day: exit_prices.append(float(row["c"]))
+            except (KeyError,TypeError,ValueError,OverflowError) as exc:
+                raise ValueError("V3_SETTLEMENT_RAW_EVIDENCE_INVALID") from exc
+        paths.append(expected_path.as_posix())
+        verified_receipts.append({
+            "feed":feed,"adjustment":"split","sha256":digest,
+            "start":str(item["start"]),"end":str(item["end"]),
+            "fetched_at":stamp.astimezone(timezone.utc).isoformat(),
+            "evidence_path":expected_path.as_posix(),
+            "page":item.get("page")})
     if asof_feed not in ("sip","iex") or asof_feed!=feed:
         raise ValueError("V3_SETTLEMENT_FEED_CHANGED")
     if min(fetched)<due_after.astimezone(timezone.utc):
         raise ValueError("V3_SETTLEMENT_BAR_FETCH_PREMATURE")
+    if len(entry_prices)!=1 or len(exit_prices)!=1:
+        raise ValueError("V3_SETTLEMENT_RAW_EVIDENCE_PRICE_MISSING_OR_DUPLICATE")
+    if (not math.isclose(entry_prices[0],float(expected_entry_open),rel_tol=1e-10,abs_tol=1e-8)
+            or not math.isclose(exit_prices[0],float(expected_exit_close),rel_tol=1e-10,abs_tol=1e-8)):
+        raise ValueError("V3_SETTLEMENT_RAW_EVIDENCE_PRICE_MISMATCH")
     return {"feed":feed,"receipt_sha256":hashes,
             "retrieved_at_utc":max(fetched).isoformat(),
+            "evidence_paths":paths,
+            "receipts":verified_receipts,
             "adjustment":"split","price_basis":PRICE_BASIS}
+
+
+def stored_settlement_evidence_valid(root, row):
+    """Reopen stored raw provider pages before displaying or scoring an outcome."""
+    try:
+        clock=TradingClock()
+        exit_session=clock.session(row["exit_session"])
+        due_after=clock.close(exit_session)+clock.delay
+        evidence=_receipt_evidence(
+            row.get("settlement_receipts"),root=root,
+            entry_day=row["entry_session"],exit_day=row["exit_session"],
+            asof_feed=row.get("settlement_feed"),due_after=due_after,
+            expected_entry_open=row["entry_open_split_adjusted"],
+            expected_exit_close=row["exit_close_split_adjusted"])
+        return (row.get("settlement_receipts_sha256")==evidence["receipt_sha256"] and
+                row.get("settlement_evidence_paths")==evidence["evidence_paths"] and
+                row.get("settlement_fetched_at_utc")==evidence["retrieved_at_utc"] and
+                row.get("settlement_adjustment")=="split")
+    except (ValueError,TypeError,KeyError,OverflowError,OSError):
+        return False
 
 
 def settle_due_research(root, bars, *, latest_session, limit=30,
@@ -126,9 +196,12 @@ def settle_due_research(root, bars, *, latest_session, limit=30,
                 due_after=clock.close(dates[position+h])+clock.delay
                 try:
                     evidence=_receipt_evidence(price_receipts,
+                        root=root,
                         entry_day=entry_day,exit_day=exit_day,
                         asof_feed=payload.get("data_feed"),
-                        due_after=due_after)
+                        due_after=due_after,
+                        expected_entry_open=float(spy.loc[entry_day,"open"]),
+                        expected_exit_close=float(spy.loc[exit_day,"close"]))
                 except (ValueError,TypeError,KeyError,OverflowError):
                     blocked_price_evidence += 1
                     continue
@@ -161,6 +234,8 @@ def settle_due_research(root, bars, *, latest_session, limit=30,
                     "price_basis":PRICE_BASIS,
                     "settlement_status":"VERIFIED_SOURCE_PRICE_ONLY_NOT_TOTAL_RETURN",
                     "settlement_receipts_sha256":evidence["receipt_sha256"],
+                    "settlement_evidence_paths":evidence["evidence_paths"],
+                    "settlement_receipts":evidence["receipts"],
                     "settlement_feed":evidence["feed"],
                     "settlement_adjustment":"split",
                     "settlement_fetched_at_utc":evidence["retrieved_at_utc"],
@@ -213,7 +288,8 @@ def recent_v3_outcomes(root,limit=30):
                 r.get("settlement_status")!="VERIFIED_SOURCE_PRICE_ONLY_NOT_TOTAL_RETURN" or
                 r.get("price_basis")!=PRICE_BASIS or
                 r.get("settlement_adjustment")!="split" or
-                not r.get("settlement_receipts_sha256")):
+                not r.get("settlement_receipts_sha256") or
+                not stored_settlement_evidence_valid(root,r)):
                 continue
             rows.append({k:r[k] for k in
                 ("asof_session","horizon","exit_session","actual_scenario",

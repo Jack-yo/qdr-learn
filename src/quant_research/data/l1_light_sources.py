@@ -106,6 +106,7 @@ class LiveSources:
                  'XLB','XLC','XLE','XLF','XLI','XLK','XLP','XLRE','XLU','XLV','XLY')
     CBOE_VIX='https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv'
     def __init__(self, root, *, cache=None, fetch=None, env=None, now=None):
+        self.root=Path(root)
         self.cache=cache or BoundedCache(root, now=now)
         self.fetch=fetch or _network
         self.env=os.environ if env is None else env
@@ -152,7 +153,7 @@ class LiveSources:
 
     def bars(self, *, days=530, refresh=False, symbols=None,
              start_date=None, end_date=None, adjustment='raw',
-             history_feed=None):
+             history_feed=None, preserve_source_evidence=False):
         """Historical 1Day stock bars: SIP/IEX only; never delayed_sip.
 
         end_date selects the completed exchange session. Query end is its
@@ -217,6 +218,28 @@ class LiveSources:
             body,stamp,digest=self.request('https://data.alpaca.markets/v2/stocks/bars',
                                           query,headers,ttl=900,
                                           refresh=refresh,feed=feed)
+            evidence_path=None
+            if preserve_source_evidence:
+                if sha256(body).hexdigest()!=digest:
+                    raise SourceUnavailable('SOURCE_EVIDENCE_HASH_MISMATCH')
+                evidence_root=(self.root/'outputs'/
+                               'l1_v3_source_evidence'/'sha256')
+                evidence_root.mkdir(parents=True,exist_ok=True)
+                evidence_file=evidence_root/(digest+'.json')
+                if evidence_file.exists():
+                    if sha256(evidence_file.read_bytes()).hexdigest()!=digest:
+                        raise SourceUnavailable('SOURCE_EVIDENCE_CONTENT_ADDRESS_COLLISION')
+                else:
+                    temporary=evidence_root/(digest+'.'+uuid4().hex+'.tmp')
+                    try:
+                        with temporary.open('xb') as stream:
+                            stream.write(body)
+                        temporary.replace(evidence_file)
+                    finally:
+                        temporary.unlink(missing_ok=True)
+                    if sha256(evidence_file.read_bytes()).hexdigest()!=digest:
+                        raise SourceUnavailable('SOURCE_EVIDENCE_PERSIST_FAILED')
+                evidence_path=evidence_file.relative_to(evidence_root.parents[1]).as_posix()
             try:
                 doc=json.loads(body)
             except (ValueError,TypeError) as exc:
@@ -236,9 +259,12 @@ class LiveSources:
                     count+=1
                     if count>150_000:
                         raise SourceUnavailable('HISTORY_ROW_CAP')
-            receipts.append({'fetched_at':stamp,'sha256':digest,'feed':feed,
-                             'adjustment':adjustment,'start':start.isoformat(),
-                             'end':end.isoformat(),'page':page+1})
+            receipt={'fetched_at':stamp,'sha256':digest,'feed':feed,
+                     'adjustment':adjustment,'start':start.isoformat(),
+                     'end':end.isoformat(),'page':page+1}
+            if evidence_path:
+                receipt['evidence_path']=evidence_path
+            receipts.append(receipt)
             token=doc.get('next_page_token')
             if not token:
                 break
@@ -268,9 +294,13 @@ class LiveSources:
             {'APCA-API-KEY-ID':key,'APCA-API-SECRET-KEY':secret},ttl=60,refresh=refresh,feed=feed)
         try:
             doc=json.loads(body)
-            if not isinstance(doc.get('snapshots'),dict):raise ValueError('Invalid snapshots')
+            if not isinstance(doc,dict):raise ValueError('Invalid snapshots')
+            snapshots=doc.get('snapshots',doc)
+            if (not isinstance(snapshots,dict) or not set(snapshots)<=set(symbols)
+                    or any(not isinstance(value,dict) for value in snapshots.values())):
+                raise ValueError('Invalid snapshots')
         except (ValueError,TypeError) as exc:raise SourceUnavailable('INVALID_ALPACA_SNAPSHOTS') from exc
-        return doc['snapshots'],{'fetched_at':stamp,'sha256':digest,'source':'ALPACA_'+feed,
+        return snapshots,{'fetched_at':stamp,'sha256':digest,'source':'ALPACA_'+feed,
                                  'scope':'LAST_TRADE_LEVEL1_QUOTE_NOT_FULL_DEPTH'}
 
     def cboe_vix(self, *, refresh=False):

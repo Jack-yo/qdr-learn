@@ -43,6 +43,19 @@ def test_history_feed_separate_from_snapshot_and_split_adjustment(tmp_path):
                for url in queries)
 
 
+def test_settlement_request_persists_content_addressed_raw_response(tmp_path):
+    response=json.dumps({"bars":{"SPY":[_bar("2026-11-12"),
+        _bar("2026-11-13")]},"next_page_token":None}).encode()
+    src=LiveSources(tmp_path,fetch=lambda url,headers:response,env=_env(),
+        now=lambda:datetime(2026,11,15,tzinfo=timezone.utc))
+    _,receipts=src.bars(days=30,symbols=("SPY",),end_date="2026-11-13",
+        adjustment="split",preserve_source_evidence=True)
+    receipt=receipts[0]
+    assert receipt["sha256"]==__import__("hashlib").sha256(response).hexdigest()
+    path=tmp_path/"outputs"/receipt["evidence_path"]
+    assert path.read_bytes()==response
+
+
 def test_historical_history_feed_can_be_explicit_iex(tmp_path):
     calls=[]
     def fake(url,headers):
