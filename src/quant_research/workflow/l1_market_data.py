@@ -219,10 +219,13 @@ def _import_universe(store, args):
             raise ValueError("PIT_ATTESTATION_KNOWN_AT_SEMANTICS_INVALID")
         if manifest["review_status"]!="OPERATOR_REVIEWED":
             raise ValueError("PIT_ATTESTATION_REVIEW_REQUIRED")
-        if not all(str(manifest[x]).strip() for x in
-                   ("attestation_id","provider","security_identity_scheme",
-                    "license_scope","reviewed_by")):
+        text_fields=("attestation_id","provider","security_identity_scheme",
+                     "license_scope","reviewed_by")
+        if any(not isinstance(manifest.get(x),str) or not manifest[x].strip()
+               for x in text_fields):
             raise ValueError("PIT_ATTESTATION_IDENTITY_REQUIRED")
+        if manifest["provider"]!=args.provider:
+            raise ValueError("PIT_ATTESTATION_PROVIDER_MISMATCH")
         coverage_start=_date(manifest["coverage_start"])
         coverage_end=_date(manifest["coverage_end"])
         if coverage_start>min(frame.session_date) or coverage_end<max(frame.session_date):
