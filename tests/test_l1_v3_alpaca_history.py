@@ -165,3 +165,23 @@ def test_default_snapshot_covers_full_core_etf_basket(tmp_path):
     assert seen[0]["feed"]==["delayed_sip"]
     assert set(seen[0]["symbols"][0].split(","))==set(LiveSources.ETF_SYMBOLS)
     assert receipt["source"]=="ALPACA_delayed_sip"
+
+
+@pytest.mark.parametrize(
+    ("operation","expected"),
+    [
+        ("bars","ALPACA_HISTORY_FEED_FORBIDDEN_SIP"),
+        ("snapshots","ALPACA_SNAPSHOT_FEED_FORBIDDEN_DELAYED_SIP"),
+    ],
+)
+def test_alpaca_forbidden_feed_returns_actionable_error(tmp_path,operation,expected):
+    def forbidden(url,headers):
+        from quant_research.data.l1_light_sources import SourceUnavailable
+        raise SourceUnavailable("HTTP_403")
+
+    source=LiveSources(tmp_path,fetch=forbidden,env=_env())
+    with pytest.raises(SourceUnavailable,match=expected):
+        if operation=="bars":
+            source.bars(days=30,symbols=("SPY",),end_date="2026-11-13")
+        else:
+            source.snapshots(symbols=("SPY",))
