@@ -217,7 +217,7 @@ def test_extended_scan_and_short_lived_cache(tmp_path):
     assert values["cftc_gold_net_pct_oi"]["value"]==10.0
     assert values["stock_sample_advance_share"]["value"]==100.0
     assert values["cboe_trf_notional_share"]["value"]==40.0
-    assert len(a["calendar_events"])==3
+    assert len(a["calendar_events"])==6
     assert values["days_to_fomc"]["value"]==25
     assert values["ici_weekly_etf_net_issuance_bn_usd"]["value"]==49.83
     assert values["ici_weekly_etf_net_issuance_bn_usd"]["published_date"]=="2026-11-10"
