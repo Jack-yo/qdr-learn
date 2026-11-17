@@ -454,12 +454,16 @@ class ExtendedPublicSources:
         raise SourceUnavailable("FINRA_SHORT_VOLUME_UNAVAILABLE_"+failures[-1]
                                 if failures else "FINRA_NO_REPORT")
 
-    def market_breadth(self,limit,*,refresh=False):
+    def market_breadth(self,limit,*,refresh=False,now=None):
         """Broad current active/tradable non-OTC US-equity breadth from Alpaca snapshots.
 
         This is a current vendor universe, not historical PIT membership. Snapshot
         coverage and batch failures are returned with every metric.
         """
+        stamp=now or datetime.now(timezone.utc)
+        if stamp.tzinfo is None:
+            raise ValueError("market breadth clock must be timezone-aware")
+        stamp=stamp.astimezone(timezone.utc)
         assets,asset_receipt=self.live.assets(refresh=refresh)
         symbols=[x["symbol"] for x in assets]
         snapshots,snapshot_receipts,batch_errors=self.live.snapshots_for_symbols(
@@ -504,8 +508,8 @@ class ExtendedPublicSources:
         fetched=max([asset_receipt["fetched_at"]]+[x["fetched_at"] for x in snapshot_receipts])
         from quant_research.clock import TradingClock
         clock=TradingClock()
-        latest_session=clock.calendar.date_to_session(datetime.fromisoformat(limit).date(),direction="none")
-        completed=clock.close(latest_session)+clock.delay<=datetime.now(timezone.utc)
+        latest_session=clock.session(limit)
+        completed=clock.close(latest_session)+clock.delay<=stamp
         mode=("COMPLETED_DAILY_BAR" if latest_day==limit and completed else
               "INTRADAY_SNAPSHOT" if latest_day>limit else
               "LATEST_AVAILABLE_DAILY_BAR" if latest_day==limit else "STALE_SNAPSHOT")
@@ -561,7 +565,7 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
         "cftc_wti":lambda:provider.cftc_commodity("wti",refresh=refresh),
         "cboe_equity_volume":lambda:provider.cboe_equity_volume(limit,refresh=refresh),
         "stock_sample":lambda:provider.stock_breadth(limit,refresh=refresh),
-        "market_breadth":lambda:provider.market_breadth(limit,refresh=refresh),
+        "market_breadth":lambda:provider.market_breadth(limit,refresh=refresh,now=stamp),
         "ici_etf":lambda:provider.ici_weekly_etf(refresh=refresh),
         "finra_short_volume":lambda:provider.finra_short_volume(limit,refresh=refresh),
     }
@@ -612,7 +616,11 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
                     raise SourceUnavailable("STALE_OBSERVATION")
                 health[name]={"status":"OBSERVED","source":receipt["source"],
                               "effective_date":day,"fetched_at":receipt["fetched_at"],
-                              "receipt_sha256":receipt["sha256"],"pit":receipt["pit"]}
+                              "receipt_sha256":receipt["sha256"],"pit":receipt["pit"],
+                              "coverage_n":receipt.get("coverage_n"),
+                              "expected_n":receipt.get("expected_n"),
+                              "observation_mode":receipt.get("observation_mode"),
+                              "batch_error_count":receipt.get("batch_error_count")}
                 def add(domain,fid,label,val,unit,scope="CURRENT_OBSERVATION_NOT_PIT",
                         *,status="OBSERVED",observed_day=None,coverage_n=None,
                         expected_n=None,metadata=None):
@@ -679,11 +687,13 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
                 elif name=="market_breadth":
                     coverage_n=value["coverage_n"];expected_n=value["expected_n"]
                     status="OBSERVED" if coverage_n/expected_n>=0.98 and not value["batch_error_count"] else "PARTIAL"
+                    health[name]["status"]=status
                     scope="CURRENT_ACTIVE_TRADABLE_ALPACA_UNIVERSE_NOT_HISTORICAL_PIT"
                     meta={"observation_mode":value["observation_mode"],
                           "coverage_pct":round(value["market_snapshot_coverage_pct"],3),
                           "batch_count":value["batch_count"],
-                          "batch_error_count":value["batch_error_count"]}
+                          "batch_error_count":value["batch_error_count"],
+                          "input_receipts":[value["asset_receipt_sha256"]]+value["snapshot_receipt_sha256"]}
                     observed_day=value["observed_date"]
                     for domain,field,title,unit in (
                         ("breadth","advances","全市场活跃可交易证券上涨家数","只"),

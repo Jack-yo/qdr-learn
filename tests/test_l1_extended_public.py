@@ -230,3 +230,56 @@ def test_unknown_destination_is_refused(tmp_path):
     src,_=fake_source(tmp_path)
     with pytest.raises(SourceUnavailable,match="UNAPPROVED_SOURCE"):
         src.request("https://example.org/bad.json")
+
+
+def test_broad_market_breadth_uses_full_active_asset_snapshot_coverage():
+    from quant_research.data.l1_public_extended import ExtendedPublicSources
+
+    class FakeLive:
+        def assets(self, refresh=False):
+            assets=[{"symbol":f"STK{i:03d}"} for i in range(40)]
+            return assets,{"sha256":"a"*64,"fetched_at":"2026-11-17T22:30:00+00:00"}
+
+        def snapshots_for_symbols(self, symbols, refresh=False, batch_size=200, max_workers=4):
+            snapshots={}
+            for i,symbol in enumerate(symbols):
+                daily={"t":"2026-11-17T04:00:00Z","c":101 if i<20 else 99,"v":1000}
+                previous={"t":"2026-11-16T04:00:00Z","c":100}
+                snapshots[symbol]={"dailyBar":daily,"prevDailyBar":previous}
+            receipts=[{"sha256":"b"*64,"fetched_at":"2026-11-17T22:30:00+00:00"}]
+            return snapshots,receipts,[]
+
+    provider=ExtendedPublicSources(FakeLive())
+    values,receipt=provider.market_breadth("2026-11-17",
+        now=__import__("datetime").datetime.fromisoformat("2026-11-17T22:30:00+00:00"))
+    row=values["2026-11-17"]
+    assert row["coverage_n"]==40 and row["expected_n"]==40
+    assert row["advances"]==20 and row["declines"]==20
+    assert row["advance_share"]==50
+    assert row["observation_mode"]=="COMPLETED_DAILY_BAR"
+    assert receipt["pit"]=="CURRENT_ACTIVE_ASSET_UNIVERSE_NOT_HISTORICAL_PIT"
+    assert len(receipt["sha256"])==64
+
+
+def test_broad_market_breadth_does_not_call_a_partial_snapshot_full_coverage():
+    from quant_research.data.l1_public_extended import ExtendedPublicSources
+
+    class FakeLive:
+        def assets(self, refresh=False):
+            assets=[{"symbol":f"STK{i:03d}"} for i in range(100)]
+            return assets,{"sha256":"c"*64,"fetched_at":"2026-11-17T22:30:00+00:00"}
+
+        def snapshots_for_symbols(self, symbols, refresh=False, batch_size=200, max_workers=4):
+            snapshots={}
+            for i,symbol in enumerate(symbols[:60]):
+                snapshots[symbol]={"dailyBar":{"t":"2026-11-17T04:00:00Z","c":101,"v":100},
+                                   "prevDailyBar":{"t":"2026-11-16T04:00:00Z","c":100}}
+            return snapshots,[{"sha256":"d"*64,"fetched_at":"2026-11-17T22:30:00+00:00"}],[{"code":"HTTP_403"}]
+
+    provider=ExtendedPublicSources(FakeLive())
+    values,receipt=provider.market_breadth("2026-11-17",
+        now=__import__("datetime").datetime.fromisoformat("2026-11-17T22:30:00+00:00"))
+    row=values["2026-11-17"]
+    assert row["coverage_n"]==60 and row["expected_n"]==100
+    assert row["market_snapshot_coverage_pct"]==60
+    assert row["batch_error_count"]==1
