@@ -335,15 +335,26 @@ class L1MarketStore:
         return len(rows)
 
     def read_security_features(self, *, asof=None, symbols=None):
-        query, params = "SELECT * FROM l1_market_security_features WHERE 1=1", []
+        params = []
+        predicates = []
         if asof:
-            query += " AND session_date<=?"
+            predicates.append("session_date<=?")
             params.append(_date(asof))
         if symbols:
             clean = sorted({str(x).upper() for x in symbols})
-            query += " AND symbol IN (" + ",".join("?" for _ in clean) + ")"
+            predicates.append("symbol IN (" + ",".join("?" for _ in clean) + ")")
             params.extend(clean)
-        return self.conn.execute(query + " ORDER BY session_date, symbol, feature_id", params).fetchdf()
+        where = (" WHERE " + " AND ".join(predicates)) if predicates else ""
+        columns = ("session_date, security_id, symbol, feature_id, value, unit, provider, "
+                   "source, available_at, receipt_sha256, pit_status, quality_status, "
+                   "price_basis, vintage_id, ingested_at")
+        sql = ("SELECT " + columns + " FROM (SELECT *, ROW_NUMBER() OVER ("
+               "PARTITION BY session_date, security_id, feature_id, provider, price_basis, vintage_id "
+               "ORDER BY ingested_at DESC, available_at DESC, receipt_sha256 DESC) AS _version_rank "
+               "FROM l1_market_security_features" + where +
+               ") AS versioned WHERE _version_rank=1 "
+               "ORDER BY session_date, symbol, feature_id")
+        return self.conn.execute(sql, params).fetchdf()
 
 
     def write_source_health(self, records):
@@ -434,18 +445,28 @@ class L1MarketStore:
         return len(rows)
 
     def read_bars(self, *, start=None, end=None, symbols=None):
-        query, params = "SELECT * FROM l1_market_bars WHERE 1=1", []
+        params = []
+        predicates = []
         if start:
-            query += " AND session_date>=?"
+            predicates.append("session_date>=?")
             params.append(_date(start))
         if end:
-            query += " AND session_date<=?"
+            predicates.append("session_date<=?")
             params.append(_date(end))
         if symbols:
             clean = sorted({str(x).upper() for x in symbols})
-            query += " AND symbol IN (" + ",".join("?" for _ in clean) + ")"
+            predicates.append("symbol IN (" + ",".join("?" for _ in clean) + ")")
             params.extend(clean)
-        return self.conn.execute(query + " ORDER BY session_date, symbol", params).fetchdf()
+        where = (" WHERE " + " AND ".join(predicates)) if predicates else ""
+        columns = ("session_date, security_id, symbol, open, high, low, close, volume, "
+                   "vwap, trade_count, provider, price_basis, identity_status, "
+                   "available_at, receipt_sha256, ingested_at")
+        sql = ("SELECT " + columns + " FROM (SELECT *, ROW_NUMBER() OVER ("
+               "PARTITION BY session_date, security_id, provider, price_basis "
+               "ORDER BY ingested_at DESC, available_at DESC, receipt_sha256 DESC) AS _version_rank "
+               "FROM l1_market_bars" + where +
+               ") AS versioned WHERE _version_rank=1 ORDER BY session_date, symbol")
+        return self.conn.execute(sql, params).fetchdf()
 
     def read_universe(self, *, universe_id=None, start=None, end=None):
         query, params = "SELECT * FROM l1_market_universe WHERE 1=1", []
@@ -458,7 +479,22 @@ class L1MarketStore:
         if end:
             query += " AND session_date<=?"
             params.append(_date(end))
-        return self.conn.execute(query + " ORDER BY session_date, symbol", params).fetchdf()
+        columns = ("session_date, universe_id, security_id, symbol, is_member, provider, "
+                   "membership_basis, snapshot_complete, pit_status, known_at, "
+                   "receipt_sha256, ingested_at")
+        sql = ("SELECT " + columns + " FROM (SELECT *, ROW_NUMBER() OVER ("
+               "PARTITION BY session_date, universe_id, security_id, provider "
+               "ORDER BY ingested_at DESC, known_at DESC, receipt_sha256 DESC) AS _version_rank "
+               "FROM l1_market_universe WHERE 1=1")
+        # Reuse the same parameterized predicates against the inner relation.
+        if universe_id:
+            sql += " AND universe_id=?"
+        if start:
+            sql += " AND session_date>=?"
+        if end:
+            sql += " AND session_date<=?"
+        sql += ") AS versioned WHERE _version_rank=1 ORDER BY session_date, symbol"
+        return self.conn.execute(sql, params).fetchdf()
 
     def read_observations(self, *, asof=None, dimension=None):
         query, params = "SELECT * FROM l1_market_observations WHERE 1=1", []
