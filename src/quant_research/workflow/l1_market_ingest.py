@@ -45,6 +45,7 @@ _SOURCE_ALIASES = {
     "cftc_wti": "cftc",
     "cboe_options": "cboe_daily_options",
     "cboe_equity_volume": "cboe_market_volume",
+    "fomc_calendar": "fed_calendar",
     "market_breadth": "market_breadth",
     "stock_sample": "alpaca_bars",
 }
