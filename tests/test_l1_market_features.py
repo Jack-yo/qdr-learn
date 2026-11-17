@@ -80,3 +80,33 @@ def test_path_labels_are_separate_and_same_bar_double_touch_is_ambiguous():
     assert not labels.empty
     assert set(labels.status) == {"OUTCOME_ONLY_NOT_PREDICTOR"}
     assert "first_touch" in labels
+
+
+def test_breadth_rejects_mixed_universe_ids_in_a_single_session():
+    bars,cutoffs,universe=sample_market()
+    latest=universe.session_date.max()
+    extra=universe.loc[universe.session_date.eq(latest)].copy()
+    extra["universe_id"]="SECOND_UNIVERSE"
+    mixed=pd.concat([universe,extra],ignore_index=True)
+    result=compute_l1_market_features(bars,cutoffs,universe=mixed)
+    quality=result["breadth_quality"]
+    row=quality.loc[quality.session_date.eq(latest.date().isoformat())].iloc[0]
+    assert row.reason=="MULTIPLE_UNIVERSE_IDS"
+    assert result["observations"].loc[
+        result["observations"].session_date.eq(latest.date().isoformat()) &
+        result["observations"].dimension.eq("breadth")
+    ].empty
+
+
+def test_breadth_moving_average_shares_exclude_missing_ma_from_denominator():
+    bars,cutoffs,universe=sample_market(n_sessions=280,n_stocks=100)
+    target=universe.session_date.max()
+    missing_id=universe.loc[universe.session_date.eq(target),"security_id"].iloc[0]
+    bars=bars.loc[~((bars.security_id==missing_id) &
+                    (bars.session_date>=target-pd.Timedelta(days=10)))]
+    result=compute_l1_market_features(bars,cutoffs,universe=universe)
+    row=result["observations"].loc[
+        result["observations"].session_date.eq(target.date().isoformat()) &
+        result["observations"].feature_id.eq("pct_above_ma20")
+    ]
+    assert row.empty or pd.isna(row.iloc[0].value)

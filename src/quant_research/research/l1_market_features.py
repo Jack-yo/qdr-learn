@@ -233,6 +233,7 @@ def _breadth_features(bars, cutoffs, universe, min_coverage):
         }, index=sessions)
     output, quality = [], []
     ad_line, ad_line_started, ad_line_valid = 0, False, True
+    ad_line_universe_id, ad_line_membership_basis = None, None
     for cutoff in cutoffs.itertuples(index=False):
         day = cutoff.session_date
         rows = u.loc[u.session_date.eq(day)]
@@ -243,6 +244,13 @@ def _breadth_features(bars, cutoffs, universe, min_coverage):
                             "status": "MISSING", "reason": "MISSING_UNIVERSE_DAY",
                             "coverage_n": 0, "expected_n": None})
             continue
+        if rows.universe_id.nunique()!=1:
+            if ad_line_started:
+                ad_line_valid = False
+            quality.append({"session_date": day.date().isoformat(), "dimension": "breadth",
+                            "status": "PARTIAL", "reason": "MULTIPLE_UNIVERSE_IDS",
+                            "coverage_n": 0, "expected_n": int(rows.is_member.sum())})
+            continue
         if not rows.snapshot_complete.all():
             if ad_line_started:
                 ad_line_valid = False
@@ -250,6 +258,15 @@ def _breadth_features(bars, cutoffs, universe, min_coverage):
                             "status": "PARTIAL", "reason": "UNIVERSE_SNAPSHOT_NOT_ATTESTED_COMPLETE",
                             "coverage_n": 0, "expected_n": int(rows.is_member.sum())})
             continue
+        current_universe_id=str(rows.universe_id.iloc[0])
+        current_membership_basis=(str(rows.membership_basis.iloc[0])
+                                  if "membership_basis" in rows else None)
+        if ad_line_universe_id is None:
+            ad_line_universe_id=current_universe_id
+            ad_line_membership_basis=current_membership_basis
+        elif (current_universe_id!=ad_line_universe_id or
+              current_membership_basis!=ad_line_membership_basis):
+            ad_line_valid=False
         members = rows.loc[rows.is_member]
         expected = len(members)
         if expected < 30:
@@ -300,16 +317,21 @@ def _breadth_features(bars, cutoffs, universe, min_coverage):
             ("up_volume_share", up_volume / total_volume * 100 if total_volume else np.nan, "%"),
             ("downside_sync_share", float((data.ret < 0).mean() * 100), "%"),
             ("stock_dispersion_1", float(data.ret.std(ddof=0) * 100), "%"),
-            ("pct_above_ma20", float((data.close > data.ma20).mean() * 100)
-             if data.ma20.notna().mean() >= min_coverage else np.nan, "%"),
-            ("pct_above_ma50", float((data.close > data.ma50).mean() * 100)
-             if data.ma50.notna().mean() >= min_coverage else np.nan, "%"),
-            ("pct_above_ma200", float((data.close > data.ma200).mean() * 100)
-             if data.ma200.notna().mean() >= min_coverage else np.nan, "%"),
-            ("new_high_52w", int((data.close > data.prev_high252).sum())
-             if data.prev_high252.notna().mean() >= min_coverage else np.nan, "只"),
-            ("new_low_52w", int((data.close < data.prev_low252).sum())
-             if data.prev_low252.notna().mean() >= min_coverage else np.nan, "只"),
+            ("pct_above_ma20", float((data.loc[data.ma20.notna(),"close"] >
+                                      data.loc[data.ma20.notna(),"ma20"]).mean() * 100)
+             if data.ma20.notna().sum()/expected >= min_coverage else np.nan, "%"),
+            ("pct_above_ma50", float((data.loc[data.ma50.notna(),"close"] >
+                                      data.loc[data.ma50.notna(),"ma50"]).mean() * 100)
+             if data.ma50.notna().sum()/expected >= min_coverage else np.nan, "%"),
+            ("pct_above_ma200", float((data.loc[data.ma200.notna(),"close"] >
+                                       data.loc[data.ma200.notna(),"ma200"]).mean() * 100)
+             if data.ma200.notna().sum()/expected >= min_coverage else np.nan, "%"),
+            ("new_high_52w", int((data.loc[data.prev_high252.notna(),"close"] >
+                                  data.loc[data.prev_high252.notna(),"prev_high252"]).sum())
+             if data.prev_high252.notna().sum()/expected >= min_coverage else np.nan, "只"),
+            ("new_low_52w", int((data.loc[data.prev_low252.notna(),"close"] <
+                                 data.loc[data.prev_low252.notna(),"prev_low252"]).sum())
+             if data.prev_low252.notna().sum()/expected >= min_coverage else np.nan, "只"),
             ("trin", trin, "倍"),
         ]
         for feature_id, value, unit in metrics:
