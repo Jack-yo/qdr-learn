@@ -329,3 +329,50 @@ def test_alpaca_asset_directory_and_batched_snapshots_are_bounded(tmp_path):
     assert len(snapshots)==205
     assert len(receipts)==3 and errors==[]
     assert len(calls)==4
+
+def test_broad_market_breadth_preserves_asset_receipt_when_all_snapshot_batches_fail():
+    from quant_research.data.l1_public_extended import ExtendedPublicSources
+
+    class FakeLive:
+        def assets(self, refresh=False):
+            assets=[{"symbol":f"STK{i:03d}"} for i in range(120)]
+            return assets,{"sha256":"e"*64,"fetched_at":"2026-11-17T22:30:00+00:00"}
+
+        def snapshots_for_symbols(self, symbols, refresh=False, batch_size=200, max_workers=4):
+            raise SourceUnavailable("ALL_ALPACA_SNAPSHOT_BATCHES_FAILED")
+
+    provider=ExtendedPublicSources(FakeLive())
+    values,receipt=provider.market_breadth("2026-11-17",
+        now=__import__("datetime").datetime.fromisoformat("2026-11-17T22:30:00+00:00"))
+    row=values["2026-11-17"]
+    assert row["coverage_n"]==0 and row["expected_n"]==120
+    assert row["observation_mode"]=="NO_SNAPSHOT_DATA"
+    assert row["snapshot_error_code"]=="ALL_ALPACA_SNAPSHOT_BATCHES_FAILED"
+    assert receipt["input_receipts"]==["e"*64]
+    assert receipt["coverage"]==0
+
+
+def test_broad_market_breadth_retains_low_nonzero_coverage_as_partial_evidence():
+    from quant_research.data.l1_public_extended import ExtendedPublicSources
+
+    class FakeLive:
+        def assets(self, refresh=False):
+            assets=[{"symbol":f"STK{i:03d}"} for i in range(100)]
+            return assets,{"sha256":"f"*64,"fetched_at":"2026-11-17T22:30:00+00:00"}
+
+        def snapshots_for_symbols(self, symbols, refresh=False, batch_size=200, max_workers=4):
+            snapshots={}
+            for symbol in symbols[:20]:
+                snapshots[symbol]={
+                    "dailyBar":{"t":"2026-11-17T04:00:00Z","c":101,"v":100},
+                    "prevDailyBar":{"t":"2026-11-16T04:00:00Z","c":100},
+                }
+            return snapshots,[{"sha256":"1"*64,"fetched_at":"2026-11-17T22:30:00+00:00"}],[]
+
+    provider=ExtendedPublicSources(FakeLive())
+    values,_=provider.market_breadth("2026-11-17",
+        now=__import__("datetime").datetime.fromisoformat("2026-11-17T22:30:00+00:00"))
+    row=values["2026-11-17"]
+    assert row["coverage_n"]==20 and row["expected_n"]==100
+    assert row["market_snapshot_coverage_pct"]==20
+    assert row["advances"]==20
