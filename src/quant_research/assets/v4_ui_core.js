@@ -118,7 +118,7 @@ async function updateStatus(){
  $('#v4-model-status').textContent=latest?.session_date_et===clock?.asof_session?latest.status:'当前批次未完成';
 }
 function loadingSkeleton(key){
- const names={overview:'总览',market:'市场未来展望',style:'经典因子',lab:'因子实验室',screen:'选股研究',risk:'持仓与风控',data:'数据中心'};
+ const names={overview:'总览',market:'市场未来展望',style:'经典因子',lab:'因子实验室',screen:'选股研究',risk:'持仓与风控',data:'数据中心',warehouse:'数据仓库'};
  return '<div class="v4-page-skeleton" role="status" aria-live="polite"><h1>'+e(names[key]||'研究工作区')+'</h1><p>页面已就绪，各模块正在独立读取真实数据…</p><div class="v4-skeleton-grid">'+
    Array.from({length:4},()=>'<div class="v4-skeleton-block v4-skeleton-kpi"><i></i><b></b></div>').join('')+
    '</div><div class="v4-skeleton-grid two">'+
@@ -175,6 +175,6 @@ function boot(){
  $('#v4-refresh')?.addEventListener('click',()=>{viewResults.clear();updateStatus();show(state.page)});
  updateStatus();show(location.hash.slice(1)||'overview');
 }
-window.V4={pages,state,$,e,n,pct,signed,date,short,badge,button,link,heading,card,kpi,empty,note,row,table,fail,value,api,settle,grid,toolbar,field,select,svgLine,progress,setContent,toast,show,go};
+window.V4={pages,state,$,e,n,pct,signed,date,short,badge,button,link,heading,card,kpi,empty,note,row,table,fail,value,api,settle,grid,toolbar,field,select,svgLine,progress,setContent,toast,show,go,refresh:()=>{viewResults.clear();show(state.page)}};
 document.addEventListener('DOMContentLoaded',boot);
 })();

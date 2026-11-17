@@ -334,10 +334,53 @@ def handler(console):
                         '/assets/v4_ui_fidelity.js',
                         '/assets/v4_ui_market_v2.js', '/assets/v4_ui_market_v2.css',
                          '/assets/v4_ui_market_v3.js', '/assets/v4_ui_market_v3.css',
-                         '/assets/v4_ui_light.css', '/assets/v4_ui_theme.js'}:
+                         '/assets/v4_ui_light.css', '/assets/v4_ui_theme.js',
+                         '/assets/v4_ui_warehouse.js', '/assets/v4_ui_warehouse.css'}:
                 asset = Path(__file__).with_name('assets') / path.rsplit('/',1)[1]
                 content_type = 'text/css; charset=utf-8' if path.endswith('.css') else 'text/javascript; charset=utf-8'
                 return self.send(200, asset.read_bytes(), content_type)
+            if path == '/api/v1/warehouse/overview':
+                from .data.warehouse_observability import warehouse_overview
+                if urlsplit(self.path).query:
+                    return self.send(400, {'status':'BLOCKED','code':'WAREHOUSE_QUERY_INVALID'})
+                return self.send(200, warehouse_overview(console.root))
+            if path == '/api/v1/warehouse/runs':
+                from .data.warehouse_observability import warehouse_runs
+                query=parse_qs(urlsplit(self.path).query,keep_blank_values=True)
+                try:
+                    if set(query)-{'limit'} or any(len(v)!=1 for v in query.values()):
+                        raise ValueError('Unexpected warehouse run parameter')
+                    limit=int(query.get('limit',['20'])[0])
+                    return self.send(200, warehouse_runs(console.root,limit=limit))
+                except (ValueError,TypeError):
+                    return self.send(400, {'status':'BLOCKED','code':'WAREHOUSE_RUN_QUERY_INVALID'})
+            if path.startswith('/api/v1/warehouse/datasets/'):
+                from .data.warehouse_observability import warehouse_dataset, warehouse_preview
+                parts=path.strip('/').split('/')
+                if len(parts) not in (5,6) or parts[:4] != ['api','v1','warehouse','datasets']:
+                    return self.send(404, {'status':'NOT_FOUND'})
+                dataset_id=parts[4]
+                query=parse_qs(urlsplit(self.path).query,keep_blank_values=True)
+                try:
+                    if any(len(v)!=1 for v in query.values()):
+                        raise ValueError('Repeated warehouse query parameter')
+                    params={key:values[0] for key,values in query.items()}
+                    if len(parts)==5:
+                        if params:
+                            raise ValueError('Dataset detail does not accept query parameters')
+                        return self.send(200, warehouse_dataset(console.root,dataset_id))
+                    if parts[5] != 'preview' or set(params)-{'limit','offset','symbol','start','end'}:
+                        raise ValueError('Invalid warehouse preview route or parameters')
+                    result=warehouse_preview(
+                        console.root,dataset_id,
+                        limit=int(params.get('limit','20')),
+                        offset=int(params.get('offset','0')),
+                        symbol=params.get('symbol') or None,
+                        start=params.get('start') or None,
+                        end=params.get('end') or None)
+                    return self.send(200,result)
+                except (ValueError,TypeError):
+                    return self.send(400, {'status':'BLOCKED','code':'WAREHOUSE_DATASET_QUERY_INVALID'})
             if path in {'/api/v1/data/universe/asof', '/api/v1/data/universe/history',
                         '/api/v1/data/universe/resolve'}:
                 from .data.forward_universe import asof_directory, observation_changes, resolve_symbols

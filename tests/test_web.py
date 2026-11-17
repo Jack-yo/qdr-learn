@@ -102,3 +102,88 @@ def test_console_single_writer_and_http_boundaries(tmp_path):
         server.shutdown()
         server.server_close()
         thread.join()
+
+
+def test_warehouse_read_only_api_routes_and_query_validation(tmp_path):
+    console=Console(tmp_path)
+    server=ThreadingHTTPServer(("127.0.0.1",0),handler(console))
+    thread=threading.Thread(target=server.serve_forever,daemon=True)
+    thread.start()
+    base=f"http://127.0.0.1:{server.server_port}"
+    try:
+        with urlopen(base+"/api/v1/warehouse/overview") as response:
+            overview=json.load(response)
+        assert overview["status"]=="NOT_CREATED"
+        assert overview["read_only"] is True
+        assert not (tmp_path/"data/l1_market").exists()
+
+        with urlopen(base+"/api/v1/warehouse/datasets/market_bars") as response:
+            detail=json.load(response)
+        assert detail["status"]=="NOT_CREATED"
+
+        with urlopen(base+"/api/v1/warehouse/datasets/market_bars/preview") as response:
+            preview=json.load(response)
+        assert preview["status"]=="NOT_CREATED"
+        assert preview["rows"]==[]
+
+        with urlopen(base+"/api/v1/warehouse/runs?limit=5") as response:
+            runs=json.load(response)
+        assert runs["status"]=="NOT_CREATED"
+
+        for route in (
+            "/api/v1/warehouse/overview?refresh=true",
+            "/api/v1/warehouse/runs?limit=100",
+            "/api/v1/warehouse/datasets/unknown_table/preview",
+            "/api/v1/warehouse/datasets/market_bars/preview?limit=100",
+            "/api/v1/warehouse/datasets/market_bars/preview?symbol=SPY&symbol=QQQ",
+        ):
+            with pytest.raises(HTTPError) as error:
+                urlopen(base+route)
+            assert error.value.code==400
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+def test_warehouse_api_returns_real_l1_inventory_and_serializable_preview(tmp_path):
+    from datetime import datetime, timezone
+    from hashlib import sha256
+    from quant_research.data.l1_market_store import L1MarketStore
+
+    payload=b"warehouse route receipt"
+    digest=sha256(payload).hexdigest()
+    stamp=datetime(2026,11,17,22,30,tzinfo=timezone.utc)
+    with L1MarketStore(tmp_path) as store:
+        store.write_receipt(provider="ALPACA",dataset="bars",
+            fetched_at=stamp,available_at=stamp,receipt_sha256=digest,payload=payload)
+        store.write_bars([{
+            "session_date":"2026-11-16","security_id":"SID-SPY","symbol":"SPY",
+            "open":600,"high":605,"low":598,"close":603,"volume":1000,
+            "provider":"ALPACA","price_basis":"raw",
+            "available_at":stamp,"receipt_sha256":digest,
+        }])
+    console=Console(tmp_path)
+    server=ThreadingHTTPServer(("127.0.0.1",0),handler(console))
+    thread=threading.Thread(target=server.serve_forever,daemon=True)
+    thread.start()
+    base=f"http://127.0.0.1:{server.server_port}"
+    try:
+        with urlopen(base+"/api/v1/warehouse/overview") as response:
+            overview=json.load(response)
+        assert overview["status"]=="OBSERVED"
+        assert len(overview["sources"])==21
+        bars=next(x for x in overview["datasets"] if x["dataset_id"]=="market_bars")
+        assert bars["physical_rows"]==1
+        with urlopen(base+"/api/v1/warehouse/datasets/market_bars/preview?limit=5") as response:
+            preview=json.load(response)
+        assert preview["rows"][0]["session_date"]=="2026-11-16"
+        assert preview["rows"][0]["available_at"]=="2026-11-17T22:30:00+00:00"
+        for asset in ("v4_ui_warehouse.js","v4_ui_warehouse.css"):
+            with urlopen(base+"/assets/"+asset) as response:
+                assert response.status==200
+                assert response.read()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
