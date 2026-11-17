@@ -28,6 +28,13 @@ CBOE_PREFIX = "https://cdn.cboe.com/data/us/options/market_statistics/daily/"
 OFR_FSI = "https://www.financialresearch.gov/financial-stress-index/data/fsi.csv"
 BLS_CALENDAR = "https://www.bls.gov/schedule/news_release/bls.ics"
 FOMC_CALENDAR = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+FRED_OBSERVATIONS = "https://api.stlouisfed.org/fred/series/observations"
+FRED_SERIES = {
+    "real_yield_10y":("DFII10","%"),
+    "breakeven_10y":("T10YIE","%"),
+    "hy_oas":("BAMLH0A0HYM2","bps"),
+    "usd_broad":("DTWEXBGS","index"),
+}
 CFTC_TFF = "https://publicreporting.cftc.gov/resource/gpe5-46if.json"
 CFTC_DISAGG = "https://publicreporting.cftc.gov/resource/72hh-3qpy.json"
 CBOE_VOLUME_PREFIX = "https://cdn.cboe.com/resources/us/equities/market-statistics/historical-market-volume/"
@@ -295,6 +302,35 @@ def parse_fomc_calendar(body):
         raise SourceUnavailable("FOMC_CALENDAR_INVALID_HTML") from exc
 
 
+def parse_fred_observations(body, series_id):
+    """Parse a bounded FRED observations response without substituting missing dots."""
+    try:
+        payload=json.loads(body)
+        rows=payload.get("observations") if isinstance(payload,dict) else None
+        if not isinstance(rows,list):
+            raise SourceUnavailable("FRED_OBSERVATIONS_MISSING")
+        values={}
+        for row in rows:
+            day=_date(row.get("date"))
+            raw=row.get("value")
+            if raw in (None,"","."):
+                continue
+            value=_finite(raw,-1_000_000,1_000_000)
+            realtime_start=_date(row.get("realtime_start") or day)
+            realtime_end=_date(row.get("realtime_end") or realtime_start)
+            if day in values:
+                raise SourceUnavailable("FRED_DUPLICATE_OBSERVATION_DATE")
+            values[day]={
+                "series_id":series_id,"date":day,"value":value,
+                "realtime_start":realtime_start,"realtime_end":realtime_end,
+            }
+        if not values:
+            raise SourceUnavailable("FRED_NO_NUMERIC_OBSERVATIONS")
+        return sorted(values.values(),key=lambda item:item["date"])
+    except (UnicodeDecodeError,ValueError,TypeError,KeyError) as exc:
+        raise SourceUnavailable("FRED_INVALID_OBSERVATIONS") from exc
+
+
 def parse_ici_weekly_etf_issuance(body):
     """Extract only the explicit current ICI reported release, no HTML table guess."""
     try:
@@ -452,6 +488,74 @@ class ExtendedPublicSources:
         receipt["pit"]="CURRENT_PUBLISHED_SCHEDULE_NOT_HISTORICAL_PIT"
         receipt["published_date"]=events[0]["published_date"]
         return events,receipt
+
+    def fred_cross_asset(self,limit,*,refresh=False):
+        api_key=self.live.env.get("FRED_API_KEY")
+        if not api_key:
+            raise SourceUnavailable("MISSING_FRED_API_KEY")
+        def load(item):
+            field,(series_id,unit)=item
+            params={"series_id":series_id,"api_key":api_key,"file_type":"json",
+                    "realtime_start":limit,"realtime_end":limit,
+                    "sort_order":"desc","limit":"12"}
+            body,stamp,digest=self.live.request(
+                FRED_OBSERVATIONS,params,ttl=21600,refresh=refresh)
+            observations=parse_fred_observations(body,series_id)
+            eligible=[x for x in observations
+                      if x["date"]<=limit and x["realtime_start"]<=limit]
+            if not eligible:
+                raise SourceUnavailable("FRED_NO_ASOF_OBSERVATION_"+series_id)
+            return field,unit,eligible,stamp,digest
+        loaded={}; failures=[]
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures={pool.submit(load,item):item[0] for item in FRED_SERIES.items()}
+            for future,field in [(future,field) for future,field in futures.items()]:
+                try:
+                    loaded[field]=future.result()
+                except SourceUnavailable as exc:
+                    failures.append({"series":FRED_SERIES[field][0],"code":exc.code})
+        if not loaded:
+            raise SourceUnavailable(failures[0]["code"] if failures else "FRED_NO_SERIES")
+        values={}; receipts=[]; effective_dates=[]
+        for field,(loaded_field,unit,observations,stamp,digest) in loaded.items():
+            receipts.append(digest)
+            latest=observations[-1]
+            effective_dates.append(latest["date"])
+            scale=100.0 if field=="hy_oas" else 1.0
+            if field!="usd_broad":
+                values[field]={
+                    "value":latest["value"]*scale,"unit":unit,
+                    "observed_date":latest["date"],
+                    "realtime_start":latest["realtime_start"],
+                    "series_id":latest["series_id"],
+                }
+            else:
+                if len(observations)>=6:
+                    first=observations[-6]["value"]
+                    last=observations[-1]["value"]
+                    if first>0:
+                        values["dxy_return_5"]={
+                            "value":(last/first-1)*100.0,"unit":"%",
+                            "observed_date":latest["date"],
+                            "realtime_start":latest["realtime_start"],
+                            "series_id":latest["series_id"],
+                            "proxy":"DTWEXBGS_BROAD_TRADE_WEIGHTED_USD_NOT_DXY",
+                        }
+        if not values:
+            raise SourceUnavailable("FRED_NO_FEATURE_VALUES")
+        derived=sha256(json.dumps({"asof":limit,"inputs":sorted(receipts),
+            "series":sorted(x[0] for x in FRED_SERIES.values())},
+            sort_keys=True,separators=(",",":")).encode()).hexdigest()
+        fetched=max(x[3] for x in loaded.values())
+        receipt={
+            "source":"FRED_ALFRED_ASOF_CURRENT_SESSION",
+            "fetched_at":fetched,"sha256":derived,
+            "pit":"ALFRED_ASOF_CURRENT_SESSION_NOT_FULL_HISTORICAL_ARCHIVE",
+            "input_receipts":receipts,"effective_date":min(effective_dates),
+            "coverage_n":len(values),"expected_n":4,
+            "batch_error_count":len(failures),"failures":failures,
+        }
+        return {limit:values},receipt
 
     def cftc_nasdaq(self,*,refresh=False):
         query={"cftc_contract_market_code":"20974A",
@@ -656,6 +760,7 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
         "ofr_fsi":lambda:provider.ofr_fsi(refresh=refresh),
         "bls_calendar":lambda:provider.bls_calendar(refresh=refresh),
         "fomc_calendar":lambda:provider.fomc_calendar(refresh=refresh),
+        "fred_cross_asset":lambda:provider.fred_cross_asset(limit,refresh=refresh),
         "cftc_nasdaq":lambda:provider.cftc_nasdaq(refresh=refresh),
         "cftc_gold":lambda:provider.cftc_commodity("gold",refresh=refresh),
         "cftc_wti":lambda:provider.cftc_commodity("wti",refresh=refresh),
@@ -771,6 +876,29 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
                         "CURRENT_PUBLISHED_EVENT_SCHEDULE_NOT_HISTORICAL_PIT",
                         metadata={"next_meeting_date":value["next_meeting_date"],
                                   "published_date":receipt.get("published_date")})
+                elif name=="fred_cross_asset":
+                    feature_labels={
+                        "real_yield_10y":("10年实际国债收益率","%"),
+                        "breakeven_10y":("10年通胀盈亏平衡率","%"),
+                        "hy_oas":("美国高收益债 OAS","bps"),
+                        "dxy_return_5":("广义贸易加权美元指数五日收益（DXY代理）","%"),
+                    }
+                    health[name]["status"]="PARTIAL" if receipt.get("batch_error_count") else "OBSERVED"
+                    health[name]["effective_date"]=receipt.get("effective_date")
+                    for field,(label,unit) in feature_labels.items():
+                        if field not in value:
+                            continue
+                        item=value[field]
+                        age=(datetime.fromisoformat(limit).date()-
+                             datetime.fromisoformat(item["observed_date"]).date()).days
+                        if age<0 or age>7:
+                            continue
+                        add("cross_asset",field,label,item["value"],unit,
+                            "ALFRED_ASOF_CURRENT_SESSION_NOT_FULL_HISTORICAL_ARCHIVE",
+                            status="PARTIAL",observed_day=item["observed_date"],
+                            metadata={"series_id":item["series_id"],
+                                      "realtime_start":item["realtime_start"],
+                                      "proxy":item.get("proxy")})
                 elif name in ("cftc_nasdaq","cftc_gold","cftc_wti"):
                     title={"cftc_nasdaq":"Nasdaq-100 杠杆基金净仓 / OI",
                            "cftc_gold":"黄金管理资金净仓 / OI",
