@@ -115,12 +115,17 @@ class L1MarketStore:
             security_id VARCHAR NOT NULL, symbol VARCHAR NOT NULL,
             is_member BOOLEAN NOT NULL, provider VARCHAR NOT NULL,
             membership_basis VARCHAR NOT NULL, snapshot_complete BOOLEAN NOT NULL,
-            pit_status VARCHAR NOT NULL, known_at TIMESTAMPTZ NOT NULL,
+            pit_status VARCHAR NOT NULL, pit_attestation_id VARCHAR,
+            pit_attestation_sha256 VARCHAR, pit_attestation_provider VARCHAR,
+            known_at TIMESTAMPTZ NOT NULL,
             receipt_sha256 VARCHAR NOT NULL, ingested_at TIMESTAMPTZ NOT NULL,
             PRIMARY KEY(session_date, universe_id, security_id, provider, receipt_sha256))""")
         universe_columns = {row[1] for row in self.conn.execute("PRAGMA table_info('l1_market_universe')").fetchall()}
         if "snapshot_complete" not in universe_columns:
             self.conn.execute("ALTER TABLE l1_market_universe ADD COLUMN snapshot_complete BOOLEAN DEFAULT FALSE")
+        for column in ("pit_attestation_id","pit_attestation_sha256","pit_attestation_provider"):
+            if column not in universe_columns:
+                self.conn.execute(f"ALTER TABLE l1_market_universe ADD COLUMN {column} VARCHAR")
         self.conn.execute("""CREATE TABLE IF NOT EXISTS l1_market_observations (
             session_date DATE NOT NULL, dimension VARCHAR NOT NULL,
             feature_id VARCHAR NOT NULL, value DOUBLE, unit VARCHAR NOT NULL,
@@ -179,6 +184,9 @@ class L1MarketStore:
             [datetime.now(timezone.utc)])
         self.conn.execute("""INSERT INTO l1_market_schema
             SELECT 2, ? WHERE NOT EXISTS (SELECT 1 FROM l1_market_schema WHERE version=2)""",
+            [datetime.now(timezone.utc)])
+        self.conn.execute("""INSERT INTO l1_market_schema
+            SELECT 3, ? WHERE NOT EXISTS (SELECT 1 FROM l1_market_schema WHERE version=3)""",
             [datetime.now(timezone.utc)])
 
     def close(self):
@@ -271,20 +279,40 @@ class L1MarketStore:
                 raise ValueError("UNIVERSE_MEMBERSHIP_MUST_BE_BOOLEAN")
             if type(item.get("snapshot_complete")) is not bool:
                 raise ValueError("UNIVERSE_SNAPSHOT_COMPLETENESS_REQUIRED")
+            pit_status=str(item.get("pit_status") or "PIT_UNATTESTED")
+            attestation_id=str(item.get("pit_attestation_id") or "")
+            attestation_sha=str(item.get("pit_attestation_sha256") or "")
+            attestation_provider=str(item.get("pit_attestation_provider") or "")
+            if pit_status=="PIT_VERIFIED":
+                raise ValueError("PIT_VERIFIED_REQUIRES_INDEPENDENT_SIGNATURE_VERIFICATION")
+            if pit_status=="PIT_ATTESTED":
+                if not attestation_id or not attestation_sha or not attestation_provider:
+                    raise ValueError("PIT_ATTESTATION_FIELDS_REQUIRED")
+                self._require_receipt(attestation_sha)
+                attestation=self.conn.execute(
+                    "SELECT provider,dataset FROM l1_market_source_receipts WHERE receipt_sha256=?",
+                    [attestation_sha]).fetchone()
+                if not attestation or attestation[0]!=attestation_provider or \
+                   attestation[1]!="pit_universe_attestation_manifest":
+                    raise ValueError("PIT_ATTESTATION_MANIFEST_RECEIPT_REQUIRED")
+            elif attestation_id or attestation_sha or attestation_provider:
+                raise ValueError("PIT_ATTESTATION_FIELDS_REQUIRE_PIT_ATTESTED_STATUS")
             rows.append((_date(item.get("session_date") or item.get("date")),
                 str(item.get("universe_id") or ""), str(item.get("security_id") or ""),
                 str(item.get("symbol") or "").upper(), item["is_member"],
                 str(item.get("provider") or ""), str(item.get("membership_basis") or "UNATTESTED"),
-                item["snapshot_complete"], str(item.get("pit_status") or "PIT_UNATTESTED"),
+                item["snapshot_complete"], pit_status, attestation_id or None,
+                attestation_sha or None, attestation_provider or None,
                 _timestamp(item.get("known_at")), item["receipt_sha256"], now))
         if any(not x[1] or not x[2] or not x[3] or not x[5] for x in rows):
             raise ValueError("UNIVERSE_IDENTITY_REQUIRED")
         if rows:
             self.conn.executemany("""INSERT INTO l1_market_universe (
                 session_date, universe_id, security_id, symbol, is_member, provider,
-                membership_basis, snapshot_complete, pit_status, known_at,
+                membership_basis, snapshot_complete, pit_status, pit_attestation_id,
+                pit_attestation_sha256, pit_attestation_provider, known_at,
                 receipt_sha256, ingested_at) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING""", rows)
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING""", rows)
         return len(rows)
 
     def write_observations(self, records):
@@ -477,7 +505,8 @@ class L1MarketStore:
         if end:
             params.append(_date(end))
         columns = ("session_date, universe_id, security_id, symbol, is_member, provider, "
-                   "membership_basis, snapshot_complete, pit_status, known_at, "
+                   "membership_basis, snapshot_complete, pit_status, pit_attestation_id, "
+                   "pit_attestation_sha256, pit_attestation_provider, known_at, "
                    "receipt_sha256, ingested_at")
         sql = ("SELECT " + columns + " FROM (SELECT *, ROW_NUMBER() OVER ("
                "PARTITION BY session_date, universe_id, security_id, provider "
