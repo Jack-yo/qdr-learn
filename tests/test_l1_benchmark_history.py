@@ -147,8 +147,9 @@ def test_incremental_sync_repairs_old_historical_gap(tmp_path):
     from quant_research.data.l1_market_store import L1MarketStore
     with L1MarketStore(tmp_path) as store:
         gap = store.conn.execute(
-            "SELECT MIN(session_date)+INTERVAL 30 DAY FROM l1_market_bars "
-            "WHERE provider=? AND symbol='SPY'", [BAR_PROVIDER]).fetchone()[0]
+            "SELECT session_date FROM l1_market_bars "
+            "WHERE provider=? AND symbol='SPY' ORDER BY session_date "
+            "LIMIT 1 OFFSET 30", [BAR_PROVIDER]).fetchone()[0]
         gap_day = gap.date().isoformat() if hasattr(gap, "date") else str(gap)[:10]
         store.conn.execute(
             "DELETE FROM l1_market_bars WHERE provider=? AND symbol='SPY' "
