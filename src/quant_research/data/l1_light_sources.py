@@ -219,9 +219,16 @@ class LiveSources:
         merged={sym:[] for sym in symbols}
         receipts=[]; known_tokens=set(); count=0
         for page in range(15):
-            body,stamp,digest=self.request('https://data.alpaca.markets/v2/stocks/bars',
-                                          query,headers,ttl=900,
-                                          refresh=refresh,feed=feed)
+            try:
+                body,stamp,digest=self.request('https://data.alpaca.markets/v2/stocks/bars',
+                                              query,headers,ttl=900,
+                                              refresh=refresh,feed=feed)
+            except SourceUnavailable as exc:
+                if exc.code=='HTTP_403':
+                    raise SourceUnavailable('ALPACA_HISTORY_FEED_FORBIDDEN_'+feed.upper()) from exc
+                if exc.code=='HTTP_401':
+                    raise SourceUnavailable('ALPACA_CREDENTIALS_REJECTED') from exc
+                raise
             try:
                 doc=json.loads(body)
             except (ValueError,TypeError) as exc:
@@ -277,10 +284,17 @@ class LiveSources:
               'https://paper-api.alpaca.markets').rstrip('/')
         if base not in {'https://paper-api.alpaca.markets','https://api.alpaca.markets'}:
             raise SourceUnavailable('UNAPPROVED_ALPACA_TRADING_API')
-        body,stamp,digest=self.request(base+'/v2/assets',
-            {'status':'active','asset_class':'us_equity'},
-            {'APCA-API-KEY-ID':key,'APCA-API-SECRET-KEY':secret},
-            ttl=21600,refresh=refresh)
+        try:
+            body,stamp,digest=self.request(base+'/v2/assets',
+                {'status':'active','asset_class':'us_equity'},
+                {'APCA-API-KEY-ID':key,'APCA-API-SECRET-KEY':secret},
+                ttl=21600,refresh=refresh)
+        except SourceUnavailable as exc:
+            if exc.code=='HTTP_403':
+                raise SourceUnavailable('ALPACA_ASSET_DIRECTORY_FORBIDDEN') from exc
+            if exc.code=='HTTP_401':
+                raise SourceUnavailable('ALPACA_CREDENTIALS_REJECTED') from exc
+            raise
         try:
             records=json.loads(body)
             if not isinstance(records,list):
@@ -326,8 +340,15 @@ class LiveSources:
         if not symbols or len(symbols)>500:
             raise SourceUnavailable('INVALID_SNAPSHOT_SYMBOLS')
         params={'symbols':','.join(sorted(set(symbols))),'feed':feed}
-        body,stamp,digest=self.request('https://data.alpaca.markets/v2/stocks/snapshots',params,
-            {'APCA-API-KEY-ID':key,'APCA-API-SECRET-KEY':secret},ttl=60,refresh=refresh,feed=feed)
+        try:
+            body,stamp,digest=self.request('https://data.alpaca.markets/v2/stocks/snapshots',params,
+                {'APCA-API-KEY-ID':key,'APCA-API-SECRET-KEY':secret},ttl=60,refresh=refresh,feed=feed)
+        except SourceUnavailable as exc:
+            if exc.code=='HTTP_403':
+                raise SourceUnavailable('ALPACA_SNAPSHOT_FEED_FORBIDDEN_'+feed.upper()) from exc
+            if exc.code=='HTTP_401':
+                raise SourceUnavailable('ALPACA_CREDENTIALS_REJECTED') from exc
+            raise
         try:
             doc=json.loads(body)
             if not isinstance(doc.get('snapshots'),dict):raise ValueError('Invalid snapshots')
