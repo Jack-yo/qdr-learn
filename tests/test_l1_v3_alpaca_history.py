@@ -34,7 +34,7 @@ def test_history_feed_separate_from_snapshot_and_split_adjustment(tmp_path):
     assert len(data["SPY"])==2
     assert queries[0][1]["feed"]==["sip"]
     assert queries[0][1]["adjustment"]==["split"]
-    assert queries[0][1]["end"]==["2026-11-14"]
+    assert queries[0][1]["end"]==["2026-11-13T21:01:00+00:00"]
     assert receipts[0]["feed"]=="sip"
     assert receipts[0]["adjustment"]=="split"
     live.snapshots(symbols=("SPY",))
@@ -103,3 +103,47 @@ def test_future_bar_is_rejected(tmp_path):
     src=LiveSources(tmp_path,fetch=future,env=_env())
     with pytest.raises(SourceUnavailable,match="BAR_OUTSIDE_REQUEST_WINDOW"):
         src.bars(days=30,symbols=("SPY",),end_date="2026-11-13")
+
+
+def test_sip_session_end_does_not_query_tomorrow_or_recent_window(tmp_path):
+    """Daily requests must not ask for future midnight on free historical SIP."""
+    seen=[]
+    def fake(url,headers):
+        query=parse_qs(urlsplit(url).query)
+        seen.append(query)
+        return json.dumps({"bars":{"SPY":[_bar("2026-11-16")]},
+                           "next_page_token":None}).encode()
+    early=LiveSources(tmp_path/"early",fetch=fake,env=_env(),
+                      now=lambda:datetime(2026,11,16,21,16,tzinfo=timezone.utc))
+    with pytest.raises(SourceUnavailable,match="HISTORICAL_SIP_EMBARGO_PENDING"):
+        early.bars(days=30,symbols=("SPY",),end_date="2026-11-16",
+                   adjustment="split")
+    assert seen==[]  # No forbidden request is sent to Alpaca.
+    ready=LiveSources(tmp_path/"ready",fetch=fake,env=_env(),
+                      now=lambda:datetime(2026,11,16,21,20,tzinfo=timezone.utc))
+    rows,receipts=ready.bars(days=30,symbols=("SPY",),end_date="2026-11-16",
+                             adjustment="split")
+    assert rows["SPY"][0]["t"].startswith("2026-11-16")
+    assert seen[0]["end"]==["2026-11-16T21:01:00+00:00"]
+    assert seen[0]["feed"]==["sip"]
+    assert receipts[0]["end"]=="2026-11-16"
+
+
+def test_implicit_history_end_uses_last_completed_session(tmp_path):
+    seen=[]
+    def fake(url,headers):
+        seen.append(parse_qs(urlsplit(url).query))
+        return json.dumps({"bars":{"SPY":[_bar("2026-11-16")]},
+                           "next_page_token":None}).encode()
+    source=LiveSources(tmp_path,fetch=fake,env=_env(),
+                       now=lambda:datetime(2026,11,17,1,0,tzinfo=timezone.utc))
+    source.bars(days=30,symbols=("SPY",),adjustment="split")
+    assert seen[0]["end"]==["2026-11-16T21:01:00+00:00"]
+    assert seen[0]["feed"]==["sip"]
+
+
+def test_historical_source_rejects_unclosed_future_session(tmp_path):
+    source=LiveSources(tmp_path,env=_env(),
+                       now=lambda:datetime(2026,11,16,20,0,tzinfo=timezone.utc))
+    with pytest.raises(SourceUnavailable,match="HISTORICAL_SESSION_NOT_CLOSED"):
+        source.bars(days=30,symbols=("SPY",),end_date="2026-11-16")
