@@ -158,15 +158,18 @@ def test_public_scan_persists_features_and_source_health(tmp_path):
         "calendar_events":[],
     }
     result=persist_public_scan(tmp_path,payload,scan_kind="extended")
-    assert result["features"]==1 and result["source_health"]==1
+    assert result["features"]==1 and result["source_health"]==3
     snapshot=market_data_snapshot(tmp_path)
     breadth=next(x for x in snapshot["coverage"]["dimensions"] if x["id"]=="breadth")
     assert breadth["coverage"]["available"]==1
     assert breadth["historical_pit_verified"] is False
     assert snapshot["policy"]["forecast_eligible"] is False
     assert snapshot["status"]["source_receipts"]>=1
-    health_keys={x["source_key"] for x in snapshot["source_health"]}
-    assert {"alpaca_assets","alpaca_snapshots","market_breadth"} <= health_keys
+    health_by_key={x["source_key"]:x for x in snapshot["source_health"]}
+    assert {"alpaca_assets","alpaca_snapshots","market_breadth"} <= set(health_by_key)
+    assert health_by_key["alpaca_assets"]["receipt_sha256"] == hashlib.sha256(b"asset list").hexdigest()
+    assert health_by_key["alpaca_snapshots"]["receipt_sha256"] == hashlib.sha256(b"snapshot batch").hexdigest()
+    assert health_by_key["alpaca_snapshots"]["metadata"]["snapshot_receipt_count"] == 1
 
 
 def test_registry_blocked_pit_universe_is_visible_without_runtime_failure():
@@ -205,3 +208,31 @@ def test_missing_market_breadth_health_is_attributed_to_both_alpaca_sources(tmp_
     health={x["source_key"]:x["status"] for x in snapshot["source_health"]}
     assert health["alpaca_assets"]=="MISSING"
     assert health["alpaca_snapshots"]=="MISSING"
+
+def test_asset_directory_success_survives_snapshot_batch_failure(tmp_path):
+    pytest.importorskip("duckdb")
+    from quant_research.workflow.l1_market_ingest import market_data_snapshot,persist_public_scan
+    asset_digest=hashlib.sha256(b"asset directory response").hexdigest()
+    derived_digest=hashlib.sha256(b"derived breadth response").hexdigest()
+    payload={
+        "schema":"qdr.l1.extended.v1","asof_session":"2026-11-16",
+        "fetched_at":"2026-11-16T22:00:00Z","features":[],
+        "source_health":{"market_breadth":{
+            "status":"MISSING","code":"ALL_ALPACA_SNAPSHOT_BATCHES_FAILED",
+            "source":"ALPACA_ACTIVE_US_EQUITY_SNAPSHOT_BREADTH",
+            "fetched_at":"2026-11-16T22:00:00Z",
+            "receipt_sha256":derived_digest,
+            "input_receipts":[asset_digest],
+            "coverage_n":0,"expected_n":120,
+            "observation_mode":"NO_SNAPSHOT_DATA",
+        }},
+        "calendar_events":[],
+    }
+    persist_public_scan(tmp_path,payload,scan_kind="extended")
+    snapshot=market_data_snapshot(tmp_path)
+    health={x["source_key"]:x for x in snapshot["source_health"]}
+    assert health["alpaca_assets"]["status"]=="OBSERVED"
+    assert health["alpaca_assets"]["receipt_sha256"]==asset_digest
+    assert health["alpaca_snapshots"]["status"]=="MISSING"
+    assert health["alpaca_snapshots"]["receipt_sha256"] is None
+    assert health["market_breadth"]["status"]=="MISSING"
