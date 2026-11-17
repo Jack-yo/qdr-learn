@@ -168,7 +168,7 @@ Audited files on main:
 1. Existing French verified coverage documented through 2026-09-30; that is not the latest ETF market session.
 2. The existing style model currently requires `VERIFIED_RAW_RELATIVE_RETURN`, while documented factor-lab experiments include exploratory proxy labels and zero formal raw labels. This is a real blocker for training from those experiments, not a reason to weaken the gate.
 3. Current ETF history is not a PIT constituent universe. For the seven liquid ETF proxy portfolios, this does not require reconstructing every historical constituent to describe the traded ETF itself; however, price-source, corporate-action, and historical availability evidence still must be verified.
-4. Cyclical/defensive sector ETF basket data and the proposed IWF/SPY Growth proxy need source-coverage verification before P1 can claim full seven-style coverage.
+4. The repository's configured current symbol allowlist includes all 14 required ETF symbols. This is not proof that each symbol has complete historical coverage in the user's local database; P1 workflow emits per-symbol coverage and blocks affected style rows rather than filling gaps. Cyclical/defensive basket data and the IWF/SPY Growth proxy still require local source-coverage verification.
 5. Data ingestion, provider setup, warehouse maintenance, and local cache ownership remain outside this L2 implementation scope. Missing sources must be reported as blocked; no synthetic data or automatic source substitution.
 
 ## 8. Implementation sequence and deliverables
@@ -185,11 +185,14 @@ Audited files on main:
 
 Do not create a separate PR for each small phase. Work on one L2 branch and open one consolidated draft PR after a coherent implementation increment; keep Codex/local-only data acceptance as a single explicit handoff if required.
 
-## 9. API contracts to implement after P0
+## 9. API contracts
 
-These are proposed contracts, not existing endpoints:
+Implemented in the initial P1 increment:
 
-- `GET /api/v1/l2/styles/overview?asof=&cutoff=`
+- `GET /api/v1/l2/styles/overview?asof=&cutoff=&start=` — read-only observation payload using the existing verified Yahoo split-adjusted bundle. It returns the registry, latest seven style rows, 126-session history per style, per-symbol coverage, source snapshot hash, and explicit observation-only limitations.
+
+Still proposed, not implemented:
+
 - `GET /api/v1/l2/styles/history?style_id=&start=&end=`
 - `GET /api/v1/l2/styles/rotation?asof=`
 - `GET /api/v1/l2/styles/forecast?style_id=&horizon=&asof=`
@@ -201,7 +204,15 @@ These are proposed contracts, not existing endpoints:
 
 Every payload must expose schema/version, as-of session, signal cutoff, per-source availability, source snapshot hash, calculation protocol version, missingness/coverage, research status, and eligibility. A missing value is null with a reason, never zero.
 
-## 10. Out of scope
+## 10. P1 implementation progress
+
+- Added `research/l2_style_rotation.py`: seven-style registry and causal calculations for 5/20/60-session relative return, acceleration, relative up-day count, volatility, and 20/60-session relative drawdown.
+- Added `workflow/l2_styles.py`: read-only adapter over the existing verified market bundle; no provider requests, ingestion, or warehouse mutation. V1 currently requires Yahoo split-adjusted price basis and reports the current-vintage/non-total-return limitation.
+- Added `GET /api/v1/l2/styles/overview`.
+- Added focused unit tests for registry, windows, missing basket components, causal-prefix stability, availability propagation, source basis, and API query validation. These tests have been authored but not executed in the local Codex environment yet.
+- Real local symbol coverage and pytest acceptance remain pending. The API is not yet the final L2 UI and has no forecast or rotation-state engine.
+
+## 11. Out of scope
 
 - No new data warehouse or parallel history store.
 - No paid data subscription or provider onboarding by this implementation.
