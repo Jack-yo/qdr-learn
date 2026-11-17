@@ -303,7 +303,7 @@ def coverage_matrix(observations: Iterable[dict] = (), *,
                 state = health.get(source, {})
                 source_spec = SOURCE_BY_KEY.get(source)
                 if (state.get("status") in ("BLOCKED", "MISSING", "ERROR") or
-                    (source_spec is not None and source_spec.implementation == "BLOCKED")):
+                    (source_spec is not None and source_spec.code_status == "BLOCKED")):
                     blocked_sources.append(source)
         count, total = len(observed), len(specs)
         status = "OBSERVED" if total and count == total else (
