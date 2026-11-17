@@ -491,7 +491,7 @@ class ExtendedPublicSources:
 
     def fred_cross_asset(self,limit,*,refresh=False):
         env=getattr(self.live,"env",{})
-        api_key=env.get("FRED_API_KEY") if isinstance(env,dict) else None
+        api_key=env.get("FRED_API_KEY") if hasattr(env,"get") else None
         if not api_key:
             raise SourceUnavailable("MISSING_FRED_API_KEY")
         if not re.fullmatch(r"[a-z0-9]{32}",str(api_key)):
