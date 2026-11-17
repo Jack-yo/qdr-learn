@@ -10,6 +10,10 @@ from dataclasses import asdict, dataclass
 import json
 from typing import Iterable
 
+from quant_research.data.l1_market_freshness import (
+    available_by_session_end, freshness, numeric_or_class_value,
+)
+
 
 @dataclass(frozen=True)
 class SystemSpec:
@@ -277,7 +281,8 @@ def catalog_payload() -> dict:
 
 
 def coverage_matrix(observations: Iterable[dict] = (), *,
-                    source_health: dict | None = None, asof: str | None = None) -> dict:
+                    source_health: dict | None = None, asof: str | None = None,
+                    freshness_asof: str | None = None) -> dict:
     """Build coverage from actual stored observations; registry alone is not coverage."""
     rows = list(observations)
     health = source_health or {}
@@ -286,6 +291,9 @@ def coverage_matrix(observations: Iterable[dict] = (), *,
         key = row.get("feature_id") or row.get("id")
         day = str(row.get("session_date") or row.get("observed_date") or "")
         if asof and day and day > asof:
+            continue
+        if asof and not available_by_session_end(
+                row.get("available_at") or row.get("fetched_at"), asof):
             continue
         if key not in FEATURE_BY_KEY:
             continue
@@ -305,8 +313,36 @@ def coverage_matrix(observations: Iterable[dict] = (), *,
         key: item for key, item in latest_rows.items()
         if item["row"].get("status", item["row"].get("quality_status", "OBSERVED"))
            in ("OBSERVED", "PARTIAL")
-        and item["row"].get("value") is not None
+        and numeric_or_class_value(item["row"].get("value"),
+                                   unit=FEATURE_BY_KEY[key].unit)
     }
+    # Freshness is independent of implementation: a feature may exist in code
+    # and still be absent, out of date, or only partially observed in practice.
+    feature_health = {}
+    for spec in FEATURES:
+        entry = latest_rows.get(spec.key)
+        row = entry["row"] if entry else {}
+        observed = entry["date"] if entry else None
+        freshness_info = freshness(observed, spec.cadence, freshness_asof)
+        quality = str(row.get("status", row.get("quality_status", "MISSING")))
+        if spec.key not in feature_rows:
+            state = "PLANNED" if entry is None and spec.implementation == "PLANNED" else (
+                "BLOCKED" if quality == "BLOCKED" else "MISSING")
+        elif freshness_info["status"] in ("STALE", "UNKNOWN_DATE", "FUTURE_OBSERVATION"):
+            state = freshness_info["status"]
+        else:
+            state = quality
+        feature_health[spec.key] = {
+            "id": spec.key, "dimension": spec.dimension, "status": state,
+            "implementation": spec.implementation, "cadence": spec.cadence,
+            "observed_date": observed,
+            "age_days": freshness_info["age_days"],
+            "max_age_days": freshness_info["max_age_days"],
+            "freshness": freshness_info["status"],
+            "source": str(row.get("source") or row.get("provider") or "") or None,
+            "availability_timestamp_recorded": bool(
+                row.get("available_at") or row.get("fetched_at")),
+        }
     dimensions = []
     for dimension in DIMENSIONS:
         specs = [x for x in FEATURES if x.dimension == dimension.key]
@@ -320,12 +356,16 @@ def coverage_matrix(observations: Iterable[dict] = (), *,
                     (source_spec is not None and source_spec.code_status == "BLOCKED")):
                     blocked_sources.append(source)
         count, total = len(observed), len(specs)
+        current_count = sum(feature_health[x.key]["status"] in ("OBSERVED", "PARTIAL")
+                            for x in specs)
+        stale_count = sum(feature_health[x.key]["status"] == "STALE" for x in specs)
         latest_quality = [
             str(feature_rows[x.key]["row"].get(
                 "status", feature_rows[x.key]["row"].get("quality_status", "OBSERVED")))
             for x in observed
         ]
-        status = ("OBSERVED" if total and count == total and
+        status = ("STALE" if stale_count and not current_count else
+                  "OBSERVED" if total and count == total and not stale_count and
                   all(x == "OBSERVED" for x in latest_quality) and not blocked_sources
                   else "PARTIAL" if count else "BLOCKED" if blocked_sources else "MISSING")
         rows_for_pit = [feature_rows[x.key]["row"] for x in observed]
@@ -352,8 +392,12 @@ def coverage_matrix(observations: Iterable[dict] = (), *,
                       "PIT_ATTESTED_PENDING_VERIFICATION" if pit_attested else "UNVERIFIED")
         dimensions.append({
             "id": dimension.key, "name": dimension.name, "role": dimension.role,
-            "status": status, "coverage": {"available": count, "registered": total},
+            "status": status, "coverage": {"available": count, "registered": total,
+                                           "current": current_count, "stale": stale_count},
             "observed_features": [x.key for x in observed],
+            "current_features": [x.key for x in specs if feature_health[x.key]["status"]
+                                 in ("OBSERVED", "PARTIAL")],
+            "stale_features": [x.key for x in specs if feature_health[x.key]["status"] == "STALE"],
             "missing_features": [x.key for x in specs if x.key not in feature_rows],
             "blocked_sources": sorted(set(blocked_sources)),
             "pit_attestation_status": pit_status,
@@ -366,15 +410,19 @@ def coverage_matrix(observations: Iterable[dict] = (), *,
     for system in SYSTEMS:
         parts = [by_dimension[key] for key in system.dimensions]
         available = sum(x["coverage"]["available"] for x in parts)
+        current = sum(x["coverage"]["current"] for x in parts)
+        stale = sum(x["coverage"]["stale"] for x in parts)
         registered = sum(x["coverage"]["registered"] for x in parts)
         system_status = ("OBSERVED" if parts and all(x["status"] == "OBSERVED" for x in parts)
+                         else "STALE" if stale and not current
                          else "PARTIAL" if available
                          else "BLOCKED" if any(x["status"] == "BLOCKED" for x in parts)
                          else "MISSING")
         systems.append({
             "id": system.key, "name": system.name,
             "status": system_status,
-            "coverage": {"available": available, "registered": registered},
+            "coverage": {"available": available, "registered": registered,
+                         "current": current, "stale": stale},
             "dimensions": list(system.dimensions),
             "historical_pit_verified": bool(parts) and all(x["historical_pit_verified"] for x in parts),
             "model_eligible": False,
@@ -382,10 +430,20 @@ def coverage_matrix(observations: Iterable[dict] = (), *,
     return {
         "schema": "qdr.l1.market_data_coverage.v1",
         "asof": asof,
+        "freshness_asof": freshness_asof,
         "systems": systems,
         "dimensions": dimensions,
+        "feature_health": list(feature_health.values()),
         "summary": {"systems": len(systems), "dimensions": len(dimensions),
                     "features_registered": len(FEATURES), "features_observed": len(feature_rows),
+                    "features_current": sum(x["status"] in ("OBSERVED", "PARTIAL")
+                                            for x in feature_health.values()),
+                    "features_stale": sum(x["status"] == "STALE" for x in feature_health.values()),
+                    "features_unknown_date": sum(x["status"] in ("UNKNOWN_DATE", "FUTURE_OBSERVATION")
+                                                 for x in feature_health.values()),
+                    "features_missing": sum(x["status"] in ("MISSING", "BLOCKED")
+                                            for x in feature_health.values()),
+                    "features_planned": sum(x["status"] == "PLANNED" for x in feature_health.values()),
                     "historical_pit_verified": False, "forecast_eligible": False,
                     "trade_eligible": False},
     }
