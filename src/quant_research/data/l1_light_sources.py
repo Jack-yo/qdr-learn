@@ -103,7 +103,8 @@ def _network(url, headers, *, max_bytes=5_000_000):
 
 class LiveSources:
     ETF_SYMBOLS=('SPY','QQQ','IWM','RSP','HYG','LQD','TLT','SHY',
-                 'XLB','XLC','XLE','XLF','XLI','XLK','XLP','XLRE','XLU','XLV','XLY')
+                 'XLB','XLC','XLE','XLF','XLI','XLK','XLP','XLRE','XLU','XLV','XLY',
+                 'IWB','IWD','IWF','MTUM','QUAL','USMV','VLUE','VTV','VUG')
     CBOE_VIX='https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv'
     def __init__(self, root, *, cache=None, fetch=None, env=None, now=None):
         self.cache=cache or BoundedCache(root, now=now)

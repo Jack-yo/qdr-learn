@@ -378,6 +378,8 @@ class L1MarketStore:
             MAX(session_date) FROM l1_market_observations""").fetchone()
         universe = self.conn.execute("""SELECT COUNT(*), COUNT(DISTINCT security_id),
             MAX(session_date) FROM l1_market_universe""").fetchone()
+        security = self.conn.execute("""SELECT COUNT(*), COUNT(DISTINCT feature_id),
+            MAX(session_date) FROM l1_market_security_features""").fetchone()
         receipts = self.conn.execute("SELECT COUNT(*) FROM l1_market_source_receipts").fetchone()[0]
         return {
             "schema": "qdr.l1.market_data_store_status.v1",
@@ -387,6 +389,8 @@ class L1MarketStore:
                      "last_session": str(bars[3]) if bars[3] else None},
             "observations": {"rows": obs[0], "features": obs[1],
                              "last_session": str(obs[2]) if obs[2] else None},
+            "security_features": {"rows": security[0], "features": security[1],
+                                  "last_session": str(security[2]) if security[2] else None},
             "universe": {"rows": universe[0], "securities": universe[1],
                          "last_session": str(universe[2]) if universe[2] else None},
             "source_receipts": receipts, "historical_pit_verified": False,

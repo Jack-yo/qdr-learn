@@ -30,7 +30,8 @@ def sample_market(n=280, members=40):
                     "session_date": day, "universe_id": "CURRENT_SAMPLE",
                     "security_id": "ID:"+symbol, "symbol": symbol, "is_member": True,
                     "known_at": (day+pd.Timedelta(hours=20)).tz_localize("UTC"),
-                    "snapshot_complete": True,
+                    "snapshot_complete": True, "provider": "fixture-universe",
+                    "receipt_sha256": ("%064x" % 999),
                 })
     cutoffs = pd.DataFrame({
         "session_date": days,
