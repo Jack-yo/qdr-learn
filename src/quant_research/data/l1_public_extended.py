@@ -27,6 +27,7 @@ from quant_research.data.l1_official_sources import _date, _finite
 CBOE_PREFIX = "https://cdn.cboe.com/data/us/options/market_statistics/daily/"
 OFR_FSI = "https://www.financialresearch.gov/financial-stress-index/data/fsi.csv"
 BLS_CALENDAR = "https://www.bls.gov/schedule/news_release/bls.ics"
+FOMC_CALENDAR = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
 CFTC_TFF = "https://publicreporting.cftc.gov/resource/gpe5-46if.json"
 CFTC_DISAGG = "https://publicreporting.cftc.gov/resource/72hh-3qpy.json"
 CBOE_VOLUME_PREFIX = "https://cdn.cboe.com/resources/us/equities/market-statistics/historical-market-volume/"
@@ -253,6 +254,47 @@ class _HTMLToText(HTMLParser):
         self.fragments.append(text)
 
 
+def parse_fomc_calendar(body):
+    """Parse official FOMC meeting dates and the page-level published update date."""
+    try:
+        parser=_HTMLToText()
+        parser.feed(body.decode("utf-8-sig"))
+        text=" ".join(" ".join(parser.fragments).split())
+        updated=re.search(r"Last Update:\\s*([A-Z][a-z]+\\s+\\d{1,2},\\s+\\d{4})",text)
+        if updated is None:
+            raise SourceUnavailable("FOMC_CALENDAR_LAST_UPDATE_MISSING")
+        published=datetime.strptime(updated.group(1),"%B %d, %Y").date()
+        known_at=datetime(published.year,published.month,published.day,23,59,59,
+                          tzinfo=timezone.utc)
+        sections=list(re.finditer(r"\\b(20\\d{2})\\s+FOMC Meetings\\b",text))
+        events={}
+        months={name:index for index,name in enumerate(
+            ("January","February","March","April","May","June","July","August",
+             "September","October","November","December"),1)}
+        meeting_pattern=re.compile(
+            r"\\b(January|February|March|April|May|June|July|August|September|October|November|December)"
+            r"\\s+(\\d{1,2})\\s*-\\s*(\\d{1,2})\\b",re.IGNORECASE)
+        for index,section in enumerate(sections):
+            year=int(section.group(1))
+            end=sections[index+1].start() if index+1<len(sections) else len(text)
+            block=re.split(r"\\bNote:",text[section.end():end],maxsplit=1)[0]
+            for match in meeting_pattern.finditer(block):
+                month=months[match.group(1).title()]
+                day=int(match.group(2))
+                meeting=datetime(year,month,day,23,59,59,tzinfo=timezone.utc)
+                event_id="FOMC|"+meeting.date().isoformat()
+                events[event_id]={
+                    "event_id":event_id,"name":"FOMC Meeting "+meeting.date().isoformat(),
+                    "event_type":"FOMC","dt":meeting,"schedule_known_at":known_at,
+                    "published_date":published.isoformat(),
+                }
+        if not events:
+            raise SourceUnavailable("FOMC_CALENDAR_NO_DATED_MEETINGS")
+        return sorted(events.values(),key=lambda item:item["dt"])
+    except (UnicodeDecodeError,ValueError,TypeError,OverflowError) as exc:
+        raise SourceUnavailable("FOMC_CALENDAR_INVALID_HTML") from exc
+
+
 def parse_ici_weekly_etf_issuance(body):
     """Extract only the explicit current ICI reported release, no HTML table guess."""
     try:
@@ -402,6 +444,14 @@ class ExtendedPublicSources:
     def bls_calendar(self,*,refresh=False):
         body,stamp,digest=self.live.request(BLS_CALENDAR,ttl=14400,refresh=refresh)
         return parse_bls_calendar(body),self.receipt("BLS_RELEASE_CALENDAR",stamp,digest)
+
+    def fomc_calendar(self,*,refresh=False):
+        body,stamp,digest=self.live.request(FOMC_CALENDAR,ttl=14400,refresh=refresh)
+        events=parse_fomc_calendar(body)
+        receipt=self.receipt("FED_FOMC_CALENDAR",stamp,digest)
+        receipt["pit"]="CURRENT_PUBLISHED_SCHEDULE_NOT_HISTORICAL_PIT"
+        receipt["published_date"]=events[0]["published_date"]
+        return events,receipt
 
     def cftc_nasdaq(self,*,refresh=False):
         query={"cftc_contract_market_code":"20974A",
@@ -605,6 +655,7 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
         "cboe_options":lambda:provider.cboe_options(limit,refresh=refresh),
         "ofr_fsi":lambda:provider.ofr_fsi(refresh=refresh),
         "bls_calendar":lambda:provider.bls_calendar(refresh=refresh),
+        "fomc_calendar":lambda:provider.fomc_calendar(refresh=refresh),
         "cftc_nasdaq":lambda:provider.cftc_nasdaq(refresh=refresh),
         "cftc_gold":lambda:provider.cftc_commodity("gold",refresh=refresh),
         "cftc_wti":lambda:provider.cftc_commodity("wti",refresh=refresh),
@@ -624,7 +675,7 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
                     if not isinstance(values,list):
                         raise SourceUnavailable("BLS_BAD_EVENT_PAYLOAD")
                     upcoming=[x for x in values if stamp<=x["dt"]<=stamp+timedelta(days=14)]
-                    calendar_events=[{
+                    calendar_events.extend([{
                         "event_id":str(x["name"])+"|"+x["dt"].isoformat(),
                         "name":x["name"],
                         "event_type":("CPI" if "consumer price index" in str(x["name"]).lower()
@@ -634,11 +685,29 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
                         "schedule_known_at":receipt["fetched_at"],
                         "source":receipt["source"],
                         "receipt_sha256":receipt["sha256"],
-                    } for x in upcoming[:25]]
+                    } for x in upcoming[:25]])
                     day=limit
                     values={
                         day:{"bls_scheduled_next_7d":sum(1 for x in values if stamp<=x["dt"]<=stamp+timedelta(days=7))}
                     }
+                elif name=="fomc_calendar":
+                    if not isinstance(values,list):
+                        raise SourceUnavailable("FOMC_BAD_EVENT_PAYLOAD")
+                    upcoming=[x for x in values if stamp<x["dt"]<=stamp+timedelta(days=520)]
+                    if not upcoming:
+                        raise SourceUnavailable("FOMC_NO_UPCOMING_MEETINGS")
+                    calendar_events.extend([{
+                        "event_id":x["event_id"],"name":x["name"],
+                        "event_type":"FOMC","start_utc":x["dt"].isoformat(),
+                        "schedule_known_at":x["schedule_known_at"].isoformat(),
+                        "source":receipt["source"],"receipt_sha256":receipt["sha256"],
+                    } for x in upcoming])
+                    next_meeting=min(upcoming,key=lambda x:x["dt"])
+                    values={limit:{
+                        "days_to_fomc":(next_meeting["dt"].date()-
+                                        datetime.fromisoformat(limit).date()).days,
+                        "next_meeting_date":next_meeting["dt"].date().isoformat(),
+                    }}
                 eligible=[(d,v) for d,v in values.items() if d<=limit]
                 if name=="ici_etf":
                     # Use source article's publication day, not its Wednesday week-end,
@@ -696,6 +765,12 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
                     add("events","bls_scheduled_next_7d",
                         "未来7天 BLS 已排程经济发布",value["bls_scheduled_next_7d"],"项",
                         "CURRENT_PUBLISHED_EVENT_SCHEDULE_NOT_HISTORICAL_PIT")
+                elif name=="fomc_calendar":
+                    add("events","days_to_fomc","距离下一次 FOMC 会议天数",
+                        value["days_to_fomc"],"days",
+                        "CURRENT_PUBLISHED_EVENT_SCHEDULE_NOT_HISTORICAL_PIT",
+                        metadata={"next_meeting_date":value["next_meeting_date"],
+                                  "published_date":receipt.get("published_date")})
                 elif name in ("cftc_nasdaq","cftc_gold","cftc_wti"):
                     title={"cftc_nasdaq":"Nasdaq-100 杠杆基金净仓 / OI",
                            "cftc_gold":"黄金管理资金净仓 / OI",
