@@ -14,6 +14,7 @@ from quant_research.data.l1_public_extended import (
     parse_bls_calendar, parse_cftc_contract, parse_cboe_equities_volume,
     sample_stock_breadth, scan_extended_public,
     parse_ici_weekly_etf_issuance, parse_finra_consolidated_short_volume,
+    parse_fomc_calendar,
 )
 
 CLOCK = datetime(2026, 11, 15, 12, 0, tzinfo=timezone.utc)
@@ -376,3 +377,66 @@ def test_broad_market_breadth_retains_low_nonzero_coverage_as_partial_evidence()
     assert row["coverage_n"]==20 and row["expected_n"]==100
     assert row["market_snapshot_coverage_pct"]==20
     assert row["advances"]==20
+
+FOMC_HTML = ("""<html><body>
+<h3>2026 FOMC Meetings</h3>
+<p>January</p><p>27-28</p>
+<p>March</p><p>17-18*</p>
+<p>December</p><p>8-9*</p>
+<h3>2027 FOMC Meetings</h3>
+<p>January</p><p>26-27</p>
+<p>March</p><p>16-17</p>
+<p>November</p><p>16-17</p>
+<p>Note: A two-day meeting is scheduled for January 25-26, 2028.</p>
+<p>Last Update: November 12, 2026</p>
+</body></html>""").encode()
+
+
+def test_fomc_calendar_parser_preserves_page_update_vintage():
+    events=parse_fomc_calendar(FOMC_HTML)
+    by_id={x["event_id"]:x for x in events}
+    assert "FOMC|2026-12-08" in by_id
+    assert "FOMC|2027-01-26" in by_id
+    assert "FOMC|2028-01-25" not in by_id
+    assert by_id["FOMC|2026-12-08"]["schedule_known_at"] == datetime(
+        2026,11,12,23,59,59,tzinfo=timezone.utc)
+
+
+def test_scan_extended_public_emits_fomc_feature_and_event(monkeypatch,tmp_path):
+    import quant_research.data.l1_public_extended as module
+
+    event={
+        "event_id":"FOMC|2026-12-08","name":"FOMC Meeting 2026-12-08",
+        "event_type":"FOMC",
+        "dt":datetime(2026,12,8,23,59,59,tzinfo=timezone.utc),
+        "schedule_known_at":datetime(2026,11,12,23,59,59,tzinfo=timezone.utc),
+        "published_date":"2026-11-12",
+    }
+    receipt={
+        "source":"FED_FOMC_CALENDAR","fetched_at":"2026-11-17T22:30:00+00:00",
+        "sha256":"a"*64,"pit":"CURRENT_PUBLISHED_SCHEDULE_NOT_HISTORICAL_PIT",
+        "published_date":"2026-11-12",
+    }
+
+    class FakeProvider:
+        def __init__(self,live): pass
+        def fomc_calendar(self,refresh=False): return [event],receipt
+        def cboe_options(self,*args,**kwargs): raise SourceUnavailable("OFFLINE")
+        def ofr_fsi(self,*args,**kwargs): raise SourceUnavailable("OFFLINE")
+        def bls_calendar(self,*args,**kwargs): raise SourceUnavailable("OFFLINE")
+        def cftc_nasdaq(self,*args,**kwargs): raise SourceUnavailable("OFFLINE")
+        def cftc_commodity(self,*args,**kwargs): raise SourceUnavailable("OFFLINE")
+        def cboe_equity_volume(self,*args,**kwargs): raise SourceUnavailable("OFFLINE")
+        def stock_breadth(self,*args,**kwargs): raise SourceUnavailable("OFFLINE")
+        def market_breadth(self,*args,**kwargs): raise SourceUnavailable("OFFLINE")
+        def ici_weekly_etf(self,*args,**kwargs): raise SourceUnavailable("OFFLINE")
+        def finra_short_volume(self,*args,**kwargs): raise SourceUnavailable("OFFLINE")
+
+    monkeypatch.setattr(module,"ExtendedPublicSources",FakeProvider)
+    result=module.scan_extended_public(tmp_path,sources=object(),
+        now=datetime(2026,11,17,22,30,tzinfo=timezone.utc))
+    fomc=next(x for x in result["features"] if x["id"]=="days_to_fomc")
+    assert fomc["value"]==21
+    assert fomc["pit"]=="CURRENT_PUBLISHED_EVENT_SCHEDULE_NOT_HISTORICAL_PIT"
+    assert result["source_health"]["fomc_calendar"]["status"]=="OBSERVED"
+    assert result["calendar_events"][0]["schedule_known_at"]=="2026-11-12T23:59:59+00:00"
