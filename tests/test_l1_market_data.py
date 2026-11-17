@@ -408,3 +408,92 @@ def test_store_schema_v2_migrates_pit_attestation_columns(tmp_path):
         assert {"pit_attestation_id","pit_attestation_sha256",
                 "pit_attestation_provider"} <= columns
         assert 3 in versions
+
+
+
+def test_coverage_distinguishes_old_observations_from_fresh_ones():
+    rows = [
+        {"feature_id": "rv5", "session_date": "2026-11-16",
+         "value": 12.3, "quality_status": "OBSERVED",
+         "available_at": "2026-11-16T22:00:00Z"},
+        {"feature_id": "vix_close", "session_date": "2026-11-01",
+         "value": 25.0, "quality_status": "OBSERVED",
+         "available_at": "2026-11-01T22:00:00Z"},
+        {"feature_id": "cftc_gold_net_pct_oi", "session_date": "2026-11-07",
+         "value": 5.0, "quality_status": "OBSERVED",
+         "available_at": "2026-11-13T22:00:00Z"},
+    ]
+    result = coverage_matrix(rows, freshness_asof="2026-11-17")
+    by_feature = {x["id"]: x for x in result["feature_health"]}
+    assert by_feature["rv5"]["status"] == "OBSERVED"
+    assert by_feature["vix_close"]["status"] == "STALE"
+    assert by_feature["cftc_gold_net_pct_oi"]["status"] == "OBSERVED"
+    assert by_feature["vix_close"]["age_days"] == 16
+    assert by_feature["cftc_gold_net_pct_oi"]["max_age_days"] == 12
+    assert result["summary"]["features_observed"] == 3
+    assert result["summary"]["features_current"] == 2
+    assert result["summary"]["features_stale"] == 1
+    vol = next(x for x in result["dimensions"] if x["id"] == "volatility")
+    assert vol["coverage"]["available"] == 2
+    assert vol["coverage"]["current"] == 1
+    assert vol["coverage"]["stale"] == 1
+    assert vol["status"] == "PARTIAL"
+    assert result["summary"]["forecast_eligible"] is False
+
+
+def test_historical_asof_excludes_later_available_revisions():
+    rows = [
+        {"feature_id": "vix_close", "session_date": "2026-11-15",
+         "value": 20.0, "status": "OBSERVED",
+         "available_at": "2026-11-15T22:00:00Z"},
+        {"feature_id": "vix_close", "session_date": "2026-11-16",
+         "value": 21.0, "status": "OBSERVED",
+         "available_at": "2026-11-17T01:00:00Z"},
+        {"feature_id": "rv5", "session_date": "2026-11-16",
+         "value": 14.0, "status": "OBSERVED",
+         "available_at": "2026-11-16T22:00:00"},
+    ]
+    result = coverage_matrix(rows, asof="2026-11-16",
+                             freshness_asof="2026-11-16")
+    by_feature = {x["id"]: x for x in result["feature_health"]}
+    assert by_feature["vix_close"]["observed_date"] == "2026-11-15"
+    assert by_feature["rv5"]["status"] == "MISSING"
+    assert result["summary"]["features_observed"] == 1
+    assert result["summary"]["historical_pit_verified"] is False
+
+
+def test_coverage_rejects_non_finite_stored_values():
+    result = coverage_matrix([
+        {"feature_id": "rv5", "session_date": "2026-11-16",
+         "value": float("nan"), "status": "OBSERVED"},
+        {"feature_id": "rv20", "session_date": "2026-11-16",
+         "value": float("inf"), "status": "OBSERVED"},
+        {"feature_id": "vix_close", "session_date": "2026-11-16",
+         "value": "not-a-number", "status": "OBSERVED"},
+    ], freshness_asof="2026-11-17")
+    assert result["summary"]["features_observed"] == 0
+    assert result["summary"]["features_current"] == 0
+
+
+def test_market_snapshot_historical_asof_hides_future_source_health(tmp_path):
+    pytest.importorskip("duckdb")
+    from quant_research.workflow.l1_market_ingest import (
+        market_data_snapshot, persist_public_scan,
+    )
+    payload = {
+        "schema": "qdr.l1.extended.v1",
+        "asof_session": "2026-11-16",
+        "fetched_at": "2026-11-17T01:00:00Z",
+        "features": [],
+        "source_health": {"ofr_fsi": {
+            "status": "OBSERVED", "fetched_at": "2026-11-17T01:00:00Z",
+            "effective_date": "2026-11-16",
+        }},
+        "calendar_events": [],
+    }
+    persist_public_scan(tmp_path, payload, scan_kind="extended")
+    latest = market_data_snapshot(tmp_path)
+    historical = market_data_snapshot(tmp_path, asof="2026-11-16")
+    assert len(latest["source_health"]) == 1
+    assert historical["source_health"] == []
+    assert historical["coverage"]["freshness_asof"] == "2026-11-16"
