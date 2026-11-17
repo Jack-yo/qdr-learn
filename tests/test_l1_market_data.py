@@ -188,3 +188,20 @@ def test_partial_breadth_keeps_pit_universe_blocker_visible():
     breadth=next(x for x in result["dimensions"] if x["id"]=="breadth")
     assert breadth["status"]=="PARTIAL"
     assert "pit_universe" in breadth["blocked_sources"]
+
+
+def test_missing_market_breadth_health_is_attributed_to_both_alpaca_sources(tmp_path):
+    pytest.importorskip("duckdb")
+    from quant_research.workflow.l1_market_ingest import market_data_snapshot,persist_public_scan
+    payload={
+        "schema":"qdr.l1.extended.v1","asof_session":"2026-11-16",
+        "fetched_at":"2026-11-16T22:00:00Z","features":[],
+        "source_health":{"market_breadth":{"status":"MISSING","code":"MISSING_ALPACA_CREDENTIALS",
+            "fetched_at":"2026-11-16T22:00:00Z"}},
+        "calendar_events":[],
+    }
+    persist_public_scan(tmp_path,payload,scan_kind="extended")
+    snapshot=market_data_snapshot(tmp_path)
+    health={x["source_key"]:x["status"] for x in snapshot["source_health"]}
+    assert health["alpaca_assets"]=="MISSING"
+    assert health["alpaca_snapshots"]=="MISSING"

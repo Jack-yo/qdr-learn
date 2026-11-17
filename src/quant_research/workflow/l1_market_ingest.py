@@ -118,17 +118,20 @@ def persist_public_scan(root, payload, *, scan_kind):
                     _register_receipt(store,input_digest,provider=input_source,
                         dataset=scan_kind+"_input_source_receipt",fetched_at=fetched,
                         available_at=fetched,metadata={"derived_parent":digest,"source_key":input_source})
-            if name=="market_breadth" and input_receipts:
+            if name=="market_breadth":
+                assets_ok=bool(input_receipts)
                 health_rows.append({"source_key":"alpaca_assets","asof_session":asof,
-                    "fetched_at":fetched,"status":"OBSERVED","error_code":None,
-                    "receipt_sha256":input_receipts[0],
+                    "fetched_at":fetched,"status":"OBSERVED" if assets_ok else "MISSING",
+                    "error_code":None if assets_ok else item.get("code"),
+                    "receipt_sha256":input_receipts[0] if assets_ok else None,
                     "metadata":{"scope":"CURRENT_ACTIVE_TRADABLE_NON_OTC_DIRECTORY"}})
                 health_rows.append({"source_key":"alpaca_snapshots","asof_session":asof,
                     "fetched_at":fetched,"status":item.get("status") or "MISSING",
                     "error_code":item.get("code"),"receipt_sha256":digest,
                     "metadata":{"coverage_n":item.get("coverage_n"),
                         "expected_n":item.get("expected_n"),
-                        "observation_mode":item.get("observation_mode")}})
+                        "observation_mode":item.get("observation_mode"),
+                        "feed_sources":item.get("feed_sources")}})
                 health_rows.append({"source_key":"market_breadth","asof_session":asof,
                     "fetched_at":fetched,"status":item.get("status") or "MISSING",
                     "error_code":item.get("code"),"receipt_sha256":digest,
