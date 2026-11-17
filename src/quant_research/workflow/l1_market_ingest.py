@@ -357,7 +357,7 @@ def market_data_snapshot(root, *, asof=None, db_path=None):
                 "status":str(row.get("status") or "MISSING"),
                 "coverage_n":coverage_n,"expected_n":expected_n,
                 "coverage_pct":round(coverage_n/expected_n*100,4) if expected_n else None,
-                "latest_session":str(row.get("session_date")) if row.get("session_date") else None,
+                "latest_session":str(row.get("session_date"))[:10] if row.get("session_date") else None,
                 "window_start":metadata.get("window_start"),
                 "window_end":metadata.get("window_end"),
                 "incremental":metadata.get("incremental"),
