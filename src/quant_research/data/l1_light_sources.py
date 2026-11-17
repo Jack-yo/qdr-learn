@@ -155,8 +155,9 @@ class LiveSources:
              history_feed=None):
         """Historical 1Day stock bars: SIP/IEX only; never delayed_sip.
 
-        end_date is inclusive. Feed, adjustment, window, and page SHA are
-        explicit source receipts, and all requests are size/row bounded.
+        end_date selects the completed exchange session. Query end is its
+        close + 1 minute (never the following midnight); SIP waits out the
+        vendor's recent-data embargo. All pages retain source receipts.
         """
         key=self.env.get('ALPACA_API_KEY'); secret=self.env.get('ALPACA_SECRET_KEY')
         if not key or not secret:
@@ -168,15 +169,38 @@ class LiveSources:
             raise SourceUnavailable('INVALID_HISTORICAL_ADJUSTMENT')
         if type(days) is not int or not 10<=days<=5000:
             raise SourceUnavailable('INVALID_HISTORY_WINDOW')
+        # Use the exchange session close, not tomorrow's midnight. A request
+        # extending into the newest 15 minutes (or into the future) is rejected
+        # for free-plan SIP history even when the requested daily bar has closed.
+        from quant_research.clock import TradingClock
+        now=self._now()
+        if not isinstance(now,datetime) or now.tzinfo is None or now.utcoffset() is None:
+            raise SourceUnavailable('INVALID_SOURCE_CLOCK')
+        now=now.astimezone(timezone.utc)
+        clock=TradingClock()
         try:
-            end=(datetime.fromisoformat(str(end_date)).date() if end_date
-                 else self._now().date())
+            if end_date:
+                end=datetime.fromisoformat(str(end_date)).date()
+                session=clock.session(end.isoformat())
+            else:
+                session=clock.calendar.date_to_session(now.date(),direction='previous')
+                while clock.close(session)+timedelta(minutes=20)>now:
+                    session=clock.calendar.previous_session(session)
+                end=session.date()
             start=(datetime.fromisoformat(str(start_date)).date() if start_date
                    else end-timedelta(days=days-1))
             if start>end or (end-start).days>5000:
                 raise ValueError('Bad history date window')
-        except (TypeError,ValueError,OverflowError):
+        except (TypeError,ValueError,OverflowError,KeyError):
             raise SourceUnavailable('INVALID_HISTORY_DATES')
+        close_at=clock.close(session).astimezone(timezone.utc)
+        query_end=close_at+timedelta(minutes=1)
+        if now<query_end:
+            raise SourceUnavailable('HISTORICAL_SESSION_NOT_CLOSED')
+        if feed=='sip' and now<query_end+timedelta(minutes=16):
+            # Wait and retry rather than silently switching to IEX or using
+            # a partially formed daily bar. Margin covers provider clock skew.
+            raise SourceUnavailable('HISTORICAL_SIP_EMBARGO_PENDING')
         symbols=tuple(symbols or self.ETF_SYMBOLS)
         if (not symbols or len(symbols)>50 or
                 any(not re.fullmatch(r'[A-Z][A-Z0-9.-]{0,13}',x) for x in symbols)):
@@ -184,7 +208,7 @@ class LiveSources:
         headers={'APCA-API-KEY-ID':key,'APCA-API-SECRET-KEY':secret}
         query={'symbols':','.join(sorted(set(symbols))),
                'start':start.isoformat(),
-               'end':(end+timedelta(days=1)).isoformat(),
+               'end':query_end.isoformat(),
                'timeframe':'1Day','adjustment':adjustment,
                'feed':feed,'sort':'asc','limit':10000}
         merged={sym:[] for sym in symbols}
