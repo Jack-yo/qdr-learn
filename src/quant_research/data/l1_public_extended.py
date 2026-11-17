@@ -689,8 +689,11 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
                             "FIXED_30_LARGE_CAP_STOCK_SAMPLE_NOT_FULL_MARKET_PIT")
                 elif name=="market_breadth":
                     coverage_n=value["coverage_n"];expected_n=value["expected_n"]
-                    status="OBSERVED" if coverage_n/expected_n>=0.98 and not value["batch_error_count"] else "PARTIAL"
+                    status=("OBSERVED" if coverage_n/expected_n>=0.98 and
+                             not value["batch_error_count"] and
+                             value["observation_mode"]!="STALE_SNAPSHOT" else "PARTIAL")
                     health[name]["status"]=status
+                    health[name]["effective_date"]=value["observed_date"]
                     scope="CURRENT_ACTIVE_TRADABLE_ALPACA_UNIVERSE_NOT_HISTORICAL_PIT"
                     meta={"observation_mode":value["observation_mode"],
                           "coverage_pct":round(value["market_snapshot_coverage_pct"],3),
