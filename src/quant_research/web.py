@@ -683,8 +683,14 @@ def handler(console):
                     return self.send(400, {'schema':'qdr.l1.official.v1',
                                            'status':'BLOCKED','code':'INVALID_QUERY'})
                 try:
-                    return self.send(200, scan_official_l1(console.root,
-                        refresh=q.get('refresh', ['0'])[0] == '1'))
+                    data=scan_official_l1(console.root,
+                        refresh=q.get('refresh', ['0'])[0] == '1')
+                    try:
+                        from .workflow.l1_market_ingest import persist_public_scan
+                        data["persistence"]=persist_public_scan(console.root,data,scan_kind="official")
+                    except Exception as exc:
+                        data["persistence"]={"status":"FAILED","code":type(exc).__name__}
+                    return self.send(200,data)
                 except (ValueError, OSError, TypeError):
                     return self.send(409, {'schema':'qdr.l1.official.v1',
                                            'status':'BLOCKED','code':'OFFICIAL_DATA_INVALID'})
@@ -695,8 +701,14 @@ def handler(console):
                     return self.send(400,{'schema':'qdr.l1.extended.v1',
                                           'status':'BLOCKED','code':'INVALID_QUERY'})
                 try:
-                    return self.send(200, scan_extended_public(console.root,
-                        refresh=q.get('refresh',['0'])[0]=='1'))
+                    data=scan_extended_public(console.root,
+                        refresh=q.get('refresh',['0'])[0]=='1')
+                    try:
+                        from .workflow.l1_market_ingest import persist_public_scan
+                        data["persistence"]=persist_public_scan(console.root,data,scan_kind="extended")
+                    except Exception as exc:
+                        data["persistence"]={"status":"FAILED","code":type(exc).__name__}
+                    return self.send(200,data)
                 except (ValueError,OSError,TypeError,KeyError):
                     return self.send(409,{'schema':'qdr.l1.extended.v1',
                                           'status':'BLOCKED','code':'EXTENDED_PUBLIC_DATA_INVALID'})
@@ -710,11 +722,31 @@ def handler(console):
                     return self.send(400,{'schema':'qdr.l1.v2','status':'BLOCKED','code':'INVALID_QUERY'})
                 try:
                     data=current_l1_v2(console.root,refresh=params.get('refresh',['0'])[0]=='1')
+                    try:
+                        from .workflow.l1_market_ingest import persist_l1_v2
+                        data["persistence"]=persist_l1_v2(console.root,data)
+                    except Exception as exc:
+                        data["persistence"]={"status":"FAILED","code":type(exc).__name__}
                     return self.send(200,data)
                 except SourceUnavailable as exc:
                     return self.send(409,{'schema':'qdr.l1.v2','status':'BLOCKED','code':exc.code})
                 except (ValueError, OSError, KeyError, TypeError):
                     return self.send(409,{'schema':'qdr.l1.v2','status':'BLOCKED','code':'L1_V2_DATA_INVALID'})
+            if path == '/api/v1/l1/market-data/coverage':
+                from .workflow.l1_market_ingest import market_data_snapshot
+                from datetime import date as date_cls
+                query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+                if set(query)-{'asof'} or any(len(v)!=1 for v in query.values()):
+                    return self.send(400,{'schema':'qdr.l1.market_data_snapshot.v1',
+                                          'status':'BLOCKED','code':'INVALID_QUERY'})
+                asof=query.get('asof',[None])[0]
+                try:
+                    if asof is not None and date_cls.fromisoformat(asof).isoformat()!=asof:
+                        raise ValueError("Invalid asof")
+                    return self.send(200,market_data_snapshot(console.root,asof=asof))
+                except (ValueError,OSError,KeyError,TypeError):
+                    return self.send(409,{'schema':'qdr.l1.market_data_snapshot.v1',
+                                          'status':'BLOCKED','code':'MARKET_DATA_SNAPSHOT_INVALID'})
             if path.startswith('/api/v1/l1/'):
                 from .workflow.l1_runtime import (
                     L1Blocked, market_overview_for_api, observations_for_api,
