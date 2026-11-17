@@ -263,15 +263,15 @@ def _register_series_receipt(store, receipt, dataset, observed_start, observed_e
     return digest
 
 
-def _obs(feature, dimension, day, value, unit, provider, source, receipt, fetched,
-         metadata=None):
+def _reference_row(series_id, feature, day, value, unit, provider, source,
+                   receipt, fetched, metadata=None):
     return {
-        "session_date": day, "dimension": dimension, "feature_id": feature,
+        "observation_date": day, "series_id": series_id, "feature_id": feature,
         "value": value, "unit": unit, "provider": provider, "source": source,
-        "observed_at": None, "available_at": fetched,
+        "available_at": fetched,
         "vintage_id": "CURRENT_DOWNLOAD:" + receipt[:12],
         "pit_status": "CURRENT_VINTAGE_NOT_HISTORICAL_PIT",
-        "quality_status": "OBSERVED", "coverage_n": None, "expected_n": None,
+        "quality_status": "OBSERVED",
         "receipt_sha256": receipt, "metadata": metadata or {},
     }
 
@@ -291,10 +291,11 @@ def _sync_macro(store, sources, *, years, refresh, asof):
             store, receipt, "vix_history_current_download",
             min(selected), max(selected), provider="CBOE")
         fetched = receipt["fetched_at"]
-        observations.extend(_obs(
-            "vix_close", "volatility", d, float(v), "点", "CBOE",
+        observations.extend(_reference_row(
+            "CBOE:VIX", "vix_close", d, float(v), "点", "CBOE",
             "CBOE_VIX_CURRENT_DOWNLOAD", digest, fetched,
-            {"current_download_not_historical_vintage": True})
+            {"dimension": "volatility",
+             "current_download_not_historical_vintage": True})
             for d, v in sorted(selected.items()))
         output["series"]["vix_close"] = len(selected)
     except (SourceUnavailable, ValueError, TypeError, KeyError) as exc:
@@ -313,10 +314,10 @@ def _sync_macro(store, sources, *, years, refresh, asof):
                 store, receipt, "fred_history_current_download:" + series_id,
                 min(selected), max(selected), provider="FRED")
             fetched = receipt["fetched_at"]
-            observations.extend(_obs(
-                feature, dimension, d, v, unit, "FRED",
+            observations.extend(_reference_row(
+                "FRED:" + series_id, feature, d, v, unit, "FRED",
                 "FRED_" + series_id + "_CURRENT_DOWNLOAD", digest, fetched,
-                {"series_id": series_id,
+                {"dimension": dimension, "series_id": series_id,
                  "registry_primary_source_may_differ": True,
                  "current_download_not_historical_vintage": True})
                 for d, v in sorted(selected.items()))
@@ -340,11 +341,11 @@ def _sync_macro(store, sources, *, years, refresh, asof):
         for i in range(5, len(selected)):
             day, value = selected[i]
             previous = selected[i - 5][1]
-            observations.append(_obs(
-                "dxy_return_5", "cross_asset", day,
+            observations.append(_reference_row(
+                "FRED:" + USD_SERIES + ":RETURN5", "dxy_return_5", day,
                 (value / previous - 1.0) * 100.0, "%", "FRED",
                 "FRED_DTWEXBGS_BROAD_USD_PROXY", digest, fetched,
-                {"series_id": USD_SERIES,
+                {"dimension": "cross_asset", "series_id": USD_SERIES,
                  "proxy": "BROAD_TRADE_WEIGHTED_USD_NOT_DXY",
                  "current_download_not_historical_vintage": True}))
         output["series"]["dxy_return_5"] = len(selected) - 5
@@ -379,17 +380,17 @@ def _sync_macro(store, sources, *, years, refresh, asof):
             metadata={"derived_receipt": True, "inputs": [ld, rd],
                       "historical_pit_verified": False},
         )
-        observations.extend(_obs(
-            feature, dimension, d, (lv[d] - rv[d]) * 100.0, "bps",
+        observations.extend(_reference_row(
+            "DERIVED:" + feature, feature, d, (lv[d] - rv[d]) * 100.0, "bps",
             "QDR_DERIVED", "FRED_CURRENT_DOWNLOAD_DERIVED",
             digest, fetched,
-            {"components": [left, right],
+            {"dimension": dimension, "components": [left, right],
              "current_download_not_historical_vintage": True})
             for d in common)
         output["series"][feature] = len(common)
 
     if observations:
-        output["rows_written"] = store.write_observations(observations)
+        output["rows_written"] = store.write_reference_series(observations)
     else:
         output["rows_written"] = 0
         output["status"] = "BLOCKED"
