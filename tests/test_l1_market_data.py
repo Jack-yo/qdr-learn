@@ -263,6 +263,14 @@ def test_append_only_bar_and_universe_reads_select_latest_revision(tmp_path):
         assert bars.iloc[0].close==102
         assert bars.iloc[0].receipt_sha256==second_sha
 
+        universe_first=b"first universe revision"
+        universe_second=b"corrected universe revision"
+        universe_first_sha=hashlib.sha256(universe_first).hexdigest()
+        universe_second_sha=hashlib.sha256(universe_second).hexdigest()
+        for payload,digest in ((universe_first,universe_first_sha),
+                               (universe_second,universe_second_sha)):
+            store.write_receipt(provider="fixture",dataset="universe",
+                fetched_at=stamp,available_at=stamp,receipt_sha256=digest,payload=payload)
         universe_base={
             "session_date":"2026-11-16","universe_id":"CURRENT_SAMPLE",
             "security_id":"ID:AAA","symbol":"AAA","is_member":True,
@@ -270,13 +278,13 @@ def test_append_only_bar_and_universe_reads_select_latest_revision(tmp_path):
             "snapshot_complete":True,"pit_status":"CURRENT_SNAPSHOT_ONLY",
             "known_at":stamp,
         }
-        store.write_universe([{**universe_base,"receipt_sha256":first_sha}])
+        store.write_universe([{**universe_base,"receipt_sha256":universe_first_sha}])
         store.write_universe([{**universe_base,"is_member":False,
-                               "receipt_sha256":second_sha}])
+                               "receipt_sha256":universe_second_sha}])
         universe=store.read_universe(universe_id="CURRENT_SAMPLE")
         assert len(universe)==1
         assert bool(universe.iloc[0].is_member) is False
-        assert universe.iloc[0].receipt_sha256==second_sha
+        assert universe.iloc[0].receipt_sha256==universe_second_sha
 
 def test_coverage_keeps_all_partial_feature_rows_as_partial():
     from quant_research.data.l1_market_catalog import FEATURES,coverage_matrix
