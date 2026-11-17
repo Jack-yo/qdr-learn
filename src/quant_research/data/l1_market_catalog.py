@@ -286,6 +286,17 @@ def coverage_matrix(observations: Iterable[dict] = (), *,
     """Build coverage from actual stored observations; registry alone is not coverage."""
     rows = list(observations)
     health = source_health or {}
+
+    def source_timestamp(row):
+        # pandas NaT and NA are not valid timestamps, and bool(pd.NA) raises.
+        # Prefer the actual declared availability timestamp over fetch time.
+        for field in ("available_at", "fetched_at"):
+            value = row.get(field)
+            if value is not None and str(value).lower() not in (
+                    "", "nat", "nan", "<na>", "none"):
+                return value
+        return None
+
     latest_rows = {}
     for row in rows:
         key = row.get("feature_id") or row.get("id")
@@ -293,7 +304,7 @@ def coverage_matrix(observations: Iterable[dict] = (), *,
         if asof and day and day > asof:
             continue
         if asof and not available_by_session_end(
-                row.get("available_at") or row.get("fetched_at"), asof):
+                source_timestamp(row), asof):
             continue
         if key not in FEATURE_BY_KEY:
             continue
@@ -301,7 +312,7 @@ def coverage_matrix(observations: Iterable[dict] = (), *,
             if value is None:
                 return ""
             return value.isoformat() if hasattr(value, "isoformat") else str(value)
-        rank = (day, sort_stamp(row.get("available_at") or row.get("fetched_at")),
+        rank = (day, sort_stamp(source_timestamp(row)),
                 sort_stamp(row.get("ingested_at")), str(row.get("provider") or ""),
                 str(row.get("receipt_sha256") or ""))
         previous = latest_rows.get(key)
@@ -340,8 +351,7 @@ def coverage_matrix(observations: Iterable[dict] = (), *,
             "max_age_days": freshness_info["max_age_days"],
             "freshness": freshness_info["status"],
             "source": str(row.get("source") or row.get("provider") or "") or None,
-            "availability_timestamp_recorded": bool(
-                row.get("available_at") or row.get("fetched_at")),
+            "availability_timestamp_recorded": source_timestamp(row) is not None,
         }
     dimensions = []
     for dimension in DIMENSIONS:
