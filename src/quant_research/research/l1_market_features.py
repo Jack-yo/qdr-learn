@@ -299,6 +299,7 @@ def _breadth_features(bars, cutoffs, universe, min_coverage):
             ("ad_line", ad_line if ad_line_valid else np.nan, "累计只数"),
             ("up_volume_share", up_volume / total_volume * 100 if total_volume else np.nan, "%"),
             ("downside_sync_share", float((data.ret < 0).mean() * 100), "%"),
+            ("stock_dispersion_1", float(data.ret.std(ddof=0) * 100), "%"),
             ("pct_above_ma20", float((data.close > data.ma20).mean() * 100)
              if data.ma20.notna().mean() >= min_coverage else np.nan, "%"),
             ("pct_above_ma50", float((data.close > data.ma50).mean() * 100)
@@ -312,7 +313,8 @@ def _breadth_features(bars, cutoffs, universe, min_coverage):
             ("trin", trin, "倍"),
         ]
         for feature_id, value, unit in metrics:
-            output.append(_record(day, "breadth", feature_id, value, unit,
+            feature_dimension = FEATURE_BY_KEY[feature_id].dimension
+            output.append(_record(day, feature_dimension, feature_id, value, unit,
                 available, digest, quality="OBSERVED" if pd.notna(value) else "MISSING",
                 pit="PIT_UNVERIFIED_CURRENT_UNIVERSE", coverage_n=len(current), expected_n=expected,
                 source="CURRENT_COMPLETE_UNIVERSE_SNAPSHOT",

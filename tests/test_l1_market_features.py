@@ -56,7 +56,9 @@ def test_breadth_requires_explicit_complete_snapshot_and_remains_unverified_pit(
     latest_day = cutoffs.session_date.iloc[-1].date().isoformat()
     breadth = result["observations"].query("session_date == @latest_day and dimension == 'breadth'")
     assert "advances" in set(breadth.feature_id)
-    assert set(breadth.pit_status) == {"CURRENT_SNAPSHOT_ONLY"}
+    assert set(breadth.pit_status) == {"PIT_UNVERIFIED_CURRENT_UNIVERSE"}
+    correlation = result["observations"].query("session_date == @latest_day and dimension == \"correlation\"")
+    assert {"stock_dispersion_1", "downside_sync_share"} <= set(correlation.feature_id)
     assert not any(breadth.get("model_eligible", []))
     incomplete = universe.copy()
     incomplete["snapshot_complete"] = False

@@ -280,7 +280,10 @@ class L1MarketStore:
         if any(not x[1] or not x[2] or not x[3] or not x[5] for x in rows):
             raise ValueError("UNIVERSE_IDENTITY_REQUIRED")
         if rows:
-            self.conn.executemany("""INSERT INTO l1_market_universe VALUES (
+            self.conn.executemany("""INSERT INTO l1_market_universe (
+                session_date, universe_id, security_id, symbol, is_member, provider,
+                membership_basis, snapshot_complete, pit_status, known_at,
+                receipt_sha256, ingested_at) VALUES (
                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING""", rows)
         return len(rows)
 
@@ -351,7 +354,8 @@ class L1MarketStore:
                 self._require_receipt(digest)
             rows.append((str(item.get("source_key") or item.get("id") or ""),
                 _date(item.get("asof_session") or item.get("session_date")),
-                _timestamp(item.get("fetched_at")), str(item.get("status") or "MISSING"),
+                _timestamp(item.get("fetched_at") or item.get("checked_at") or datetime.now(timezone.utc)),
+                str(item.get("status") or "MISSING"),
                 str(item.get("error_code") or item.get("code") or "") or None,
                 digest, _json(item.get("metadata"))))
         if any(not x[0] or not x[3] for x in rows):
