@@ -523,6 +523,7 @@ class ExtendedPublicSources:
             "coverage_n":covered,"expected_n":expected,
             "observation_mode":mode,"observed_date":latest_day,
             "batch_count":len(snapshot_receipts),"batch_error_count":len(batch_errors),
+            "feed_sources":sorted({x.get("source","UNKNOWN") for x in snapshot_receipts}),
             "batch_errors":batch_errors[:10],
             "asset_receipt_sha256":asset_receipt["sha256"],
             "snapshot_receipt_sha256":[x["sha256"] for x in snapshot_receipts],
@@ -532,7 +533,7 @@ class ExtendedPublicSources:
             "pit":"CURRENT_ACTIVE_ASSET_UNIVERSE_NOT_HISTORICAL_PIT",
             "coverage_n":covered,"expected_n":expected,"coverage":coverage,
             "observation_mode":mode,"batch_error_count":len(batch_errors),
-            "input_receipts":input_hashes}
+            "feed_sources":result["feed_sources"],"input_receipts":input_hashes}
         return {limit:result},receipt
 
     def stock_breadth(self,limit,*,refresh=False):
@@ -620,6 +621,7 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
                               "coverage_n":receipt.get("coverage_n"),
                               "expected_n":receipt.get("expected_n"),
                               "observation_mode":receipt.get("observation_mode"),
+                              "feed_sources":receipt.get("feed_sources"),
                               "batch_error_count":receipt.get("batch_error_count"),
                               "input_receipts":receipt.get("input_receipts")}
                 def add(domain,fid,label,val,unit,scope="CURRENT_OBSERVATION_NOT_PIT",
@@ -694,6 +696,7 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
                           "coverage_pct":round(value["market_snapshot_coverage_pct"],3),
                           "batch_count":value["batch_count"],
                           "batch_error_count":value["batch_error_count"],
+                          "feed_sources":value["feed_sources"],
                           "input_receipts":[value["asset_receipt_sha256"]]+value["snapshot_receipt_sha256"]}
                     observed_day=value["observed_date"]
                     for domain,field,title,unit in (

@@ -90,7 +90,7 @@ function fromSources(v3,v2,official,extended){
    'breadth_proxy_rsp_spy_5','small_cap_relative_5','credit_proxy_hyg_lqd_5',
    'downside_rv20','rv5','rv20','drawdown20','overnight','intraday',
    'sector_dispersion_1','sector_up_share_1','duration_proxy_5']);
- const basisPoints=new Set(['credit_spread','spy_level1_spread_bps']);
+ const basisPoints=new Set(['credit_spread']);
  const unitById={vol_ratio:'倍',vix:'点',credit_spread:'bps',
    treasury_yield:'%',sofr:'%',spy_level1_spread_bps:'bps',
    close_location:'ratio',momentum_z:'z',pressure_z:'z',decay_z:'z'};
@@ -302,6 +302,7 @@ function rawPanel(rows,official,extended,v3,v2){
      '<small>'+e(x.effective_date||'无有效观测日期')+
      (x.coverage_n!=null?' · 覆盖 '+e(x.coverage_n)+'/'+e(x.expected_n):'')+
      (x.observation_mode?' · '+e(x.observation_mode):'')+
+     (Array.isArray(x.feed_sources)&&x.feed_sources.length?' · '+e(x.feed_sources.join('/')):'')+
      (x.fetched_at?' · 获取 '+stripTime(x.fetched_at):'')+'</small></div>').join('')+
    '</div></details>':'<p class="lv3-small">外部数据尚未返回来源健康状态。</p>';
  return box('lv3-data',title('市场原始数据监测',
