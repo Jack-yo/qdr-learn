@@ -469,15 +469,12 @@ class L1MarketStore:
         return self.conn.execute(sql, params).fetchdf()
 
     def read_universe(self, *, universe_id=None, start=None, end=None):
-        query, params = "SELECT * FROM l1_market_universe WHERE 1=1", []
+        params = []
         if universe_id:
-            query += " AND universe_id=?"
             params.append(universe_id)
         if start:
-            query += " AND session_date>=?"
             params.append(_date(start))
         if end:
-            query += " AND session_date<=?"
             params.append(_date(end))
         columns = ("session_date, universe_id, security_id, symbol, is_member, provider, "
                    "membership_basis, snapshot_complete, pit_status, known_at, "
