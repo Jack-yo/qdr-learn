@@ -1,12 +1,11 @@
-"""Six-system L1 feature engine. All outputs are research observations or labels.
+"""Six-system L1 feature engine. Outputs are research observations or labels.
 
-Market breadth requires a complete dated membership snapshot. Current-only
-membership is explicitly unverified PIT. Future path labels are returned
-separately and must never be passed as predictor features.
+Breadth requires a complete dated universe snapshot and current source receipts.
+PIT is never inferred from a current directory. Forward path labels are isolated
+from predictor features and are available only after their future window ends.
 """
 from __future__ import annotations
 
-from datetime import date
 from hashlib import sha256
 import json
 import re
@@ -14,16 +13,15 @@ import re
 import numpy as np
 import pandas as pd
 
-from quant_research.data.l1_market_catalog import FEATURE_BY_KEY, DIMENSION_BY_KEY
+from quant_research.data.l1_market_catalog import FEATURE_BY_KEY
 
 _SHA = re.compile(r"^[a-f0-9]{64}$")
 _SECTOR_ETFS = ("XLB", "XLC", "XLE", "XLF", "XLI", "XLK",
                 "XLP", "XLRE", "XLU", "XLV", "XLY")
 _STYLE_ETFS = ("IWB", "IWM", "IWD", "IWF", "MTUM", "QUAL",
                "USMV", "VLUE", "VTV", "VUG")
-_REQUIRED_BARS = {"security_id", "symbol", "open", "high", "low",
-                  "close", "volume", "available_at", "provider",
-                  "price_basis", "receipt_sha256"}
+_REQUIRED_BARS = {"security_id", "symbol", "open", "high", "low", "close",
+                  "volume", "available_at", "provider", "price_basis", "receipt_sha256"}
 
 
 def _dates(frame, label):
@@ -40,11 +38,20 @@ def _dates(frame, label):
     return out
 
 
+def _aware_utc(value, *, optional=False):
+    if optional and (value is None or pd.isna(value)):
+        return pd.NaT
+    stamp = pd.Timestamp(value)
+    if stamp.tzinfo is None:
+        raise ValueError("TIMESTAMP_MUST_BE_TIMEZONE_AWARE")
+    return stamp.tz_convert("UTC")
+
+
 def _cutoffs(cutoffs):
     c = _dates(cutoffs, "CUTOFFS")
     if "decision_cutoff_utc" not in c:
         raise ValueError("DECISION_CUTOFF_REQUIRED")
-    c["decision_cutoff_utc"] = pd.to_datetime(c.decision_cutoff_utc, utc=True, errors="raise")
+    c["decision_cutoff_utc"] = c.decision_cutoff_utc.map(_aware_utc)
     if c.decision_cutoff_utc.isna().any() or c.session_date.duplicated().any():
         raise ValueError("CUTOFFS_DUPLICATE_OR_MISSING")
     return c.sort_values("session_date").reset_index(drop=True)
@@ -57,7 +64,9 @@ def _bars(bars, cutoffs):
         raise ValueError("BARS_MISSING_COLUMNS:" + ",".join(sorted(missing)))
     if b.duplicated(["session_date", "security_id", "provider", "price_basis"]).any():
         raise ValueError("DUPLICATE_SECURITY_BARS")
-    b["available_at"] = pd.to_datetime(b.available_at, utc=True, errors="raise")
+    if b.duplicated(["session_date", "symbol"]).any():
+        raise ValueError("DUPLICATE_SYMBOL_BARS")
+    b["available_at"] = b.available_at.map(_aware_utc)
     if b.available_at.isna().any():
         raise ValueError("BAR_AVAILABLE_AT_REQUIRED")
     if not b.receipt_sha256.astype(str).str.fullmatch(_SHA).all():
@@ -67,9 +76,11 @@ def _bars(bars, cutoffs):
     for field in ("open", "high", "low", "close", "volume"):
         b[field] = pd.to_numeric(b[field], errors="coerce")
     values = b[["open", "high", "low", "close", "volume"]].to_numpy(dtype=float)
-    if not np.isfinite(values).all() or (b[["open", "high", "low", "close"]] <= 0).any().any() or (b.volume < 0).any():
+    if (not np.isfinite(values).all() or
+        (b[["open", "high", "low", "close"]] <= 0).any().any() or (b.volume < 0).any()):
         raise ValueError("BAR_PRICE_OR_VOLUME_INVALID")
-    if (b.high < b[["open", "close", "low"]].max(axis=1)).any() or (b.low > b[["open", "close", "high"]].min(axis=1)).any():
+    if ((b.high < b[["open", "close", "low"]].max(axis=1)).any() or
+        (b.low > b[["open", "close", "high"]].min(axis=1)).any()):
         raise ValueError("BAR_OHLC_INCONSISTENT")
     b = b.merge(cutoffs, on="session_date", how="left", validate="many_to_one")
     if b.decision_cutoff_utc.isna().any():
@@ -93,6 +104,8 @@ def _record(session, dimension, feature_id, value, unit, available_at,
         raise ValueError("UNREGISTERED_FEATURE:" + feature_id)
     if FEATURE_BY_KEY[feature_id].dimension != dimension:
         raise ValueError("FEATURE_DIMENSION_MISMATCH:" + feature_id)
+    if not _SHA.fullmatch(str(receipt_sha)):
+        raise ValueError("FEATURE_RECEIPT_SHA256_INVALID")
     numeric = None if value is None or pd.isna(value) else float(value)
     if numeric is not None and not np.isfinite(numeric):
         raise ValueError("FEATURE_VALUE_NONFINITE")
@@ -100,8 +113,7 @@ def _record(session, dimension, feature_id, value, unit, available_at,
         "session_date": pd.Timestamp(session).date().isoformat(),
         "dimension": dimension, "feature_id": feature_id, "value": numeric,
         "unit": unit, "provider": provider, "source": source,
-        "observed_at": pd.Timestamp(session).tz_localize("UTC").isoformat(),
-        "available_at": pd.Timestamp(available_at).isoformat(),
+        "observed_at": None, "available_at": pd.Timestamp(available_at).isoformat(),
         "vintage_id": vintage, "pit_status": pit,
         "quality_status": quality, "coverage_n": coverage_n,
         "expected_n": expected_n, "receipt_sha256": receipt_sha,
@@ -125,19 +137,20 @@ def _security_record(session, security_id, symbol, feature_id, value, unit,
 
 def _per_security_features(bars, cutoffs):
     sessions = pd.DatetimeIndex(cutoffs.session_date)
-    security_rows, market_rows = [], []
-    for security_id, group in bars.groupby("security_id", sort=False):
+    security_rows = []
+    benchmark = bars.loc[bars.symbol.eq("SPY")].sort_values("session_date")
+    benchmark_close = benchmark.set_index("session_date").close.reindex(sessions)
+    benchmark_ret5 = benchmark_close.div(benchmark_close.shift(5)).sub(1)
+    for (security_id, provider, price_basis), group in bars.groupby(
+            ["security_id", "provider", "price_basis"], sort=False):
         group = group.sort_values("session_date").set_index("session_date")
         symbol = str(group.symbol.iloc[-1])
         if group.symbol.nunique() != 1:
             raise ValueError("SECURITY_SYMBOL_MAPPING_CHANGED_WITHOUT_IDENTITY_EVENT")
-        # Reindex to the exchange-session calendar. A missing bar breaks rolling windows.
         x = group.reindex(sessions)
         close = pd.to_numeric(x.close, errors="coerce")
-        opn = pd.to_numeric(x.open, errors="coerce")
         high = pd.to_numeric(x.high, errors="coerce")
         low = pd.to_numeric(x.low, errors="coerce")
-        volume = pd.to_numeric(x.volume, errors="coerce")
         ret1 = close.pct_change(fill_method=None)
         for window in (5, 20, 60):
             x[f"ret_{window}"] = close.div(close.shift(window)).sub(1)
@@ -147,38 +160,35 @@ def _per_security_features(bars, cutoffs):
                                 (low-prior_close).abs()], axis=1).max(axis=1)
         x["atr14_pct"] = true_range.rolling(14, min_periods=14).mean().div(close)
         x["drawdown20"] = close.div(close.rolling(20, min_periods=20).max()).sub(1)
-        for window in (5, 20, 60):
-            x[f"rv{window}"] = ret1.rolling(window, min_periods=window).std() * np.sqrt(252)
-        x["downside_rv20"] = ret1.clip(upper=0).pow(2).rolling(20, min_periods=20).mean().mul(252).pow(.5)
-        x["above_ma20"] = close > close.rolling(20, min_periods=20).mean()
-        x["above_ma50"] = close > close.rolling(50, min_periods=50).mean()
-        x["above_ma200"] = close > close.rolling(200, min_periods=200).mean()
-        x["prev_high252"] = high.shift(1).rolling(252, min_periods=252).max()
-        x["prev_low252"] = low.shift(1).rolling(252, min_periods=252).min()
-        x["new_high52w"] = close > x.prev_high252
-        x["new_low52w"] = close < x.prev_low252
-        source = str(group.provider.iloc[-1])
-        basis = str(group.price_basis.iloc[-1])
+        x["rv20"] = ret1.rolling(20, min_periods=20).std() * np.sqrt(252)
         for day in sessions:
             row = x.loc[day]
             if pd.isna(row.close):
                 continue
-            available = group.loc[group.index <= day, "available_at"].max()
-            receipts = group.loc[group.index <= day, "receipt_sha256"].dropna().tolist()
-            digest = _receipt_digest(day, receipts)
-            for feature, col, unit in (
-                ("security_return_1", "ret_1", "%"),
-                ("security_return_5", "ret_5", "%"),
-                ("security_return_20", "ret_20", "%"),
-                ("security_return_60", "ret_60", "%"),
-                ("atr14_pct", "atr14_pct", "%"),
-                ("drawdown20", "drawdown20", "%"),
-                ("rv20", "rv20", "%"),
+            past = group.loc[group.index <= day]
+            available = past.available_at.max()
+            digest = _receipt_digest(day, past.receipt_sha256.dropna().tolist(),
+                                     version="L1_SECURITY_FEATURES_V1:"+str(security_id))
+            for feature, col, scale in (
+                ("security_return_1", "ret_1", 100.0),
+                ("security_return_5", "ret_5", 100.0),
+                ("security_return_20", "ret_20", 100.0),
+                ("security_return_60", "ret_60", 100.0),
+                ("atr14_pct", "atr14_pct", 100.0),
+                ("drawdown20", "drawdown20", 100.0),
+                ("rv20", "rv20", 100.0),
             ):
-                if feature not in FEATURE_BY_KEY:
-                    continue
                 security_rows.append(_security_record(day, security_id, symbol, feature,
-                    row[col], unit, available, digest, source=source, price_basis=basis))
+                    row[col] * scale if pd.notna(row[col]) else np.nan,
+                    "%", available, digest, source=str(provider), price_basis=str(price_basis)))
+            if symbol in _SECTOR_ETFS and pd.notna(row.ret_5) and pd.notna(benchmark_ret5.loc[day]):
+                security_rows.append(_security_record(day, security_id, symbol, "sector_relative_5",
+                    (row.ret_5-benchmark_ret5.loc[day])*100, "%",
+                    available, digest, source=str(provider), price_basis=str(price_basis)))
+            if symbol in _STYLE_ETFS and pd.notna(row.ret_5) and pd.notna(benchmark_ret5.loc[day]):
+                security_rows.append(_security_record(day, security_id, symbol, "style_relative_5",
+                    (row.ret_5-benchmark_ret5.loc[day])*100, "%",
+                    available, digest, source=str(provider), price_basis=str(price_basis)))
     return security_rows
 
 
@@ -188,7 +198,8 @@ def _breadth_features(bars, cutoffs, universe, min_coverage):
                      "status": "MISSING", "reason": "NO_DATED_UNIVERSE",
                      "coverage_n": 0, "expected_n": None} for d in cutoffs.session_date]
     u = _dates(universe, "UNIVERSE")
-    required = {"universe_id", "security_id", "symbol", "is_member", "known_at", "snapshot_complete"}
+    required = {"universe_id", "security_id", "symbol", "is_member",
+                "known_at", "snapshot_complete", "provider", "receipt_sha256"}
     if required - set(u.columns):
         raise ValueError("UNIVERSE_MISSING_COLUMNS:" + ",".join(sorted(required-set(u.columns))))
     if u.duplicated(["session_date", "universe_id", "security_id"]).any():
@@ -197,7 +208,9 @@ def _breadth_features(bars, cutoffs, universe, min_coverage):
         raise ValueError("UNIVERSE_MEMBERSHIP_NOT_BOOLEAN")
     if not u.snapshot_complete.map(lambda v: type(v) in (bool, np.bool_)).all():
         raise ValueError("UNIVERSE_COMPLETENESS_NOT_BOOLEAN")
-    u["known_at"] = pd.to_datetime(u.known_at, utc=True, errors="raise")
+    if not u.receipt_sha256.astype(str).str.fullmatch(_SHA).all():
+        raise ValueError("UNIVERSE_RECEIPT_SHA256_INVALID")
+    u["known_at"] = u.known_at.map(_aware_utc)
     u = u.merge(cutoffs, on="session_date", how="left", validate="many_to_one")
     if u.decision_cutoff_utc.isna().any() or (u.known_at > u.decision_cutoff_utc).any():
         raise ValueError("UNIVERSE_NOT_KNOWN_AT_DECISION_CUTOFF")
@@ -219,15 +232,20 @@ def _breadth_features(bars, cutoffs, universe, min_coverage):
             "prev_low252": low.shift(1).rolling(252, min_periods=252).min(),
         }, index=sessions)
     output, quality = [], []
+    ad_line, ad_line_started, ad_line_valid = 0, False, True
     for cutoff in cutoffs.itertuples(index=False):
         day = cutoff.session_date
         rows = u.loc[u.session_date.eq(day)]
         if rows.empty:
+            if ad_line_started:
+                ad_line_valid = False
             quality.append({"session_date": day.date().isoformat(), "dimension": "breadth",
                             "status": "MISSING", "reason": "MISSING_UNIVERSE_DAY",
                             "coverage_n": 0, "expected_n": None})
             continue
         if not rows.snapshot_complete.all():
+            if ad_line_started:
+                ad_line_valid = False
             quality.append({"session_date": day.date().isoformat(), "dimension": "breadth",
                             "status": "PARTIAL", "reason": "UNIVERSE_SNAPSHOT_NOT_ATTESTED_COMPLETE",
                             "coverage_n": 0, "expected_n": int(rows.is_member.sum())})
@@ -235,6 +253,8 @@ def _breadth_features(bars, cutoffs, universe, min_coverage):
         members = rows.loc[rows.is_member]
         expected = len(members)
         if expected < 30:
+            if ad_line_started:
+                ad_line_valid = False
             quality.append({"session_date": day.date().isoformat(), "dimension": "breadth",
                             "status": "PARTIAL", "reason": "UNIVERSE_TOO_SMALL",
                             "coverage_n": 0, "expected_n": expected})
@@ -249,6 +269,8 @@ def _breadth_features(bars, cutoffs, universe, min_coverage):
                 current.append(record)
         coverage = len(current) / expected if expected else 0
         if coverage < min_coverage:
+            if ad_line_started:
+                ad_line_valid = False
             quality.append({"session_date": day.date().isoformat(), "dimension": "breadth",
                             "status": "PARTIAL", "reason": "BAR_COVERAGE_BELOW_THRESHOLD",
                             "coverage_n": len(current), "expected_n": expected})
@@ -262,12 +284,21 @@ def _breadth_features(bars, cutoffs, universe, min_coverage):
         total_volume = up_volume + down_volume
         trin = ((advances / declines) / (up_volume / down_volume)
                 if advances and declines and up_volume > 0 and down_volume > 0 else np.nan)
-        digest = _receipt_digest(day, bars.loc[bars.session_date.le(day), "receipt_sha256"].tolist())
-        available = max(pd.Timestamp(cutoff.decision_cutoff_utc),
-                        pd.to_datetime(members.known_at, utc=True).max())
+        if not ad_line_started:
+            ad_line_started = True
+            ad_line = advances - declines
+        elif ad_line_valid:
+            ad_line += advances - declines
+        daily_bars = bars.loc[bars.session_date.eq(day) & bars.security_id.isin(members.security_id)]
+        available = max(daily_bars.available_at.max(), members.known_at.max())
+        digest = _receipt_digest(day,
+            daily_bars.receipt_sha256.tolist()+members.receipt_sha256.tolist(),
+            version="L1_BREADTH_FEATURES_V1")
         metrics = [
             ("advances", advances, "只"), ("declines", declines, "只"),
+            ("ad_line", ad_line if ad_line_valid else np.nan, "累计只数"),
             ("up_volume_share", up_volume / total_volume * 100 if total_volume else np.nan, "%"),
+            ("downside_sync_share", float((data.ret < 0).mean() * 100), "%"),
             ("pct_above_ma20", float((data.close > data.ma20).mean() * 100)
              if data.ma20.notna().mean() >= min_coverage else np.nan, "%"),
             ("pct_above_ma50", float((data.close > data.ma50).mean() * 100)
@@ -283,7 +314,7 @@ def _breadth_features(bars, cutoffs, universe, min_coverage):
         for feature_id, value, unit in metrics:
             output.append(_record(day, "breadth", feature_id, value, unit,
                 available, digest, quality="OBSERVED" if pd.notna(value) else "MISSING",
-                pit="CURRENT_SNAPSHOT_ONLY", coverage_n=len(current), expected_n=expected,
+                pit="PIT_UNVERIFIED_CURRENT_UNIVERSE", coverage_n=len(current), expected_n=expected,
                 source="CURRENT_COMPLETE_UNIVERSE_SNAPSHOT",
                 metadata={"universe_id": str(members.universe_id.iloc[0]),
                           "advances": advances, "declines": declines,
@@ -305,7 +336,6 @@ def _market_level_features(bars, cutoffs):
         return out
     sessions = pd.DatetimeIndex(cutoffs.session_date)
     close = pd.to_numeric(spy.close.reindex(sessions), errors="coerce")
-    opn = pd.to_numeric(spy.open.reindex(sessions), errors="coerce")
     high = pd.to_numeric(spy.high.reindex(sessions), errors="coerce")
     low = pd.to_numeric(spy.low.reindex(sessions), errors="coerce")
     ret = close.pct_change(fill_method=None)
@@ -314,7 +344,6 @@ def _market_level_features(bars, cutoffs):
     dd20 = close.div(close.rolling(20, min_periods=20).max()).sub(1)
     atr = pd.concat([high-low, (high-close.shift(1)).abs(),
                      (low-close.shift(1)).abs()], axis=1).max(axis=1).rolling(14, min_periods=14).mean().div(close)
-    receipts = spy.receipt_sha256.dropna().tolist()
     source = str(spy.provider.iloc[-1])
     for i, day in enumerate(sessions):
         if pd.isna(close.loc[day]):
@@ -322,22 +351,20 @@ def _market_level_features(bars, cutoffs):
         source_rows = spy.loc[spy.index <= day]
         available = source_rows.available_at.max()
         digest = _receipt_digest(day, source_rows.receipt_sha256.tolist())
-        cutoff = cutoffs.loc[cutoffs.session_date.eq(day), "decision_cutoff_utc"].iloc[0]
-        for feature_id, value, unit in (
-            ("spy_return_1", ret.loc[day], "%"),
-            ("spy_return_5", close.loc[day] / close.shift(5).loc[day] - 1 if pd.notna(close.shift(5).loc[day]) else np.nan, "%"),
-            ("spy_return_20", close.loc[day] / close.shift(20).loc[day] - 1 if pd.notna(close.shift(20).loc[day]) else np.nan, "%"),
-            ("spy_return_60", close.loc[day] / close.shift(60).loc[day] - 1 if pd.notna(close.shift(60).loc[day]) else np.nan, "%"),
-            ("rv5", rv[5].loc[day], "%"), ("rv20", rv[20].loc[day], "%"),
-            ("rv60", rv[60].loc[day], "%"), ("downside_rv20", downside.loc[day], "%"),
-            ("drawdown20", dd20.loc[day], "%"), ("atr14_pct", atr.loc[day], "%"),
+        for feature_id, value, unit, scale in (
+            ("spy_return_1", ret.loc[day], "%", 100.0),
+            ("spy_return_5", close.loc[day] / close.shift(5).loc[day] - 1 if pd.notna(close.shift(5).loc[day]) else np.nan, "%", 100.0),
+            ("spy_return_20", close.loc[day] / close.shift(20).loc[day] - 1 if pd.notna(close.shift(20).loc[day]) else np.nan, "%", 100.0),
+            ("spy_return_60", close.loc[day] / close.shift(60).loc[day] - 1 if pd.notna(close.shift(60).loc[day]) else np.nan, "%", 100.0),
+            ("rv5", rv[5].loc[day], "%", 100.0), ("rv20", rv[20].loc[day], "%", 100.0),
+            ("rv60", rv[60].loc[day], "%", 100.0), ("downside_rv20", downside.loc[day], "%", 100.0),
+            ("drawdown20", dd20.loc[day], "%", 100.0), ("atr14_pct", atr.loc[day], "%", 100.0),
         ):
             out.append(_record(day, FEATURE_BY_KEY[feature_id].dimension, feature_id,
-                value, unit, available, digest,
+                value*scale if pd.notna(value) else np.nan, unit, available, digest,
                 quality="OBSERVED" if pd.notna(value) else "MISSING",
                 source=source, metadata={"benchmark": "SPY", "price_basis": str(spy.price_basis.iloc[-1])}))
-        # Sector relative strength and breadth are derived from the 11 sector ETFs.
-        sector_returns = {}
+        sector_returns, sector_sources, sector_available = {}, [], []
         for symbol in _SECTOR_ETFS:
             group = by_symbol.get(symbol)
             if group is None:
@@ -346,58 +373,43 @@ def _market_level_features(bars, cutoffs):
             prior = series.shift(5)
             if pd.notna(series.loc[day]) and pd.notna(prior.loc[day]) and prior.loc[day] > 0:
                 sector_returns[symbol] = series.loc[day] / prior.loc[day] - 1
+                sector_available.append(group.loc[day, "available_at"])
+                sector_sources.extend(group.loc[group.index <= day, "receipt_sha256"].dropna().tolist())
         if len(sector_returns) >= 6:
-            sector_dispersion = float(np.std(list(sector_returns.values()), ddof=0))
-            digest2 = _receipt_digest(day, receipts + [
-                str(v) for s in _SECTOR_ETFS if s in by_symbol
-                for v in by_symbol[s].loc[by_symbol[s].index <= day, "receipt_sha256"].dropna().tolist()])
+            digest2 = _receipt_digest(day, sector_sources, version="L1_SECTOR_ETF_FEATURES_V1")
+            sector_avail = max(sector_available)
             out.append(_record(day, "correlation", "sector_dispersion_5",
-                sector_dispersion, "%", available, digest2,
-                coverage_n=len(sector_returns), expected_n=len(_SECTOR_ETFS),
-                source="ALPACA_SECTOR_ETF_CROSS_SECTION",
+                float(np.std(list(sector_returns.values()), ddof=0) * 100), "%",
+                sector_avail, digest2, coverage_n=len(sector_returns),
+                expected_n=len(_SECTOR_ETFS), source="ALPACA_SECTOR_ETF_CROSS_SECTION",
                 metadata={"symbols": sorted(sector_returns), "proxy": True}))
-            # Average pairwise correlation requires 20 consecutive daily returns.
             returns = pd.DataFrame({
                 s: pd.to_numeric(by_symbol[s].close.reindex(sessions), errors="coerce").pct_change(fill_method=None)
                 for s in sector_returns
             })
-            if len(returns.columns) >= 6 and returns.iloc[max(0, i-19):i+1].notna().all().all():
-                corr = returns.iloc[i-19:i+1].corr().to_numpy()
+            window = returns.iloc[max(0, i-19):i+1]
+            corr_value = np.nan
+            if len(window) == 20 and window.notna().all().all():
+                corr = window.corr().to_numpy()
                 upper = corr[np.triu_indices_from(corr, 1)]
-                corr_value = float(np.nanmean(upper)) if len(upper) else np.nan
-            else:
-                corr_value = np.nan
-            out.append(_record(day, "correlation", "sector_corr_20",
-                corr_value, "corr", available, digest2,
+                corr_value = float(np.mean(upper)) if len(upper) else np.nan
+            out.append(_record(day, "correlation", "sector_corr_20", corr_value,
+                "corr", sector_avail, digest2,
                 quality="OBSERVED" if pd.notna(corr_value) else "MISSING",
                 coverage_n=len(sector_returns), expected_n=len(_SECTOR_ETFS),
                 source="ALPACA_SECTOR_ETF_CROSS_SECTION",
                 metadata={"symbols": sorted(sector_returns), "proxy": True}))
-        for symbol in _STYLE_ETFS:
-            group = by_symbol.get(symbol)
-            if group is None:
-                continue
-            series = pd.to_numeric(group.close.reindex(sessions), errors="coerce")
-            prior = series.shift(5)
-            if pd.notna(series.loc[day]) and pd.notna(prior.loc[day]) and prior.loc[day] > 0:
-                relative = (series.loc[day] / prior.loc[day] - 1) - ret.loc[day] * 5
-                # Style ETF return is a proxy, not an audited factor portfolio.
-                out.append(_record(day, "price", "spy_return_5", relative, "%",
-                    available, digest, source="ALPACA_STYLE_ETF_PROXY",
-                    metadata={"style_etf": symbol, "metric_alias": "style_relative_5"}))
     return out
 
 
 def _external_features(external, cutoffs):
     if external is None or external.empty:
         return []
-    x = external.copy()
-    required = {"session_date", "feature_id", "value", "unit", "source",
-                "provider", "available_at", "receipt_sha256"}
+    x = _dates(external, "EXTERNAL")
+    required = {"feature_id", "value", "unit", "source", "provider", "available_at", "receipt_sha256"}
     if required - set(x.columns):
         raise ValueError("EXTERNAL_FEATURES_MISSING_COLUMNS")
-    x = _dates(x, "EXTERNAL")
-    x["available_at"] = pd.to_datetime(x.available_at, utc=True, errors="raise")
+    x["available_at"] = x.available_at.map(_aware_utc)
     x = x.merge(cutoffs, on="session_date", how="left", validate="many_to_one")
     if x.decision_cutoff_utc.isna().any() or (x.available_at > x.decision_cutoff_utc).any():
         raise ValueError("EXTERNAL_FEATURE_NOT_AVAILABLE_AT_CUTOFF")
@@ -412,8 +424,7 @@ def _external_features(external, cutoffs):
         records.append(_record(row.session_date, feature.dimension, row.feature_id,
             row.value, row.unit, row.available_at, digest,
             quality="OBSERVED", pit=getattr(row, "pit_status", "PIT_UNVERIFIED"),
-            source=row.source, provider=row.provider,
-            metadata={"external": True}))
+            source=row.source, provider=row.provider, metadata={"external": True}))
     return records
 
 
@@ -425,31 +436,30 @@ def _event_features(events, cutoffs):
                 "source", "receipt_sha256"}
     if required - set(x.columns):
         raise ValueError("EVENTS_MISSING_COLUMNS")
-    x["scheduled_at"] = pd.to_datetime(x.scheduled_at, utc=True, errors="raise")
-    x["schedule_known_at"] = pd.to_datetime(x.schedule_known_at, utc=True, errors="raise")
+    x["scheduled_at"] = x.scheduled_at.map(_aware_utc)
+    x["schedule_known_at"] = x.schedule_known_at.map(_aware_utc)
     if "released_at" in x:
-        x["released_at"] = pd.to_datetime(x.released_at, utc=True, errors="coerce")
+        x["released_at"] = x.released_at.map(lambda v: _aware_utc(v, optional=True))
     if "consensus_known_at" in x:
-        x["consensus_known_at"] = pd.to_datetime(x.consensus_known_at, utc=True, errors="coerce")
+        x["consensus_known_at"] = x.consensus_known_at.map(lambda v: _aware_utc(v, optional=True))
+    x["event_type"] = x.event_type.astype(str).str.upper()
     records = []
     for cutoff in cutoffs.itertuples(index=False):
         known = x.loc[x.schedule_known_at.le(cutoff.decision_cutoff_utc)]
         for event_type, feature_id in (("CPI","days_to_cpi"),("NFP","days_to_nfp"),("FOMC","days_to_fomc")):
-            future = known.loc[(known.event_type.str.upper() == event_type) &
+            future = known.loc[(known.event_type == event_type) &
                                (known.scheduled_at > cutoff.decision_cutoff_utc)].sort_values("scheduled_at")
             if future.empty:
                 continue
             row = future.iloc[0]
             days = (row.scheduled_at.date() - cutoff.session_date.date()).days
             digest = str(row.receipt_sha256)
-            if not _SHA.fullmatch(digest):
-                raise ValueError("EVENT_RECEIPT_SHA256_INVALID")
             records.append(_record(cutoff.session_date, "events", feature_id, days, "days",
                 row.schedule_known_at, digest, pit="CURRENT_SCHEDULE_NOT_HISTORICAL_PIT",
                 source=row.source, metadata={"event_id": row.event_id,
                 "scheduled_at": row.scheduled_at.isoformat()}))
-        # Surprise is only legal after both release and consensus were known.
-        if {"actual_value", "consensus_value", "released_at", "consensus_known_at"} <= set(x.columns):
+        required_surprise = {"actual_value", "consensus_value", "released_at", "consensus_known_at"}
+        if required_surprise <= set(x.columns):
             released = known.loc[x.released_at.notna() & x.consensus_known_at.notna() &
                 x.released_at.le(cutoff.decision_cutoff_utc) &
                 x.consensus_known_at.le(cutoff.decision_cutoff_utc) &
@@ -489,7 +499,6 @@ def compute_forward_path_labels(bars, cutoffs, *, benchmark="SPY",
             exit_price = float(path.close.iloc[-1])
             mfe = float(path.high.max()/entry - 1)
             mae = float(path.low.min()/entry - 1)
-            upper = lower = None
             for day2, bar in path.iterrows():
                 hit_up = float(bar.high/entry - 1) >= up_barrier
                 hit_down = float(bar.low/entry - 1) <= down_barrier
@@ -504,17 +513,14 @@ def compute_forward_path_labels(bars, cutoffs, *, benchmark="SPY",
                     break
             else:
                 first = "NO_TOUCH"
-            receipt_rows = px.loc[px.index.isin(window_days)]
-            digest = _receipt_digest(day, receipt_rows.receipt_sha256.tolist(),
-                                     version="L1_PATH_LABELS_V1")
-            available = receipt_rows.available_at.max()
+            digest = _receipt_digest(day, path.receipt_sha256.tolist(), version="L1_PATH_LABELS_V1")
             labels.append({
                 "session_date": day.date().isoformat(), "horizon": horizon,
                 "entry_date": window_days[0].date().isoformat(),
                 "exit_date": window_days[-1].date().isoformat(),
                 "forward_return": exit_price/entry - 1, "mfe": mfe, "mae": mae,
                 "first_touch": first, "status": "OUTCOME_ONLY_NOT_PREDICTOR",
-                "receipt_sha256": digest, "available_at": available.isoformat(),
+                "receipt_sha256": digest, "available_at": path.available_at.max().isoformat(),
                 "up_barrier": up_barrier, "down_barrier": down_barrier,
             })
     return pd.DataFrame(labels)
@@ -531,7 +537,6 @@ def compute_l1_market_features(bars, cutoffs, *, universe=None, external=None,
     observations.extend(breadth)
     observations.extend(_external_features(external, c))
     observations.extend(_event_features(events, c))
-    # Deduplicate only exact same feature/source/vintage/receipt records.
     unique = {}
     for row in observations:
         key = (row["session_date"], row["feature_id"], row["provider"],

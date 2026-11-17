@@ -109,6 +109,12 @@ DIMENSIONS = (
 # key, dimension, name, unit, cadence, sources, history_days, priority,
 # implementation, access, PIT requirement.
 _FEATURE_ROWS = (
+    ("security_return_1","price","单只证券单日收益","%","daily",("alpaca_bars",),1260,"P0","PARTIAL","credentialed","bar_available_at"),
+    ("security_return_5","price","单只证券五日收益","%","daily",("alpaca_bars",),1260,"P0","PARTIAL","credentialed","bar_available_at"),
+    ("security_return_20","price","单只证券二十日收益","%","daily",("alpaca_bars",),1260,"P0","PARTIAL","credentialed","bar_available_at"),
+    ("security_return_60","price","单只证券六十日收益","%","daily",("alpaca_bars",),1260,"P1","PLANNED","credentialed","bar_available_at"),
+    ("sector_relative_5","price","行业 ETF 相对 SPY 五日强度","%","daily",("alpaca_bars",),1260,"P0","PARTIAL","credentialed","bar_available_at"),
+    ("style_relative_5","price","风格 ETF 相对 SPY 五日强度","%","daily",("alpaca_bars",),1260,"P1","PLANNED","credentialed","bar_available_at"),
     ("spy_return_1","price","SPY 单日收益","%","daily",("alpaca_bars",),1260,"P0","IMPLEMENTED","credentialed","bar_available_at"),
     ("spy_return_5","price","SPY 五日收益","%","daily",("alpaca_bars",),1260,"P0","IMPLEMENTED","credentialed","bar_available_at"),
     ("spy_return_20","price","SPY 二十日收益","%","daily",("alpaca_bars",),1260,"P0","IMPLEMENTED","credentialed","bar_available_at"),
