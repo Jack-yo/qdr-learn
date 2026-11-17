@@ -125,13 +125,17 @@ def persist_public_scan(root, payload, *, scan_kind):
                     "error_code":None if assets_ok else item.get("code"),
                     "receipt_sha256":input_receipts[0] if assets_ok else None,
                     "metadata":{"scope":"CURRENT_ACTIVE_TRADABLE_NON_OTC_DIRECTORY"}})
+                snapshot_receipts=input_receipts[1:]
                 health_rows.append({"source_key":"alpaca_snapshots","asof_session":asof,
                     "fetched_at":fetched,"status":item.get("status") or "MISSING",
-                    "error_code":item.get("code"),"receipt_sha256":digest,
+                    "error_code":item.get("code"),
+                    "receipt_sha256":snapshot_receipts[0] if snapshot_receipts else None,
                     "metadata":{"coverage_n":item.get("coverage_n"),
                         "expected_n":item.get("expected_n"),
                         "observation_mode":item.get("observation_mode"),
-                        "feed_sources":item.get("feed_sources")}})
+                        "feed_sources":item.get("feed_sources"),
+                        "snapshot_receipt_count":len(snapshot_receipts),
+                        "snapshot_receipts":snapshot_receipts}})
                 health_rows.append({"source_key":"market_breadth","asof_session":asof,
                     "fetched_at":fetched,"status":item.get("status") or "MISSING",
                     "error_code":item.get("code"),"receipt_sha256":digest,
