@@ -34,7 +34,7 @@ def test_registry_contains_seven_styles_and_fixed_sector_baskets():
     cyc = next(x for x in payload["styles"] if x["style_id"] == "cyc_def")
     assert cyc["numerator"] == ["XLI", "XLY", "XLB", "XLF"]
     assert cyc["denominator"] == ["XLP", "XLU", "XLV"]
-    assert len(payload["required_symbols"]) == 13
+    assert len(payload["required_symbols"]) == 14
 
 
 def test_observation_outputs_all_styles_and_expected_windows():
