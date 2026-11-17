@@ -3,7 +3,8 @@
 > 版本：V1.0  
 > 编写日期：2026-11-17  
 > 基线：`main` / `ed856e58306608ec0efbfa4a5090ae34b4712ee1`  
-> 状态：实施方案，尚未包含页面或 API 代码变更  
+> 状态：P0 首轮实现已提交到开发分支；待自动/本地测试与 PR 审核
+> 开发分支：`feature/data-warehouse-v1`  
 > 目标：在 QDR V4 中新增独立「数据仓库」工作区，提供数据资产、更新状态、质量问题和真实样本的可视化管理。
 
 ---
@@ -377,6 +378,20 @@ L1 数据库包含行情 Bars、证券池观察、市场指标观察、个股特
 - 不再使用六个 98%/99% 覆盖率圆环。
 
 ---
+
+## 6.5 当前实现状态（PR #22）
+
+截至当前开发分支 `feature/data-warehouse-v1`：
+
+- P0 只读服务、4 个 GET API、V4 页面与导航已实现。
+- 数据资产已补充真实表字段名 `field_names[]`，全局搜索可匹配数据集、来源、字段与 L1 体系。
+- L1 observations / security features / reference series / quality checks / events 会依据真实已观测 feature/dimension 映射到 `systems[]`；无证据的资产保持空数组，不猜测关联。
+- 「需要关注」已提升到资产工作区之前，包含数据集阻断、新鲜度、source health、持久化 quality check 与 maintenance manifest 的真实异常。
+- 新鲜度统一使用 XNYS 本地会话日期作为日历锚点，不把 UTC 自然日误当美股会话日。
+- 数据预览仍然严格白名单、参数绑定、只读连接；不支持的过滤条件直接拒绝，不静默忽略。
+- 目录 CSV 仅在已有持久化 catalog snapshot 时提供现有导出链接。
+- 自动化测试已覆盖只读、不创建数据库、来源状态、字段/体系元数据、质量异常、HTTP 400/404、安全分页与真实样本口径。
+- GitHub Issue #23 负责本地真实环境验收；在其回传前 PR 保持 Draft，不合并。
 
 ## 7. 开发任务拆分
 

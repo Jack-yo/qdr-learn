@@ -29,7 +29,7 @@ MISSING = {
 }
 
 
-def cache_inventory(root):
+def cache_inventory(root, *, verify_hashes=True):
     rows=[]
     for folder in (root/'data/raw/receipts',root/'data/raw/yahoo/receipts'):
         for path in sorted(folder.glob('*.json')):
@@ -41,9 +41,16 @@ def cache_inventory(root):
                     else 'yahoo_exploratory' if request.get('provider')=='yfinance' else 'issuer_documents')
                 valid=len(digest)==64 and all(c in '0123456789abcdef' for c in digest)
                 body=root/'data/raw/objects'/digest if valid else None
-                verified=bool(body and body.is_file() and hashlib.sha256(body.read_bytes()).hexdigest()==digest)
+                body_exists=bool(body and body.is_file())
+                verified=(bool(body_exists and hashlib.sha256(body.read_bytes()).hexdigest()==digest)
+                          if verify_hashes else None if body_exists else False)
+                hash_check=('INVALID_DIGEST' if not valid else
+                            'VERIFIED' if verify_hashes and verified else
+                            'FAILED' if verify_hashes else
+                            'NOT_RECHECKED' if body_exists else 'OBJECT_MISSING')
                 rows.append({'category':category,'source_url':url or request.get('provider'), 'raw_sha256':digest,
                     'retrieved_at_utc':d.get('fetched_at'),'hash_verified':verified,
+                    'hash_check':hash_check,
                     'receipt_path':path.relative_to(root).as_posix(), 'object_path':body.relative_to(root).as_posix() if body else None})
             except (ValueError,OSError):
                 rows.append({'category':'UNCLASSIFIED','receipt_path':path.relative_to(root).as_posix(),'hash_verified':False})
@@ -103,9 +110,53 @@ def inspect_database(root,key,spec):
     return result
 
 
-def build_catalog(root):
+
+def inspect_asset_observations(root):
+    """Read the current Alpaca asset snapshot pointer without replaying the raw payload."""
+    folder=Path(root).resolve()/'data/managed/asset_observations'
+    result={'dataset_id':'asset_observations','name':'Alpaca 当前证券目录归档',
+            'path':'data/managed/asset_observations','source':'ALPACA',
+            'cadence':'on_demand','use_policy':'CURRENT_ASSET_METADATA_NOT_HISTORICAL_PIT',
+            'status':'NOT_CREATED','rows':None,'missing_reason':'NO_REAL_ASSET_OBSERVATION',
+            'historical_pit_verified':False,'raw_hash_rechecked':False}
+    pointer_path=folder/'latest.json'
+    if not pointer_path.is_file():
+        return result
+    try:
+        pointer=json.loads(pointer_path.read_text(encoding='utf-8'))
+        if not isinstance(pointer,dict) or pointer.get('schema')!='ALPACA_ASSETS_OBSERVED_V1':
+            raise ValueError('ASSET_POINTER_INVALID')
+        snapshot_id=pointer.get('snapshot_id')
+        if not isinstance(snapshot_id,str) or len(snapshot_id)!=64 or any(c not in '0123456789abcdef' for c in snapshot_id):
+            raise ValueError('ASSET_SNAPSHOT_ID_INVALID')
+        manifest_path=folder/'snapshots'/(snapshot_id+'.json')
+        raw_manifest=manifest_path.read_bytes()
+        if hashlib.sha256(raw_manifest).hexdigest()!=snapshot_id:
+            raise ValueError('ASSET_MANIFEST_HASH_MISMATCH')
+        manifest=json.loads(raw_manifest)
+        if not isinstance(manifest,dict):
+            raise ValueError('ASSET_MANIFEST_INVALID')
+        digest=manifest.get('raw_sha256')
+        if not isinstance(digest,str) or len(digest)!=64 or any(c not in '0123456789abcdef' for c in digest):
+            raise ValueError('ASSET_RAW_DIGEST_INVALID')
+        raw_path=folder/'objects'/digest
+        if not raw_path.is_file():
+            raise ValueError('ASSET_RAW_OBJECT_MISSING')
+        result.update(status='ARCHIVE_PRESENT_RAW_HASH_NOT_RECHECKED',
+                      rows=manifest.get('returned_records'),snapshot_id=snapshot_id,
+                      raw_sha256=digest,raw_bytes=raw_path.stat().st_size,
+                      observed_at_utc=manifest.get('observed_at_utc'),
+                      missing_reason=None)
+    except (OSError,ValueError,TypeError,KeyError):
+        result.update(status='BLOCKED',missing_reason='ASSET_ARCHIVE_POINTER_OR_MANIFEST_INVALID')
+    return result
+
+
+def build_catalog(root, *, verify_cache_hashes=True, include_cache_inventory=True):
     root=Path(root).resolve()
     datasets=[inspect_database(root,key,spec) for key,spec in DATASETS.items()]
+    datasets.append(inspect_l1_market_store(root))
+    datasets.append(inspect_asset_observations(root))
     datasets.extend({'dataset_id':key,'name':name,'status':'BLOCKED','rows':None,'missing_reason':reason,
                      'repair':repair,'path':None,'cadence':'EVIDENCE_DEPENDENT','use_policy':'UNAVAILABLE'}
                     for key,(name,reason,repair) in MISSING.items())
@@ -180,11 +231,44 @@ def build_catalog(root):
     active={str((root/spec[1]).resolve()) for spec in DATASETS.values()}
     excluded=[{'path':p.relative_to(root).as_posix(),'status':'LEGACY_OR_MIXED_STORE_NOT_FORMAL_INPUT'}
               for p in sorted((root/'data').glob('*.duckdb')) if str(p.resolve()) not in active]
-    cache=cache_inventory(root)
+    cache=cache_inventory(root,verify_hashes=verify_cache_hashes) if include_cache_inventory else []
     return {'created_at_utc':datetime.now(timezone.utc).isoformat(),'policy':'REAL_ONLY','datasets':datasets,
-            'cache_receipts':len(cache),'cache_hash_failures':sum(not r['hash_verified'] for r in cache),
+            'cache_receipts':len(cache) if include_cache_inventory else None,
+            'cache_inventory_included':include_cache_inventory,
+            'cache_hash_verification':'FULL' if verify_cache_hashes and include_cache_inventory else 'SKIPPED',
+            'cache_hash_failures':sum(r['hash_verified'] is False for r in cache) if verify_cache_hashes and include_cache_inventory else None,
             'excluded_stores':excluded,'cache_index':cache,'historical_universe_available':False,
             'research_grade':False,'execution_ready':False,'real_orders_enabled':False}
+
+
+
+def inspect_l1_market_store(root):
+    """Read the L1 DuckDB inventory without initializing or creating the store."""
+    path=Path(root).resolve()/'data/l1_market/market_data.duckdb'
+    result={'dataset_id':'l1_market_store','name':'L1 六体系市场数据仓库',
+            'path':'data/l1_market/market_data.duckdb','source':'L1 MARKET DATA STORE',
+            'cadence':'daily','use_policy':'OBSERVATION_AND_RESEARCH_EVIDENCE_ONLY',
+            'status':'NOT_CREATED','rows':None,'table_count':0,'tables':[],
+            'missing_reason':'L1_MARKET_DATABASE_NOT_CREATED'}
+    if not path.is_file():
+        return result
+    try:
+        with duckdb.connect(str(path),read_only=True) as db:
+            tables=sorted(row[0] for row in db.execute('SHOW TABLES').fetchall())
+            profiles=[]
+            total=0
+            for table in tables:
+                if not table.startswith('l1_market_') or not table.replace('_','').isalnum():
+                    continue
+                count=int(db.execute('SELECT COUNT(*) FROM "'+table+'"').fetchone()[0] or 0)
+                total+=count
+                profiles.append({'table':table,'rows':count})
+            result.update(status='COLLECTED_RESTRICTED_USE' if total else 'EMPTY_DATASET',
+                          rows=total,table_count=len(profiles),tables=profiles,
+                          missing_reason=None if total else 'L1_MARKET_STORE_EMPTY')
+    except Exception as exc:
+        result.update(status='BLOCKED',missing_reason='L1_MARKET_READ_FAILED_'+type(exc).__name__)
+    return result
 
 
 def write_catalog(root,maintenance_owner=False):
