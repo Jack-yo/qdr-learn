@@ -334,7 +334,8 @@ def handler(console):
                         '/assets/v4_ui_fidelity.js',
                         '/assets/v4_ui_market_v2.js', '/assets/v4_ui_market_v2.css',
                          '/assets/v4_ui_market_v3.js', '/assets/v4_ui_market_v3.css',
-                         '/assets/v4_ui_light.css', '/assets/v4_ui_theme.js'}:
+                         '/assets/v4_ui_light.css', '/assets/v4_ui_theme.js',
+                         '/assets/v4_ui_market_v4.js', '/assets/v4_ui_market_v4.css'}:
                 asset = Path(__file__).with_name('assets') / path.rsplit('/',1)[1]
                 content_type = 'text/css; charset=utf-8' if path.endswith('.css') else 'text/javascript; charset=utf-8'
                 return self.send(200, asset.read_bytes(), content_type)
