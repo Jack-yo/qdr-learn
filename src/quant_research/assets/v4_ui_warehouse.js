@@ -264,7 +264,7 @@
    '<div class="wh-source-foot">注册状态不等于真实运行状态；没有运行记录时显示「尚无运行观测」。</div></section>';
   const html=top+kpis+registryLine+attentionBlock+main+sourceMonitor;
   return {title:'数据仓库',html,mount:()=>{
-   document.getElementById('wh-refresh')?.addEventListener('click',()=>window.location.reload());
+   document.getElementById('wh-refresh')?.addEventListener('click',()=>V.refresh('/api/v1/warehouse/'));
    document.getElementById('wh-search')?.addEventListener('input',ev=>{
     state.search=ev.target.value;V.show('warehouse');
    });
