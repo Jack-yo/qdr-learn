@@ -176,6 +176,11 @@ function go(page){
  if(location.hash.slice(1)!==key)location.hash=key;
  else show(key);
 }
+function refresh(prefix=''){
+ if(!prefix)viewResults.clear();
+ else for(const key of [...viewResults.keys()])if(key.startsWith(prefix))viewResults.delete(key);
+ show(state.page,true);
+}
 function boot(){
  document.querySelectorAll('[data-page]').forEach(x=>{
   x.tabIndex=0;x.setAttribute('role','link');
@@ -193,6 +198,6 @@ function boot(){
  $('#v4-refresh')?.addEventListener('click',()=>{viewResults.clear();updateStatus();show(state.page)});
  updateStatus();show(location.hash.slice(1)||'overview');
 }
-window.V4={pages,state,$,e,n,pct,signed,date,short,badge,button,link,heading,card,kpi,empty,note,row,table,fail,value,api,settle,grid,toolbar,field,select,svgLine,progress,setContent,toast,moduleLoading,moduleError,show,go};
+window.V4={pages,state,$,e,n,pct,signed,date,short,badge,button,link,heading,card,kpi,empty,note,row,table,fail,value,api,settle,grid,toolbar,field,select,svgLine,progress,setContent,toast,moduleLoading,moduleError,show,go,refresh};
 document.addEventListener('DOMContentLoaded',boot);
 })();
