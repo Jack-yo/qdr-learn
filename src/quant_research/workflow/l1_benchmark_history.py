@@ -196,8 +196,9 @@ def _sync_bars(store, sources, *, years, refresh, history_feed, asof, stamp,
     if incremental:
         last_by_symbol = existing.groupby("symbol").session_date.max().to_dict()
         if set(last_by_symbol) == set(BENCHMARK_SYMBOLS):
-            oldest_latest = min(x.isoformat() if hasattr(x, "isoformat") else str(x)
-                                for x in last_by_symbol.values())
+            oldest_latest = min(
+                x.date().isoformat() if hasattr(x, "date") else str(x)[:10]
+                for x in last_by_symbol.values())
             recent_start = max(full_start, date.fromisoformat(oldest_latest) -
                                timedelta(days=OVERLAP_CALENDAR_DAYS))
             expected = set(_expected_sessions(full_start.isoformat(), asof))
