@@ -107,6 +107,11 @@ def persist_public_scan(root, payload, *, scan_kind):
                     dataset=scan_kind + "_source_health", fetched_at=fetched,
                     available_at=fetched, metadata={"source_key": source_key,
                     "pit": item.get("pit"), "effective_date": item.get("effective_date")})
+            for input_digest in item.get("input_receipts") or []:
+                if input_digest and input_digest != digest:
+                    _register_receipt(store,input_digest,provider=item.get("source") or source_key,
+                        dataset=scan_kind+"_input_source_receipt",fetched_at=fetched,
+                        available_at=fetched,metadata={"derived_parent":digest,"source_key":source_key})
             health_rows.append({
                 "source_key": source_key, "asof_session": asof,
                 "fetched_at": fetched, "status": item.get("status") or "MISSING",

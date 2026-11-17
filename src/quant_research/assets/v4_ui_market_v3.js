@@ -252,6 +252,8 @@ function rawPanel(rows,official,extended,v3,v2){
    ...Object.entries(extended?.source_health||{}).map(([id,value])=>({id,...value,group:'扩展来源'}))
  ];
  const ok=health.filter(x=>x.status==='OBSERVED').length;
+ const partial=health.filter(x=>x.status==='PARTIAL').length;
+ const broad=health.find(x=>x.id==='market_breadth');
  const lastDates=[v2?.asof_session,official?.asof_session,extended?.asof_session]
    .filter(Boolean).sort();
  const liveAsOf=lastDates.at(-1)||'待核验';
@@ -289,13 +291,16 @@ function rawPanel(rows,official,extended,v3,v2){
    ' 个外部来源的健康状态及失败原因</summary><div class="lv3-monitor-health-list">'+
    health.map(x=>'<div><span>'+e(x.id)+' · '+e(x.group)+'</span>'+
      '<b class="'+(x.status==='OBSERVED'?'lv3-monitor-good':'lv3-monitor-alert')+'">'+
-     e(x.status==='OBSERVED'?'已取得':x.code||'未取得')+'</b>'+
+     e(x.status==='OBSERVED'?'已取得':x.status==='PARTIAL'?'部分覆盖':x.code||'未取得')+'</b>'+
      '<small>'+e(x.effective_date||'无有效观测日期')+
+     (x.coverage_n!=null?' · 覆盖 '+e(x.coverage_n)+'/'+e(x.expected_n):'')+
+     (x.observation_mode?' · '+e(x.observation_mode):'')+
      (x.fetched_at?' · 获取 '+stripTime(x.fetched_at):'')+'</small></div>').join('')+
    '</div></details>':'<p class="lv3-small">外部数据尚未返回来源健康状态。</p>';
  return box('lv3-data',title('市场原始数据监测',
-   '<span class="lv3-soft">外部来源可用 '+ok+'/'+health.length+
-   '（非全市场覆盖率）· 指标按各自发布日期展示</span>')+
+   '<span class="lv3-soft">来源正常 '+ok+' · 部分覆盖 '+partial+
+   (broad&&broad.coverage_n!=null?' · 活跃资产快照 '+broad.coverage_n+'/'+broad.expected_n:'')+
+   ' · 指标按各自发布日期展示</span>')+
    status+
    '<div class="lv3-monitor-toolbar"><div class="lv3-raw-tabs">'+tabs+'</div>'+
    '<input type="search" data-lv3-search aria-label="搜索市场指标" placeholder="搜索指标或来源" autocomplete="off"></div>'+
@@ -332,25 +337,41 @@ function outcomePanel(result){
     content+
     '<p class="lv3-small">Brier 衡量三类概率与实际结果的距离，越小越好；只有历史归档与结果数据同时存在才会显示评分。</p>');
 }
-function evidence(v2,official,extended){
+function evidence(v2,official,extended,marketData){
  const lookup=new Map((v2?.domains||[]).map(x=>[x.id,x]));
- const added=[...(official?.features||[]),...(extended?.features||[])].filter(x=>x?.status==='OBSERVED');
- const domainIds=Object.keys(DOMAIN_NAMES);
- const statusesHtml=domainIds.map(id=>{
+ const added=[...(official?.features||[]),...(extended?.features||[])].filter(x=>['OBSERVED','PARTIAL'].includes(x?.status));
+ const dimensions=marketData?.coverage?.dimensions||[];
+ const systems=marketData?.coverage?.systems||[];
+ const fallbackIds=Object.keys(DOMAIN_NAMES);
+ const statusesHtml=(dimensions.length?dimensions.map(x=>
+   '<div class="lv3-domain-row"><span>'+e(x.name)+'</span>'+
+   '<b>'+e(x.coverage.available)+' / '+e(x.coverage.registered)+'</b>'+
+   '<small>'+e(x.status==='OBSERVED'?'已观测':x.status==='PARTIAL'?'部分覆盖':x.status==='BLOCKED'?'来源阻断':'待接入')+
+   (x.historical_pit_verified?' · PIT 已核验':' · PIT 未核验')+'</small></div>'
+ ).join(''):fallbackIds.map(id=>{
    const base=lookup.get(id);
    const count=(base?.features||[]).filter(x=>x?.status==='OBSERVED').length+
                added.filter(x=>x.domain===id).length;
    const status=count?((base?.status==='OBSERVED')?'已观测':'部分覆盖'):'待接入';
    return '<div class="lv3-domain-row"><span>'+e(DOMAIN_NAMES[id])+'</span>'+
       '<b>'+count+' 项</b><small>'+status+'</small></div>';
- }).join('');
+ }).join(''));
+ const systemHtml=systems.map(x=>'<div class="lv3-domain-row"><span>'+e(x.name)+'</span>'+
+   '<b>'+e(x.coverage.available)+' / '+e(x.coverage.registered)+'</b>'+
+   '<small>'+e(x.status==='OBSERVED'?'有观测':x.status==='PARTIAL'?'部分覆盖':'待接入')+'</small></div>').join('');
  const events=extended?.calendar_events||[];
  const eventRows=events.slice(0,8).map(x=>'<div class="lv3-event-row"><span>'+
     e(x.name||'经济发布')+'</span><b>'+stripTime(x.start_utc)+' UTC</b></div>').join('');
- return '<div class="lv3-extra-grid">'+box('lv3-source-evidence',title('12 维数据覆盖与来源',
-   '<span class="lv3-soft">完整证据与缺口按需展开</span>')+
-   '<details class="lv3-evidence-details"><summary>查看 12 维覆盖清单和真实来源</summary>'+
-   '<div class="lv3-domains">'+statusesHtml+'</div></details>'+
+ const summary=marketData?.coverage?.summary;
+ const coverageSummary=summary?
+   '<p class="lv3-small">已观测特征 '+e(summary.features_observed)+' / '+e(summary.features_registered)+
+   ' · 6 个体系 / 12 个维度 · 历史 PIT 尚未核验</p>':
+   '<p class="lv3-small">统一数据覆盖存储尚未返回；以下为本次扫描结果。</p>';
+ return '<div class="lv3-extra-grid">'+box('lv3-source-evidence',title('六大数据体系 / 十二维覆盖',
+   '<span class="lv3-soft">以已持久化观测为准，不以注册数量冒充覆盖</span>')+
+   coverageSummary+
+   '<details class="lv3-evidence-details"><summary>查看六大体系与十二维实际覆盖</summary>'+
+   '<div class="lv3-domains">'+systemHtml+statusesHtml+'</div></details>'+
    '<button class="lv3-legacy-button" type="button" data-lv3-old>打开原 L1 完整研究视图（E01/E02/E03）</button>')+
    box('lv3-events',title('近期已公布日程',
     '<span class="lv3-soft">BLS 官方排程 · UTC</span>')+
@@ -383,23 +404,25 @@ pages.market=async()=>{
  }
  const suffix=S.force?'?refresh=1':'';
  S.force=false;
- const [pRaw,statusRaw,v2Raw,officialRaw,extendedRaw,outcomesRaw]=await Promise.all([
-   // Read-only: this GET never trains a model or downloads historical prices.
+ const [pRaw,statusRaw,v2Raw,officialRaw,extendedRaw,outcomesRaw,coverageRaw]=await Promise.all([
+   // Read-only model endpoints; live market scans persist their own source receipts.
    settle('/api/v1/l1/v3/latest'),
    settle('/api/v1/l1/v3/status'),
    settle('/api/v1/l1/v2/overview?horizon=3'+(suffix?'&refresh=1':'')),
    settle('/api/v1/l1/v2/official'+suffix),
    settle('/api/v1/l1/v2/extended'+suffix),
-   settle('/api/v1/l1/v3/outcomes')
+   settle('/api/v1/l1/v3/outcomes'),
+   settle('/api/v1/l1/market-data/coverage')
  ]);
  const p=pRaw?.ok&&pRaw.data?.schema==='qdr.l1.probability.v3'&&pRaw.data.status==='RESEARCH_ONLY'?pRaw.data:null;
  const pipeline=statusRaw?.ok&&statusRaw.data?.schema==='qdr.l1.v3.pipeline.status'?statusRaw.data:null;
  const v2=v2Raw?.ok&&v2Raw.data?.schema==='qdr.l1.v2'?v2Raw.data:null;
  const official=officialRaw?.ok&&officialRaw.data?.schema==='qdr.l1.official.v1'?officialRaw.data:null;
  const extended=extendedRaw?.ok&&extendedRaw.data?.schema==='qdr.l1.extended.v1'?extendedRaw.data:null;
+ const coverageRawData=coverageRaw?.ok&&coverageRaw.data?.schema==='qdr.l1.market_data_snapshot.v1'?coverageRaw.data:null;
  const raw=fromSources(p,v2,official,extended);
  const selected=p?.horizons?.[String(S.horizon)]||null;
- const waiting=[pRaw,statusRaw,v2Raw,officialRaw,extendedRaw,outcomesRaw].filter(x=>x?.pending).length;
+ const waiting=[pRaw,statusRaw,v2Raw,officialRaw,extendedRaw,outcomesRaw,coverageRaw].filter(x=>x?.pending).length;
  const html='<div class="lv3">'+
    '<div class="lv3-heading"><div><small>L1 / MARKET INTELLIGENCE</small>'+
    '<h1>市场状态与情景研究 <span>V3</span></h1></div>'+
@@ -413,7 +436,7 @@ pages.market=async()=>{
    '<div class="lv3-data-divider"><strong>市场数据与证据</strong><span>向下继续查看当前指标、实际变动及来源时点</span></div>'+
    rawPanel(raw,official,extended,p,v2)+
    outcomePanel(outcomesRaw)+
-   evidence(v2,official,extended)+
+   evidence(v2,official,extended,coverageRawData)+
    '<footer class="lv3-footer">QDR · L1 V3 · 仅研究用途 · 不执行真实交易 · 概率需先通过历史 PIT 与前向验收</footer></div>';
  return {title:'L1 市场状态与情景研究',html,mount(){
    document.querySelectorAll('[data-lv3-h]').forEach(button=>button.addEventListener('click',()=>{

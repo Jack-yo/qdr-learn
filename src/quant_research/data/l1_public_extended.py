@@ -620,7 +620,8 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
                               "coverage_n":receipt.get("coverage_n"),
                               "expected_n":receipt.get("expected_n"),
                               "observation_mode":receipt.get("observation_mode"),
-                              "batch_error_count":receipt.get("batch_error_count")}
+                              "batch_error_count":receipt.get("batch_error_count"),
+                              "input_receipts":receipt.get("input_receipts")}
                 def add(domain,fid,label,val,unit,scope="CURRENT_OBSERVATION_NOT_PIT",
                         *,status="OBSERVED",observed_day=None,coverage_n=None,
                         expected_n=None,metadata=None):
@@ -705,7 +706,8 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
                         ("correlation","downside_sync_share","全市场活跃可交易证券同步下跌占比","%"),
                         ("correlation","stock_dispersion_1","全市场活跃可交易证券日收益离散度","%"),
                     ):
-                        add(domain,field,title,value[field],unit,scope,status=status,
+                        feature_status=status if value[field] is not None else "MISSING"
+                        add(domain,field,title,value[field],unit,scope,status=feature_status,
                             observed_day=observed_day,coverage_n=coverage_n,
                             expected_n=expected_n,metadata=meta)
             except (SourceUnavailable,ValueError,KeyError,TypeError,OverflowError) as exc:
