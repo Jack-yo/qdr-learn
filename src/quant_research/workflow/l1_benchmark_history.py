@@ -156,7 +156,7 @@ def _bar_quality(store, start, end):
     stale = []
     for symbol in BENCHMARK_SYMBOLS:
         rows = frame.loc[frame.symbol.eq(symbol)] if not frame.empty else frame
-        dates = set(rows.session_date.astype(str).tolist()) if not rows.empty else set()
+        dates = {str(x)[:10] for x in rows.session_date.tolist()} if not rows.empty else set()
         missing = sorted(expected_set - dates)
         actual_total += len(dates & expected_set)
         missing_total += len(missing)
@@ -204,8 +204,8 @@ def _sync_bars(store, sources, *, years, refresh, history_feed, asof, stamp,
             expected = set(_expected_sessions(full_start.isoformat(), asof))
             gaps = []
             for symbol in BENCHMARK_SYMBOLS:
-                dates = set(existing.loc[existing.symbol.eq(symbol),
-                                         "session_date"].astype(str).tolist())
+                dates = {str(x)[:10] for x in existing.loc[
+                    existing.symbol.eq(symbol), "session_date"].tolist()}
                 missing = expected - dates
                 if missing:
                     gaps.append(min(missing))
