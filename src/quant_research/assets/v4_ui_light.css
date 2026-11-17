@@ -631,3 +631,16 @@ label{color:#576d83}
 @media(prefers-reduced-motion:reduce){
  .nav,.btn,.lv3-horizon,.v4-market-colors-toggle{transition:none}
 }
+
+
+/* L1 market-monitoring provenance in the shared light theme. */
+.lv3-monitor-status{background:#f7faff;border-color:#dce5ef;color:#62768e}
+.lv3-monitor-status b{color:#253a54}
+.lv3-monitor-alert{color:#c03d47}
+.lv3-monitor-good{color:#147a58}
+.lv3-monitor-toolbar input{background:#fff;border-color:#dce5ef;color:#253a54}
+.lv3-monitor-toolbar input:focus-visible{outline:2px solid #8bb7e9;outline-offset:1px}
+.lv3-monitor-foot{color:#7589a1}
+.lv3-monitor-health{border-color:#dce5ef;color:#425971}
+.lv3-monitor-health-list>div{background:#fff;border-color:#dce5ef}
+.lv3-monitor-health-list small{color:#7589a1}
