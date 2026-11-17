@@ -298,6 +298,8 @@ def market_data_snapshot(root, *, asof=None, db_path=None):
         security = store.read_security_features(asof=asof)
         health = store.read_source_health(asof=asof)
         labels = store.read_path_labels(asof=asof)
+        benchmark_checks = store.read_quality_checks(
+            asof=asof, reason="CORE_BENCHMARK_HISTORY_SYNC")
         obs_rows = observations.to_dict("records") if not observations.empty else []
         sec_rows = security.to_dict("records") if not security.empty else []
         combined = obs_rows + sec_rows
@@ -316,6 +318,16 @@ def market_data_snapshot(root, *, asof=None, db_path=None):
                     row["asof_session"]=row["asof_session"].isoformat()
                 if hasattr(row.get("fetched_at"),"isoformat"):
                     row["fetched_at"]=row["fetched_at"].isoformat()
+                raw_metadata=row.pop("metadata_json",None)
+                if isinstance(raw_metadata,str):
+                    try:
+                        row["metadata"]=json.loads(raw_metadata)
+                    except (TypeError,ValueError):
+                        row["metadata"]={}
+                elif isinstance(raw_metadata,dict):
+                    row["metadata"]=raw_metadata
+                else:
+                    row["metadata"]={}
                 latest_health.append(row)
                 health_map[str(source_key)] = {"status":str(row.get("status") or "MISSING")}
         reference_date = str(asof or datetime.now(timezone.utc).date().isoformat())
@@ -328,6 +340,33 @@ def market_data_snapshot(root, *, asof=None, db_path=None):
             "latest_session":str(labels.session_date.max()) if not labels.empty else None,
             "outcome_only":True,
         }
+        benchmark_history = {"status":"NOT_SYNCED","coverage_n":0,"expected_n":0,
+                             "coverage_pct":None,"latest_session":None}
+        if not benchmark_checks.empty:
+            row=benchmark_checks.sort_values(
+                ["session_date","checked_at"]).iloc[-1].to_dict()
+            raw_metadata=row.get("metadata_json")
+            try:
+                metadata=json.loads(raw_metadata) if isinstance(raw_metadata,str) else (
+                    raw_metadata if isinstance(raw_metadata,dict) else {})
+            except (TypeError,ValueError):
+                metadata={}
+            coverage_n=int(row.get("coverage_n") or 0)
+            expected_n=int(row.get("expected_n") or 0)
+            benchmark_history={
+                "status":str(row.get("status") or "MISSING"),
+                "coverage_n":coverage_n,"expected_n":expected_n,
+                "coverage_pct":round(coverage_n/expected_n*100,4) if expected_n else None,
+                "latest_session":str(row.get("session_date")) if row.get("session_date") else None,
+                "window_start":metadata.get("window_start"),
+                "window_end":metadata.get("window_end"),
+                "incremental":metadata.get("incremental"),
+                "symbol_count":len(metadata.get("symbols") or []),
+                "stale_symbols":metadata.get("stale_symbols") or [],
+                "missing_sessions":metadata.get("missing_sessions"),
+                "price_basis":metadata.get("price_basis"),
+                "historical_pit_verified":False,
+            }
         return {
             "schema":"qdr.l1.market_data_snapshot.v1",
             "generated_at_utc":datetime.now(timezone.utc).isoformat(),
@@ -335,6 +374,7 @@ def market_data_snapshot(root, *, asof=None, db_path=None):
             "status":status,
             "coverage":coverage,
             "source_health":latest_health,
+            "benchmark_history":benchmark_history,
             "path_labels":path_summary,
             "policy":{"historical_pit_verified":False,"forecast_eligible":False,
                       "trade_eligible":False},
