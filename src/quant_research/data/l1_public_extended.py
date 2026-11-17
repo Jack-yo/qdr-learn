@@ -494,7 +494,7 @@ class ExtendedPublicSources:
         api_key=env.get("FRED_API_KEY") if hasattr(env,"get") else None
         if not api_key:
             raise SourceUnavailable("MISSING_FRED_API_KEY")
-        if not re.fullmatch(r"[a-z0-9]{32}",str(api_key)):
+        if not re.fullmatch(r"[A-Za-z0-9]{32}",str(api_key)):
             raise SourceUnavailable("INVALID_FRED_API_KEY")
         def load(item):
             field,(series_id,unit)=item
