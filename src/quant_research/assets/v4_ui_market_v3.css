@@ -206,3 +206,30 @@
 .lv3-score-item strong{font-size:22px;color:#e0effc}
 .lv3-score-item small{font-size:10px;color:#8eabc1;line-height:1.4}
 @media(max-width:700px){.lv3-forward-score-grid{grid-template-columns:1fr}}
+
+
+/* Market-monitoring data provenance; neutral in the original dark palette. */
+.lv3-monitor-status{display:flex;gap:10px 18px;flex-wrap:wrap;align-items:center;
+  padding:8px 10px;margin:7px 0 12px;border:1px solid #34506b;border-radius:8px;
+  background:#15263b;color:#b6c7d8;font-size:11px}
+.lv3-monitor-status b{color:#e7f0ff}
+.lv3-monitor-alert{color:#ef9b93;font-weight:600}
+.lv3-monitor-good{color:#6fd1b2}
+.lv3-monitor-toolbar{display:flex;align-items:flex-start;gap:12px;justify-content:space-between;flex-wrap:wrap}
+.lv3-monitor-toolbar .lv3-raw-tabs{flex:1;min-width:260px}
+.lv3-monitor-toolbar input{border-radius:8px;padding:8px 10px;border:1px solid #34506b;
+  background:#15263b;color:#e7f0ff;min-width:190px;max-width:100%;font:inherit;font-size:12px}
+.lv3-raw-item[hidden]{display:none!important}
+.lv3-monitor-foot{display:flex;flex-wrap:wrap;gap:5px 10px;margin-top:5px;
+  font-size:10px;color:#8ba6be;overflow-wrap:anywhere}
+.lv3-monitor-health{margin-top:12px;border-top:1px solid #34506b;padding-top:10px;color:#b6c7d8;font-size:12px}
+.lv3-monitor-health summary{cursor:pointer;font-weight:550}
+.lv3-monitor-health-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}
+.lv3-monitor-health-list>div{border:1px solid #34506b;border-radius:8px;padding:9px;
+  display:grid;gap:4px;grid-template-columns:minmax(0,1fr) auto;align-items:center}
+.lv3-monitor-health-list span{overflow-wrap:anywhere}
+.lv3-monitor-health-list small{grid-column:1/-1;color:#8ba6be}
+@media(max-width:700px){
+  .lv3-monitor-health-list{grid-template-columns:1fr}
+  .lv3-monitor-toolbar input{width:100%}
+}

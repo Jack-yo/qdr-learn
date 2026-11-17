@@ -126,3 +126,67 @@ console.log('PASS model trace, old palette, raw metrics, fallback and six progre
     result=subprocess.run([node,"-e",runner,str(JS)],
                           capture_output=True,text=True,timeout=15,check=False)
     assert result.returncode==0,result.stderr or result.stdout
+
+
+def test_market_monitor_is_independent_of_frozen_prediction_and_shows_all_sources():
+    node=shutil.which("node")
+    if not node:
+        pytest.skip("Node unavailable")
+    runner=r"""
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const oldItems=Array.from({length:22},(_,i)=>({id:'legacy_'+i,label:'历史指标'+i,
+  value:i+1,source:'FROZEN',category:'price',observed_date:'2026-11-13',
+  history:[1,2,3]}));
+oldItems.push({id:'SPY',label:'SPY收盘',value:100,unit:'美元',
+  observed_date:'2026-11-13',source:'FROZEN',category:'price',history:[99,100]});
+const frozen={schema:'qdr.l1.probability.v3',status:'RESEARCH_ONLY',
+  asof_session:'2026-11-13',raw_observations:oldItems};
+const v2={schema:'qdr.l1.v2',asof_session:'2026-11-16',
+  expected_asof_session:'2026-11-16',data_freshness:'CURRENT_COMPLETED_SESSION',
+  quotes:{SPY:200},latest_quotes:{SPY:{price:201,at:'2026-11-16T20:00:00Z',
+  source:'ALPACA_delayed_sip'}},scores:{},domains:[]};
+const official={schema:'qdr.l1.official.v1',asof_session:'2026-11-16',
+  features:[{id:'treasury_10y_pct',label:'10Y利率',value:4.2,unit:'%',
+  source:'TREASURY',domain:'cross_asset',status:'OBSERVED',
+  observed_date:'2026-11-16',fetched_at:'2026-11-17T01:00:00Z'}],
+  source_health:{treasury:{status:'OBSERVED',effective_date:'2026-11-16'},
+  cftc:{status:'MISSING',code:'HTTP_403'}}};
+const extended={schema:'qdr.l1.extended.v1',asof_session:'2026-11-15',
+  features:[{id:'ofr_fsi',label:'OFR压力',value:-1.1,unit:'指数点',
+  source:'OFR',domain:'funding',status:'OBSERVED',
+  observed_date:'2026-11-12',fetched_at:'2026-11-16T12:00:00Z'}],
+  source_health:{ofr:{status:'OBSERVED',effective_date:'2026-11-12'}}};
+const V={pages:{market:async()=>({html:'legacy'})},state:{marketHorizon:3},
+  n:(v,n=2)=>Number(v).toFixed(n),
+  e:v=>String(v??'').replace(/[&<>"]/g,'_'),show(){},
+  settle:async url=>{
+    if(url.endsWith('/v3/latest'))return {ok:true,data:frozen};
+    if(url.endsWith('/v3/status'))return {ok:false,pending:true};
+    if(url.endsWith('/v3/outcomes'))return {ok:false,pending:true};
+    if(url.includes('/v2/overview'))return {ok:true,data:v2};
+    if(url.includes('/v2/official'))return {ok:true,data:official};
+    if(url.includes('/v2/extended'))return {ok:true,data:extended};
+    return {ok:false,pending:true};
+  }};
+vm.runInNewContext(fs.readFileSync(process.argv[1],'utf8'),
+  {window:{V4:V},document:{}});
+(async()=>{
+ const html=(await V.pages.market()).html;
+ assert.match(html,/SPY收盘/);
+ assert.match(html,/\$200\.00/);
+ assert.doesNotMatch(html,/\$100\.00/);
+ assert.match(html,/SPY最新成交（可能延迟）/);
+ assert.match(html,/10Y利率/);
+ assert.match(html,/OFR压力/);
+ assert.match(html,/HTTP_403/);
+ assert.match(html,/冻结快照（非实时）/);
+ assert.match(html,/历史指标21/); // no 16-card truncation
+ assert.match(html,/外部来源可用 2\/3（非全市场覆盖率）/);
+ assert.match(html,/观测来源最近交易日/);
+ assert.match(html,/2026-11-16/);
+ console.log('PASS independent date selection, full catalogue, source health');
+})().catch(err=>{console.error(err);process.exitCode=1});
+"""
+    result=subprocess.run([node,"-e",runner,str(JS)],
+                          capture_output=True,text=True,timeout=15,check=False)
+    assert result.returncode==0,result.stderr or result.stdout

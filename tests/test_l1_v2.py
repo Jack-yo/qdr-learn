@@ -167,3 +167,30 @@ def test_missing_important_etf_blocks():
     b=market();b=b[b.symbol!='HYG']
     with pytest.raises(SourceUnavailable,match='MARKET_CORE_SYMBOLS_MISSING'):
         analyze_market(b,receipts=[])
+
+
+def test_daily_monitor_marks_stale_bars_without_changing_frozen_research(tmp_path):
+    """A previously valid batch must not be presented as the newest closed session."""
+    from quant_research.workflow.l1_v2 import current_l1_v2
+
+    table=market()
+    rows={}
+    for item in table.itertuples(index=False):
+        rows.setdefault(item.symbol,[]).append({
+            "t":item.date+"T05:00:00Z","o":item.open,"h":item.high,
+            "l":item.low,"c":item.close,"v":item.volume
+        })
+
+    class StubSources:
+        env={}
+        def bars(self, **kwargs):
+            return rows,[{"feed":"sip","fetched_at":"2025-04-15T22:00:00Z"}]
+        def snapshots(self, **kwargs):
+            raise SourceUnavailable("SNAPSHOT_UNAVAILABLE")
+        def cboe_vix(self, **kwargs):
+            raise SourceUnavailable("CBOE_UNAVAILABLE")
+
+    result=current_l1_v2(tmp_path,sources=StubSources(),
+                         now=datetime(2025,5,10,22,tzinfo=timezone.utc))
+    assert result["asof_session"] < result["expected_asof_session"]
+    assert result["data_freshness"]=="STALE_COMPLETED_SESSION"
