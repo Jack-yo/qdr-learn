@@ -136,6 +136,33 @@ def test_second_sync_is_incremental_with_small_overlap(tmp_path):
     assert second["bars"]["coverage"]["coverage_pct"] >= 99.5
 
 
+def test_incremental_sync_repairs_old_historical_gap(tmp_path):
+    pytest.importorskip("duckdb")
+    source = FakeSources()
+    now = datetime(2026, 11, 17, 23, tzinfo=timezone.utc)
+    sync_benchmark_history(
+        tmp_path, years=3, sources=source, include_macro=False,
+        now=now, history_feed="iex")
+
+    from quant_research.data.l1_market_store import L1MarketStore
+    with L1MarketStore(tmp_path) as store:
+        gap = store.conn.execute(
+            "SELECT MIN(session_date)+INTERVAL 30 DAY FROM l1_market_bars "
+            "WHERE provider=? AND symbol='SPY'", [BAR_PROVIDER]).fetchone()[0]
+        gap_day = gap.date().isoformat() if hasattr(gap, "date") else str(gap)[:10]
+        store.conn.execute(
+            "DELETE FROM l1_market_bars WHERE provider=? AND symbol='SPY' "
+            "AND session_date=?", [BAR_PROVIDER, gap_day])
+
+    repaired = sync_benchmark_history(
+        tmp_path, years=3, sources=source, include_macro=False,
+        now=now, history_feed="iex")
+    assert repaired["bars"]["mode"] == "GAP_REPAIR"
+    assert repaired["bars"]["repairing_gap_from"] == gap_day
+    assert repaired["bars"]["request_start"] <= gap_day
+    assert repaired["bars"]["coverage"]["coverage_pct"] >= 99.5
+
+
 def test_macro_history_is_current_download_not_historical_pit(tmp_path):
     pytest.importorskip("duckdb")
     source = FakeSources()
