@@ -318,3 +318,62 @@ def test_fomc_calendar_is_registered_as_partial_non_pit_source():
     assert feature.implementation=="PARTIAL"
     assert source.code_status=="IMPLEMENTED_PARTIAL"
     assert source.pit_status=="CURRENT_PUBLISHED_SCHEDULE_NOT_HISTORICAL_PIT"
+
+def test_pit_attested_universe_import_requires_manifest_bound_to_source_hash(tmp_path):
+    import json
+    from types import SimpleNamespace
+    from quant_research.data.l1_market_store import L1MarketStore
+    from quant_research.workflow.l1_market_data import _import_universe
+
+    csv_path=tmp_path/"pit_universe.csv"
+    csv_bytes=(
+        "session_date,security_id,symbol,is_member,snapshot_complete,known_at\n"
+        "2026-11-16,CRSP:AAA,AAA,true,true,2026-11-16T22:00:00Z\n"
+    ).encode()
+    csv_path.write_bytes(csv_bytes)
+    data_sha=hashlib.sha256(csv_bytes).hexdigest()
+    manifest={
+        "attestation_id":"CRSP-US-COMMON-2026-11",
+        "provider":"CRSP","scope":"US_COMMON_STOCKS",
+        "coverage_start":"2020-01-01","coverage_end":"2026-11-16",
+        "source_data_sha256":data_sha,
+        "security_identity_scheme":"CRSP_PERMNO",
+        "membership_point_in_time":True,"delisted_included":True,
+        "known_at_semantics":"point_in_time","license_scope":"research_use_only",
+        "review_status":"OPERATOR_REVIEWED",
+        "reviewed_at":"2026-11-17T22:00:00Z","reviewed_by":"research_operator",
+    }
+    manifest_path=tmp_path/"pit_manifest.json"
+    manifest_path.write_text(json.dumps(manifest),encoding="utf-8")
+    args=SimpleNamespace(
+        input=csv_path,session_date=None,universe_id="US_COMMON_STOCKS",
+        provider="CRSP",snapshot_complete=True,known_at=None,
+        membership_basis="PIT_VENDOR_MEMBERSHIP",pit_status="PIT_ATTESTED",
+        pit_attestation_file=manifest_path,
+    )
+    with L1MarketStore(tmp_path) as store:
+        result=_import_universe(store,args)
+        rows=store.read_universe(universe_id="US_COMMON_STOCKS")
+        assert result["pit_status"]=="PIT_ATTESTED"
+        assert rows.iloc[0].pit_status=="PIT_ATTESTED"
+        assert rows.iloc[0].pit_attestation_id==manifest["attestation_id"]
+        assert rows.iloc[0].pit_attestation_provider=="CRSP"
+        assert rows.iloc[0].pit_attestation_sha256==hashlib.sha256(
+            manifest_path.read_bytes()).hexdigest()
+        args.pit_status="PIT_VERIFIED"
+        with pytest.raises(ValueError,match="PIT_VERIFIED_REQUIRES_INDEPENDENT_SIGNATURE_VERIFICATION"):
+            _import_universe(store,args)
+
+
+def test_pit_attested_features_are_not_mistaken_for_pit_verified():
+    import json
+    specs=[x for x in FEATURES if x.dimension=="price"]
+    rows=[{
+        "feature_id":spec.key,"session_date":"2026-11-16","value":1.0,
+        "quality_status":"OBSERVED","pit_status":"PIT_ATTESTED",
+        "metadata_json":json.dumps({"pit_attestation_id":"CRSP-US-COMMON-2026-11"}),
+    } for spec in specs]
+    result=coverage_matrix(rows,asof="2026-11-16")
+    price=next(x for x in result["dimensions"] if x["id"]=="price")
+    assert price["historical_pit_verified"] is False
+    assert price["model_eligible"] is False
