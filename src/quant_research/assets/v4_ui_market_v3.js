@@ -28,7 +28,7 @@ const DOMAIN_NAMES={
   cross_asset:'跨资产风险传导',positioning:'资金与持仓',
   events:'宏观事件',funding:'融资条件',path:'路径风险'
 };
-const statuses={OBSERVED:'已观测',PARTIAL:'部分覆盖',MISSING:'待接入'};
+const statuses={OBSERVED:'已观测',PARTIAL:'部分覆盖',BLOCKED:'来源阻断',MISSING:'待接入'};
 const isNum=v=>v!==null&&v!==undefined&&v!==''&&Number.isFinite(Number(v));
 const fmt=(v,d=2)=>isNum(v)?n(Number(v),d):'—';
 const sign=(v,d=2)=>isNum(v)?(Number(v)>0?'+':'')+n(Number(v),d):'—';
