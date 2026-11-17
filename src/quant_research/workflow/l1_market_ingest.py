@@ -10,6 +10,7 @@ from hashlib import sha256
 import json
 import re
 from pathlib import Path
+import threading
 
 from quant_research.data.l1_market_catalog import (
     FEATURE_BY_KEY, catalog_payload, coverage_matrix,
@@ -17,6 +18,7 @@ from quant_research.data.l1_market_catalog import (
 from quant_research.data.l1_market_store import L1MarketStore
 
 _SHA = re.compile(r"^[a-f0-9]{64}$")
+_STORE_LOCK = threading.RLock()
 
 _FEATURE_ALIASES = {
     "cboe_pcr_total": "put_call_volume_ratio",
@@ -96,7 +98,7 @@ def persist_public_scan(root, payload, *, scan_kind):
     asof = str(payload.get("asof_session") or now.date().isoformat())
     written_features = written_health = written_events = 0
     skipped_features = []
-    with L1MarketStore(root) as store:
+    with _STORE_LOCK, L1MarketStore(root) as store:
         health_rows = []
         for name, item in (payload.get("source_health") or {}).items():
             source_key = _SOURCE_ALIASES.get(name, name)
@@ -221,7 +223,7 @@ def persist_l1_v2(root, payload):
     source_receipts = payload.get("source_receipts") or []
     input_hashes = []
     source_times = []
-    with L1MarketStore(root) as store:
+    with _STORE_LOCK, L1MarketStore(root) as store:
         for receipt in source_receipts:
             digest = receipt.get("sha256") or receipt.get("receipt_sha256")
             if not digest:
@@ -277,7 +279,7 @@ def persist_l1_v2(root, payload):
 
 def market_data_snapshot(root, *, asof=None, db_path=None):
     """Read the actual stored six-system / twelve-dimension coverage and provenance."""
-    with L1MarketStore(root,db_path=db_path) as store:
+    with _STORE_LOCK, L1MarketStore(root,db_path=db_path) as store:
         status = store.status()
         observations = store.read_observations(asof=asof)
         security = store.read_security_features(asof=asof)

@@ -404,16 +404,16 @@ pages.market=async()=>{
  }
  const suffix=S.force?'?refresh=1':'';
  S.force=false;
- const [pRaw,statusRaw,v2Raw,officialRaw,extendedRaw,outcomesRaw,coverageRaw]=await Promise.all([
-   // Read-only model endpoints; live market scans persist their own source receipts.
+ const [pRaw,statusRaw,v2Raw,officialRaw,extendedRaw,outcomesRaw]=await Promise.all([
+   // Live scans persist their receipts before the coverage snapshot is read.
    settle('/api/v1/l1/v3/latest'),
    settle('/api/v1/l1/v3/status'),
    settle('/api/v1/l1/v2/overview?horizon=3'+(suffix?'&refresh=1':'')),
    settle('/api/v1/l1/v2/official'+suffix),
    settle('/api/v1/l1/v2/extended'+suffix),
-   settle('/api/v1/l1/v3/outcomes'),
-   settle('/api/v1/l1/market-data/coverage')
+   settle('/api/v1/l1/v3/outcomes')
  ]);
+ const coverageRaw=await settle('/api/v1/l1/market-data/coverage');
  const p=pRaw?.ok&&pRaw.data?.schema==='qdr.l1.probability.v3'&&pRaw.data.status==='RESEARCH_ONLY'?pRaw.data:null;
  const pipeline=statusRaw?.ok&&statusRaw.data?.schema==='qdr.l1.v3.pipeline.status'?statusRaw.data:null;
  const v2=v2Raw?.ok&&v2Raw.data?.schema==='qdr.l1.v2'?v2Raw.data:null;
