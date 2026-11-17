@@ -125,6 +125,8 @@ def fake_source(tmp_path,broken=None,with_stocks=True):
             return FSI
         if p.path.endswith("/bls.ics"):
             return BLS
+        if p.path.endswith("/fomccalendars.htm"):
+            return FOMC_HTML
         if p.path.endswith("/72hh-3qpy.json"):
             return _commodity("088691" if "088691" in url else "067651")
         if p.path.endswith("/gpe5-46if.json"):
@@ -215,13 +217,14 @@ def test_extended_scan_and_short_lived_cache(tmp_path):
     assert values["cftc_gold_net_pct_oi"]["value"]==10.0
     assert values["stock_sample_advance_share"]["value"]==100.0
     assert values["cboe_trf_notional_share"]["value"]==40.0
-    assert len(a["calendar_events"])==2
+    assert len(a["calendar_events"])==3
+    assert values["days_to_fomc"]["value"]==25
     assert values["ici_weekly_etf_net_issuance_bn_usd"]["value"]==49.83
     assert values["ici_weekly_etf_net_issuance_bn_usd"]["published_date"]=="2026-11-10"
     assert round(values["finra_spy_short_volume_pct"]["value"],2)==56.67
-    assert a["features"]==b["features"] and len(calls)==12
+    assert a["features"]==b["features"] and len(calls)==13
     cache=list((tmp_path/"data"/"cache"/"l1_on_demand").glob("*.json"))
-    assert len(cache)==12 and sum(x.stat().st_size for x in cache)<32_000_000
+    assert len(cache)==13 and sum(x.stat().st_size for x in cache)<32_000_000
 
 
 def test_isolated_feed_failure_and_no_alpaca_credentials(tmp_path):
