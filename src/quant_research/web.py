@@ -334,7 +334,7 @@ def handler(console):
                         '/assets/v4_ui_fidelity.js',
                         '/assets/v4_ui_market_v2.js', '/assets/v4_ui_market_v2.css',
                          '/assets/v4_ui_market_v3.js', '/assets/v4_ui_market_v3.css',
-                         '/assets/v4_ui_light.css', '/assets/v4_ui_theme.js'}:
+                         '/assets/v4_ui_light.css', '/assets/v4_ui_warehouse.js', '/assets/v4_ui_warehouse.css', '/assets/v4_ui_theme.js'}:
                 asset = Path(__file__).with_name('assets') / path.rsplit('/',1)[1]
                 content_type = 'text/css; charset=utf-8' if path.endswith('.css') else 'text/javascript; charset=utf-8'
                 return self.send(200, asset.read_bytes(), content_type)
@@ -940,6 +940,48 @@ def handler(console):
                     return self.send(409, exc.payload())
                 except (sqlite3.Error, ValueError, KeyError, OSError):
                     return self.send(409, {'status': 'BLOCKED', 'code': 'CLOSE_SNAPSHOT_INVALID'})
+            if path.startswith('/api/v1/warehouse'):
+                from .data.warehouse_observability import (
+                    overview as warehouse_overview, dataset_detail as warehouse_dataset_detail,
+                    preview_dataset as warehouse_preview_dataset, maintenance_runs as warehouse_runs,
+                )
+                query=parse_qs(urlsplit(self.path).query,keep_blank_values=True)
+                try:
+                    if any(len(values)!=1 for values in query.values()):
+                        raise ValueError('Repeated warehouse query parameters')
+                    params={key:values[0] for key,values in query.items()}
+                    if path == '/api/v1/warehouse/overview':
+                        if params: raise ValueError('Unexpected warehouse overview parameter')
+                        return self.send(200,warehouse_overview(console.root))
+                    if path == '/api/v1/warehouse/runs':
+                        if set(params)-{'limit'}: raise ValueError('Unexpected maintenance run parameter')
+                        return self.send(200,warehouse_runs(console.root,limit=int(params.get('limit','20'))))
+                    prefix='/api/v1/warehouse/datasets/'
+                    if path.startswith(prefix):
+                        parts=path[len(prefix):].split('/')
+                        if not parts[0] or len(parts)>2 or (len(parts)==2 and parts[1]!='preview'):
+                            return self.send(404,{'status':'NOT_FOUND','code':'WAREHOUSE_ROUTE_NOT_FOUND'})
+                        dataset_id=parts[0]
+                        if len(parts)==1:
+                            if params: raise ValueError('Dataset detail does not accept query parameters')
+                            return self.send(200,warehouse_dataset_detail(console.root,dataset_id))
+                        allowed={'q','start','end','symbol','dimension','limit','offset'}
+                        if set(params)-allowed: raise ValueError('Unexpected preview parameter')
+                        return self.send(200,warehouse_preview_dataset(
+                            console.root,dataset_id,q=params.get('q',''),
+                            start=params.get('start') or None,end=params.get('end') or None,
+                            symbol=params.get('symbol') or None,dimension=params.get('dimension') or None,
+                            limit=int(params.get('limit','25')),offset=int(params.get('offset','0'))))
+                    return self.send(404,{'status':'NOT_FOUND','code':'WAREHOUSE_ROUTE_NOT_FOUND'})
+                except PolicyError as exc:
+                    return self.send(409,exc.payload())
+                except KeyError:
+                    return self.send(404,{'status':'NOT_FOUND','code':'WAREHOUSE_DATASET_NOT_FOUND'})
+                except (ValueError,TypeError):
+                    return self.send(400,{'status':'BLOCKED','code':'WAREHOUSE_QUERY_INVALID'})
+                except Exception as exc:
+                    return self.send(503,{'status':'BLOCKED','code':'WAREHOUSE_READ_FAILED',
+                                          'error_type':type(exc).__name__})
             if path.startswith('/api/v1/data/catalog'):
                 from .data.catalog import catalog_artifact
                 names={'/api/v1/data/catalog':'catalog.json','/api/v1/data/catalog/datasets.csv':'datasets.csv',
