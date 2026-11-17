@@ -183,7 +183,7 @@ _FEATURE_ROWS = (
     ("treasury_2s10s_bp","cross_asset","美国国债 10Y−2Y 期限利差","bps","daily",("treasury",),1260,"P1","IMPLEMENTED","public","published_at"),
     ("real_yield_10y","cross_asset","10 年实际利率","%","daily",("fred_alfred",),1260,"P1","PARTIAL","api_key","current_session_alfred_vintage_not_full_history"),
     ("breakeven_10y","cross_asset","10 年通胀盈亏平衡","%","daily",("fred_alfred",),1260,"P1","PARTIAL","api_key","current_session_alfred_vintage_not_full_history"),
-    ("dxy_return_5","cross_asset","美元指数五日收益","%","daily",("fred_alfred",),1260,"P1","PARTIAL","api_key","DTWEXBGS_BROAD_USD_PROXY_NOT_DXY"),
+    ("dxy_return_5","cross_asset","广义美元指数五日收益（DXY代理）","%","daily",("fred_alfred",),1260,"P1","PARTIAL","api_key","DTWEXBGS_BROAD_USD_PROXY_NOT_DXY"),
     ("gold_return_5","cross_asset","黄金五日收益","%","daily",("alpaca_or_market_data",),1260,"P1","PARTIAL","credentialed","bar_available_at"),
     ("oil_return_5","cross_asset","WTI 五日收益","%","daily",("alpaca_or_market_data",),1260,"P1","PARTIAL","credentialed","bar_available_at"),
     ("btc_return_5","cross_asset","Bitcoin 五日收益","%","daily",("crypto_market_data",),1260,"P1","PLANNED","public_or_licensed","bar_available_at"),
