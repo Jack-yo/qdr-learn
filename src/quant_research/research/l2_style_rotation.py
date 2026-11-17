@@ -112,7 +112,7 @@ def _rolling_available(availability: pd.DataFrame, symbols: tuple[str, ...],
     values = availability.loc[:, list(symbols)]
     complete = values.notna().all(axis=1)
     latest = values.max(axis=1).where(complete)
-    return latest.rolling(window, min_periods=window).max()
+    return latest.rolling(window + 1, min_periods=window + 1).max()
 
 
 def _rolling_wealth_drawdown(returns: pd.Series, window: int) -> pd.Series:
