@@ -493,6 +493,8 @@ class ExtendedPublicSources:
         api_key=self.live.env.get("FRED_API_KEY")
         if not api_key:
             raise SourceUnavailable("MISSING_FRED_API_KEY")
+        if not re.fullmatch(r"[a-z0-9]{32}",str(api_key)):
+            raise SourceUnavailable("INVALID_FRED_API_KEY")
         def load(item):
             field,(series_id,unit)=item
             params={"series_id":series_id,"api_key":api_key,"file_type":"json",
@@ -883,7 +885,10 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
                         "hy_oas":("美国高收益债 OAS","bps"),
                         "dxy_return_5":("广义贸易加权美元指数五日收益（DXY代理）","%"),
                     }
-                    health[name]["status"]="PARTIAL" if receipt.get("batch_error_count") else "OBSERVED"
+                    health[name]["status"]=(
+                        "PARTIAL" if receipt.get("batch_error_count") or
+                        receipt.get("coverage_n",0)<receipt.get("expected_n",0)
+                        else "OBSERVED")
                     health[name]["effective_date"]=receipt.get("effective_date")
                     for field,(label,unit) in feature_labels.items():
                         if field not in value:
@@ -892,6 +897,7 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
                         age=(datetime.fromisoformat(limit).date()-
                              datetime.fromisoformat(item["observed_date"]).date()).days
                         if age<0 or age>7:
+                            health[name]["status"]="PARTIAL"
                             continue
                         add("cross_asset",field,label,item["value"],unit,
                             "ALFRED_ASOF_CURRENT_SESSION_NOT_FULL_HISTORICAL_ARCHIVE",
