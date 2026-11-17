@@ -277,3 +277,28 @@ def test_append_only_bar_and_universe_reads_select_latest_revision(tmp_path):
         assert len(universe)==1
         assert bool(universe.iloc[0].is_member) is False
         assert universe.iloc[0].receipt_sha256==second_sha
+
+def test_coverage_keeps_all_partial_feature_rows_as_partial():
+    from quant_research.data.l1_market_catalog import FEATURES,coverage_matrix
+    specs=[x for x in FEATURES if x.dimension=="price"]
+    rows=[{
+        "feature_id":spec.key,"session_date":"2026-11-16","value":1.0,
+        "quality_status":"PARTIAL","available_at":"2026-11-16T22:00:00Z",
+    } for spec in specs]
+    result=coverage_matrix(rows,asof="2026-11-16")
+    price=next(x for x in result["dimensions"] if x["id"]=="price")
+    assert price["coverage"]["available"]==len(specs)
+    assert price["status"]=="PARTIAL"
+
+
+def test_latest_missing_observation_supersedes_older_valid_value():
+    from quant_research.data.l1_market_catalog import coverage_matrix
+    result=coverage_matrix([
+        {"feature_id":"vix_close","session_date":"2026-11-16","value":20.0,
+         "quality_status":"OBSERVED","available_at":"2026-11-16T22:00:00Z"},
+        {"feature_id":"vix_close","session_date":"2026-11-16","value":None,
+         "quality_status":"MISSING","available_at":"2026-11-17T10:00:00Z"},
+    ],asof="2026-11-16")
+    volatility=next(x for x in result["dimensions"] if x["id"]=="volatility")
+    assert "vix_close" in volatility["missing_features"]
+    assert volatility["coverage"]["available"]==0
