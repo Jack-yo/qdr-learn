@@ -297,7 +297,7 @@ def test_latest_missing_observation_supersedes_older_valid_value():
         {"feature_id":"vix_close","session_date":"2026-11-16","value":20.0,
          "quality_status":"OBSERVED","available_at":"2026-11-16T22:00:00Z"},
         {"feature_id":"vix_close","session_date":"2026-11-16","value":None,
-         "quality_status":"MISSING","available_at":"2026-11-17T10:00:00Z"},
+         "quality_status":"MISSING","available_at":"2026-11-16T23:00:00Z"},
     ],asof="2026-11-16")
     volatility=next(x for x in result["dimensions"] if x["id"]=="volatility")
     assert "vix_close" in volatility["missing_features"]
