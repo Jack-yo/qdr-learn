@@ -376,6 +376,15 @@ function evidence(v2,official,extended,marketData){
  const eventRows=events.slice(0,8).map(x=>'<div class="lv3-event-row"><span>'+
     e(x.name||'经济发布')+'</span><b>'+stripTime(x.start_utc)+' UTC</b></div>').join('');
  const summary=marketData?.coverage?.summary;
+ const benchmarkHistory=marketData?.benchmark_history||null;
+ const benchmarkLine=benchmarkHistory?
+   '<p class="lv3-small">核心历史基准库：'+
+   e(benchmarkHistory.status==='OBSERVED'?'完整':benchmarkHistory.status==='PARTIAL'?'部分覆盖':'尚未同步')+
+   (benchmarkHistory.coverage_pct!=null?' · '+e(benchmarkHistory.coverage_pct)+'%':'')+
+   (benchmarkHistory.symbol_count?' · '+e(benchmarkHistory.symbol_count)+' 个 ETF':'')+
+   (benchmarkHistory.window_start?' · '+e(benchmarkHistory.window_start)+' → '+e(benchmarkHistory.window_end||'—'):'')+
+   (benchmarkHistory.stale_symbols?.length?' · 落后 '+e(benchmarkHistory.stale_symbols.join(', ')):'')+
+   ' · 研究历史，PIT 未核验</p>':'';
  const featureHealth=marketData?.coverage?.feature_health||[];
  const featureNames=new Map((marketData?.catalog?.features||[]).map(x=>[x.key,x.name]));
  const staleFeatures=featureHealth.filter(x=>['STALE','UNKNOWN_DATE','FUTURE_OBSERVATION'].includes(x.status));
@@ -399,6 +408,7 @@ function evidence(v2,official,extended,marketData){
  return '<div class="lv3-extra-grid">'+box('lv3-source-evidence',title('六大数据体系 / 十二维覆盖',
    '<span class="lv3-soft">以已持久化观测为准，不以注册数量冒充覆盖</span>')+
    coverageSummary+
+   benchmarkLine+
    '<details class="lv3-evidence-details"><summary>查看六大体系与十二维实际覆盖</summary>'+
    '<div class="lv3-domains">'+systemHtml+statusesHtml+'</div></details>'+
    freshnessDetail+

@@ -5,6 +5,7 @@ Examples:
   python -m quant_research.workflow.l1_market_data init --root .
   python -m quant_research.workflow.l1_market_data status --root .
   python -m quant_research.workflow.l1_market_data scan-live --root .
+  python -m quant_research.workflow.l1_market_data sync-benchmark-history --root . --years 5
   python -m quant_research.workflow.l1_market_data import-bars --root . --input bars.parquet --provider alpaca --price-basis split
   python -m quant_research.workflow.l1_market_data import-universe --root . --input universe.csv --provider alpaca-assets --universe-id CURRENT_ACTIVE --known-at 2026-11-17T22:00:00Z --snapshot-complete
   python -m quant_research.workflow.l1_market_data compute --root . --price-basis split
@@ -389,6 +390,15 @@ def main(argv=None) -> int:
     live=sub.add_parser("scan-live",help="Fetch and persist current L1 public/credentialed observations")
     live.add_argument("--root",type=Path,default=Path("."))
     live.add_argument("--refresh",action="store_true")
+    history=sub.add_parser("sync-benchmark-history",
+        help="Bootstrap/increment only the 28-ETF L1 benchmark basket plus small public macro history")
+    history.add_argument("--root",type=Path,default=Path("."))
+    history.add_argument("--db",type=Path)
+    history.add_argument("--years",type=int,choices=(3,4,5),default=5)
+    history.add_argument("--refresh",action="store_true")
+    history.add_argument("--force-bootstrap",action="store_true")
+    history.add_argument("--history-feed",choices=("sip","iex"))
+    history.add_argument("--skip-macro",action="store_true")
     args=parser.parse_args(argv)
 
     if args.command=="catalog":
@@ -396,6 +406,14 @@ def main(argv=None) -> int:
         return 0
     if args.command=="scan-live":
         print(json.dumps(_scan_live(args.root,args.refresh),ensure_ascii=False,default=str))
+        return 0
+    if args.command=="sync-benchmark-history":
+        from quant_research.workflow.l1_benchmark_history import sync_benchmark_history
+        result=sync_benchmark_history(
+            args.root,years=args.years,refresh=args.refresh,
+            history_feed=args.history_feed,force_bootstrap=args.force_bootstrap,
+            include_macro=not args.skip_macro,db_path=args.db)
+        print(json.dumps(result,ensure_ascii=False,default=str))
         return 0
     if args.command=="status":
         print(json.dumps(market_data_snapshot(args.root,asof=None,db_path=args.db),ensure_ascii=False,default=str))
