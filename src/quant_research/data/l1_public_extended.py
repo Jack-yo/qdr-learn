@@ -260,24 +260,24 @@ def parse_fomc_calendar(body):
         parser=_HTMLToText()
         parser.feed(body.decode("utf-8-sig"))
         text=" ".join(" ".join(parser.fragments).split())
-        updated=re.search(r"Last Update:\\s*([A-Z][a-z]+\\s+\\d{1,2},\\s+\\d{4})",text)
+        updated=re.search(r"Last Update:\s*([A-Z][a-z]+\s+\d{1,2},\s+\d{4})",text)
         if updated is None:
             raise SourceUnavailable("FOMC_CALENDAR_LAST_UPDATE_MISSING")
         published=datetime.strptime(updated.group(1),"%B %d, %Y").date()
         known_at=datetime(published.year,published.month,published.day,23,59,59,
                           tzinfo=timezone.utc)
-        sections=list(re.finditer(r"\\b(20\\d{2})\\s+FOMC Meetings\\b",text))
+        sections=list(re.finditer(r"\b(20\d{2})\s+FOMC Meetings\b",text))
         events={}
         months={name:index for index,name in enumerate(
             ("January","February","March","April","May","June","July","August",
              "September","October","November","December"),1)}
         meeting_pattern=re.compile(
-            r"\\b(January|February|March|April|May|June|July|August|September|October|November|December)"
-            r"\\s+(\\d{1,2})\\s*-\\s*(\\d{1,2})\\b",re.IGNORECASE)
+            r"\b(January|February|March|April|May|June|July|August|September|October|November|December)"
+            r"\s+(\d{1,2})\s*-\s*(\d{1,2})\b",re.IGNORECASE)
         for index,section in enumerate(sections):
             year=int(section.group(1))
             end=sections[index+1].start() if index+1<len(sections) else len(text)
-            block=re.split(r"\\bNote:",text[section.end():end],maxsplit=1)[0]
+            block=re.split(r"\bNote:",text[section.end():end],maxsplit=1)[0]
             for match in meeting_pattern.finditer(block):
                 month=months[match.group(1).title()]
                 day=int(match.group(2))
