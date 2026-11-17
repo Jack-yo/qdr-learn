@@ -130,6 +130,7 @@ class LiveSources:
             'https://publicreporting.cftc.gov/resource/72hh-3qpy.json',
             'https://www.financialresearch.gov/financial-stress-index/data/fsi.csv',
             'https://www.bls.gov/schedule/news_release/bls.ics',
+            'https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm',
             'https://www.ici.org/research/stats/etf_flows',
         }
         cboe_date = re.fullmatch(
