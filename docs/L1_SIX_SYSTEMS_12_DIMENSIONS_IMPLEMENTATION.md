@@ -32,7 +32,7 @@
 - Alpaca 1Day bars 适配器，ETF 默认池为 19 个 symbol；单次请求限制 50 个 symbols、分页最多 15 页、累计行数上限 150,000。当前扩展股票样本仍固定 30 只大盘股。
 - Cboe VIX 历史、Cboe 每日汇总 Put/Call 与 SPX 汇总 OI。
 - Treasury 2Y/10Y、NY Fed SOFR/EFFR、CFTC 周度持仓、FRED（需 API key）。
-- OFR FSI、BLS 已排程日历、Federal Reserve FOMC 会议日历、ICI ETF 周度净发行估算、FINRA 报告设施 short volume、Cboe TRF notional share。
+- OFR FSI、BLS 已排程日历、Federal Reserve FOMC 会议日历、FRED/ALFRED 当日 vintage（实际利率、盈亏平衡、HY OAS、广义美元代理）、ICI ETF 周度净发行估算、FINRA 报告设施 short volume、Cboe TRF notional share。
 - l1_observatory.py / l1_features.py 已有 12 维研究注册和部分历史计算。
 
 关键缺口：
@@ -76,10 +76,11 @@
 - Coverage Matrix 按交易日、available_at、ingested_at 选择最新观测；最新 MISSING 记录会覆盖同一指标的旧 OBSERVED 值；全部为 PARTIAL 的维度不会被升级为 OBSERVED。
 - 修复 SourceSpec 状态字段引用错误，并使 PIT 阻断在覆盖矩阵中可见。
 - 新增 Federal Reserve 官方 FOMC 日历解析与 `days_to_fomc` 观测；事件保留页面最后更新时间作为 `schedule_known_at`，并明确标记为当前已发布日程而非历史 PIT。
-- 当前 registry：109 个特征（47 IMPLEMENTED / 38 PARTIAL / 24 PLANNED），21 个数据源（1 IMPLEMENTED / 14 IMPLEMENTED_PARTIAL / 1 BLOCKED / 5 PLANNED）。
+- 新增 FRED/ALFRED 按当前交易日 `realtime_start` / `realtime_end` 查询的实际利率、盈亏平衡、HY OAS 和广义美元指数代理；美元指标明确标记 DTWEXBGS，不冒充 DXY。该接入只覆盖当前交易日 vintage，尚未完成逐日历史 vintage 回补。
+- 当前 registry：109 个特征（47 IMPLEMENTED / 41 PARTIAL / 21 PLANNED），21 个数据源（1 IMPLEMENTED / 14 IMPLEMENTED_PARTIAL / 1 BLOCKED / 5 PLANNED）。
 
 验收边界：
-- 已提交确定性回归测试，覆盖快照批次全失败、低覆盖、回执归属、append-only 修订去重、最新缺失观测，以及 FOMC 日历解析和 schedule-known-at 防前视。
+- 已提交确定性回归测试，覆盖快照批次全失败、低覆盖、回执归属、append-only 修订去重、最新缺失观测、FOMC 日历解析和 schedule-known-at 防前视，以及 FRED vintage 解析与跨资产代理计算。
 - 这些测试尚未在本机依赖环境执行；GitHub 当前没有返回对应提交的 workflow run。不得将“测试已编写”表述为“测试通过”。
 - Alpaca 真实账户的资产目录、快照批次和历史 Bars 权限仍需在用户本机运行 `scan-live` / 历史回补任务验收。
 - 当前快照只代表 Alpaca 当前 active/tradable universe，不构成历史 PIT 股票池，也不具备模型或交易资格。
