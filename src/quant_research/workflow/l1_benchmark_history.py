@@ -172,13 +172,28 @@ def _sync_bars(store, sources, *, years, refresh, history_feed, asof, stamp,
         existing = existing.loc[(existing.provider == BAR_PROVIDER) &
                                 (existing.price_basis == BAR_BASIS)]
     incremental = not force_bootstrap and not existing.empty
+    repairing_gap_from = None
     if incremental:
         last_by_symbol = existing.groupby("symbol").session_date.max().to_dict()
         if set(last_by_symbol) == set(BENCHMARK_SYMBOLS):
             oldest_latest = min(x.isoformat() if hasattr(x, "isoformat") else str(x)
                                 for x in last_by_symbol.values())
-            start = max(full_start, date.fromisoformat(oldest_latest) -
-                        timedelta(days=OVERLAP_CALENDAR_DAYS))
+            recent_start = max(full_start, date.fromisoformat(oldest_latest) -
+                               timedelta(days=OVERLAP_CALENDAR_DAYS))
+            expected = set(_expected_sessions(full_start.isoformat(), asof))
+            gaps = []
+            for symbol in BENCHMARK_SYMBOLS:
+                dates = set(existing.loc[existing.symbol.eq(symbol),
+                                         "session_date"].astype(str).tolist())
+                missing = expected - dates
+                if missing:
+                    gaps.append(min(missing))
+            if gaps:
+                repairing_gap_from = min(gaps)
+                start = max(full_start, min(recent_start,
+                            date.fromisoformat(repairing_gap_from)))
+            else:
+                start = recent_start
         else:
             start = full_start
             incremental = False
@@ -228,6 +243,7 @@ def _sync_bars(store, sources, *, years, refresh, history_feed, asof, stamp,
             "window_end": asof,
             "request_start": start.isoformat(),
             "incremental": incremental,
+            "repairing_gap_from": repairing_gap_from,
             "coverage_pct": quality["coverage_pct"],
             "missing_sessions": quality["missing_sessions"],
             "stale_symbols": quality["stale_symbols"],
@@ -237,8 +253,10 @@ def _sync_bars(store, sources, *, years, refresh, history_feed, asof, stamp,
     }])
     return {
         "status": quality["status"],
-        "mode": "INCREMENTAL" if incremental else "BOOTSTRAP",
+        "mode": ("GAP_REPAIR" if repairing_gap_from else
+                 "INCREMENTAL" if incremental else "BOOTSTRAP"),
         "request_start": start.isoformat(), "window_start": full_start.isoformat(),
+        "repairing_gap_from": repairing_gap_from,
         "asof_session": asof, "rows_received": len(records),
         "rows_written": written, "source_pages": len(receipts),
         "coverage": quality,
