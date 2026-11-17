@@ -496,8 +496,17 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
                     if not isinstance(values,list):
                         raise SourceUnavailable("BLS_BAD_EVENT_PAYLOAD")
                     upcoming=[x for x in values if stamp<=x["dt"]<=stamp+timedelta(days=14)]
-                    calendar_events=[{"name":x["name"],"start_utc":x["dt"].isoformat()}
-                                     for x in upcoming[:25]]
+                    calendar_events=[{
+                        "event_id":str(x["name"])+"|"+x["dt"].isoformat(),
+                        "name":x["name"],
+                        "event_type":("CPI" if "consumer price index" in str(x["name"]).lower()
+                                      else "NFP" if "employment situation" in str(x["name"]).lower()
+                                      else "BLS"),
+                        "start_utc":x["dt"].isoformat(),
+                        "schedule_known_at":receipt["fetched_at"],
+                        "source":receipt["source"],
+                        "receipt_sha256":receipt["sha256"],
+                    } for x in upcoming[:25]]
                     day=limit
                     values={
                         day:{"bls_scheduled_next_7d":sum(1 for x in values if stamp<=x["dt"]<=stamp+timedelta(days=7))}
@@ -523,12 +532,14 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
                 if lag>max_lag:
                     raise SourceUnavailable("STALE_OBSERVATION")
                 health[name]={"status":"OBSERVED","source":receipt["source"],
-                              "effective_date":day,"fetched_at":receipt["fetched_at"]}
+                              "effective_date":day,"fetched_at":receipt["fetched_at"],
+                              "receipt_sha256":receipt["sha256"],"pit":receipt["pit"]}
                 def add(domain,fid,label,val,unit,scope="CURRENT_OBSERVATION_NOT_PIT"):
                     features.append({"domain":domain,"id":fid,"label":label,
                         "value":round(_finite(val),5),"unit":unit,"status":"OBSERVED",
                         "source":receipt["source"],"observed_date":day,
-                        "fetched_at":receipt["fetched_at"],"pit":scope})
+                        "fetched_at":receipt["fetched_at"],"pit":scope,
+                        "receipt_sha256":receipt["sha256"]})
                 if name=="cboe_options":
                     for field,title in (("cboe_pcr_total","全市场期权成交 Put/Call"),
                                         ("cboe_pcr_index","指数期权成交 Put/Call"),

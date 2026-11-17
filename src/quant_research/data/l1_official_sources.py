@@ -213,7 +213,8 @@ def scan_official_l1(root, *, sources=None, now=None, refresh=False, asof=None):
                     raise SourceUnavailable("STALE_OBSERVATION")
                 acquired[key] = (day, value, receipt)
                 health[key] = {"status": "OBSERVED", "source": receipt["source"],
-                               "effective_date": day, "fetched_at": receipt["fetched_at"]}
+                               "effective_date": day, "fetched_at": receipt["fetched_at"],
+                               "receipt_sha256": receipt["sha256"], "pit": receipt["pit"]}
             except (SourceUnavailable, ValueError, KeyError, TypeError, AttributeError) as exc:
                 health[key] = {"status": "MISSING",
                                "code": getattr(exc, "code", type(exc).__name__)}
@@ -225,7 +226,7 @@ def scan_official_l1(root, *, sources=None, now=None, refresh=False, asof=None):
                          "status": "OBSERVED", "source": receipt["source"],
                          "observed_date": observed_day or day,
                          "fetched_at": receipt["fetched_at"],
-                         "pit": receipt["pit"]})
+                         "pit": receipt["pit"], "receipt_sha256": receipt["sha256"]})
     if "treasury" in acquired:
         day, values, _ = acquired["treasury"]
         for fid, label, unit in (
