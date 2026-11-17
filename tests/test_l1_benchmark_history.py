@@ -111,6 +111,13 @@ def test_benchmark_bootstrap_is_scoped_to_28_etfs_and_persists_quality(tmp_path)
         assert checks and checks[-1][0] == "OBSERVED"
         assert checks[-1][2] == checks[-1][3]
 
+    from quant_research.workflow.l1_market_ingest import market_data_snapshot
+    snapshot = market_data_snapshot(tmp_path)
+    assert snapshot["benchmark_history"]["status"] == "OBSERVED"
+    assert snapshot["benchmark_history"]["symbol_count"] == 28
+    assert snapshot["benchmark_history"]["coverage_pct"] >= 99.5
+    assert snapshot["benchmark_history"]["historical_pit_verified"] is False
+
 
 def test_second_sync_is_incremental_with_small_overlap(tmp_path):
     pytest.importorskip("duckdb")
