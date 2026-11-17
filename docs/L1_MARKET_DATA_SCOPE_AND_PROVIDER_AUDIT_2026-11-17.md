@@ -35,6 +35,13 @@ L1 的产品目标是实时监测并预测美股整体市场状态，而不是�
 - Source Registry：21 项（此前口头称 20 项，按当前 main 实际代码计数应更正为 21 项）；IMPLEMENTED 1、IMPLEMENTED_PARTIAL 14、BLOCKED 1、PLANNED 5。
 - 以上是代码注册状态，不是本机实际运行成功率、数据覆盖率或预测资格。
 
+### 核心行情调用链的实际范围（静态代码核对）
+- `LiveSources.ETF_SYMBOLS` 当前包含 28 个核心指数、行业、风格和风险 ETF；历史 Bars 默认使用这 28 个 symbol。
+- main 中 `LiveSources.snapshots()` 默认只请求 SPY、QQQ、IWM、RSP、HYG、LQD 六个 symbol。因而旧版 `current_l1_v2()` 的实时 latestTrade/latestQuote 只有六个标的，而不是完整 28 ETF 核心篮子。
+- `market_breadth()` 是另一条独立链路：读取当前 active/tradable/non-OTC 资产目录，再按 200 个 symbol 分批拉快照，计算当前 universe 的上涨/下跌、上涨成交量和覆盖率；它不是历史 PIT。
+- `scan-live` 会持久化官方/扩展扫描和市场广度结果；但这不等于这些所有数据已统一进入 L1 预测输入。
+- 后续核心实时篮子修复应把默认 snapshots 从 6 个扩展到现有 28 个 ETF，并保留显式传入小集合的能力；不得扩大为全市场个股历史行情下载。
+
 ### 21 个数据源审计
 
 | Source key | 当前代码能力 / 频率 | 当前限制 | L1 处理建议 |
