@@ -279,7 +279,7 @@ def coverage_matrix(observations: Iterable[dict] = (), *,
     """Build coverage from actual stored observations; registry alone is not coverage."""
     rows = list(observations)
     health = source_health or {}
-    feature_rows = {}
+    latest_rows = {}
     for row in rows:
         key = row.get("feature_id") or row.get("id")
         day = str(row.get("session_date") or row.get("observed_date") or "")
@@ -287,12 +287,24 @@ def coverage_matrix(observations: Iterable[dict] = (), *,
             continue
         if key not in FEATURE_BY_KEY:
             continue
-        if row.get("status", row.get("quality_status", "OBSERVED")) not in ("OBSERVED", "PARTIAL"):
-            continue
-        if row.get("value") is None:
-            continue
-        if key not in feature_rows or day > feature_rows[key]["date"]:
-            feature_rows[key] = {"date": day, "row": row}
+        def sort_stamp(value):
+            if value is None:
+                return ""
+            return value.isoformat() if hasattr(value, "isoformat") else str(value)
+        rank = (day, sort_stamp(row.get("available_at") or row.get("fetched_at")),
+                sort_stamp(row.get("ingested_at")), str(row.get("provider") or ""),
+                str(row.get("receipt_sha256") or ""))
+        previous = latest_rows.get(key)
+        if previous is None or rank > previous["rank"]:
+            latest_rows[key] = {"date": day, "row": row, "rank": rank}
+    # A newer MISSING/NULL observation supersedes an older valid value for the
+    # same feature. Otherwise a failed latest scan can leave stale values looking current.
+    feature_rows = {
+        key: item for key, item in latest_rows.items()
+        if item["row"].get("status", item["row"].get("quality_status", "OBSERVED"))
+           in ("OBSERVED", "PARTIAL")
+        and item["row"].get("value") is not None
+    }
     dimensions = []
     for dimension in DIMENSIONS:
         specs = [x for x in FEATURES if x.dimension == dimension.key]
@@ -306,8 +318,14 @@ def coverage_matrix(observations: Iterable[dict] = (), *,
                     (source_spec is not None and source_spec.code_status == "BLOCKED")):
                     blocked_sources.append(source)
         count, total = len(observed), len(specs)
-        status = "OBSERVED" if total and count == total else (
-            "PARTIAL" if count else "BLOCKED" if blocked_sources else "MISSING")
+        latest_quality = [
+            str(feature_rows[x.key]["row"].get(
+                "status", feature_rows[x.key]["row"].get("quality_status", "OBSERVED")))
+            for x in observed
+        ]
+        status = ("OBSERVED" if total and count == total and
+                  all(x == "OBSERVED" for x in latest_quality) and not blocked_sources
+                  else "PARTIAL" if count else "BLOCKED" if blocked_sources else "MISSING")
         rows_for_pit = [feature_rows[x.key]["row"] for x in observed]
         pit = bool(rows_for_pit) and len(observed) == total and all(
             x.get("pit_status") == "PIT_VERIFIED" and x.get("pit_attestation_id")
@@ -328,10 +346,13 @@ def coverage_matrix(observations: Iterable[dict] = (), *,
         parts = [by_dimension[key] for key in system.dimensions]
         available = sum(x["coverage"]["available"] for x in parts)
         registered = sum(x["coverage"]["registered"] for x in parts)
+        system_status = ("OBSERVED" if parts and all(x["status"] == "OBSERVED" for x in parts)
+                         else "PARTIAL" if available
+                         else "BLOCKED" if any(x["status"] == "BLOCKED" for x in parts)
+                         else "MISSING")
         systems.append({
             "id": system.key, "name": system.name,
-            "status": "OBSERVED" if parts and all(x["status"] == "OBSERVED" for x in parts)
-                      else "PARTIAL" if available else "MISSING",
+            "status": system_status,
             "coverage": {"available": available, "registered": registered},
             "dimensions": list(system.dimensions),
             "historical_pit_verified": bool(parts) and all(x["historical_pit_verified"] for x in parts),
