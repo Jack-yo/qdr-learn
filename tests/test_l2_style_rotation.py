@@ -46,7 +46,8 @@ def test_observation_outputs_all_styles_and_expected_windows():
     assert set(result.registry_version) == {"seven-style-etf-proxy-v1"}
     assert not result.decision_eligible.any()
     assert result.loc[result.date.eq(sessions[0]), "relative_return_5d"].isna().all()
-    assert result.loc[result.date.eq(sessions[59]), "relative_return_60d"].notna().all()
+    assert result.loc[result.date.eq(sessions[59]), "relative_return_60d"].isna().all()
+    assert result.loc[result.date.eq(sessions[60]), "relative_return_60d"].notna().all()
 
 
 def test_missing_required_basket_member_blocks_only_affected_style_window():
@@ -107,3 +108,13 @@ def test_cyclical_defensive_is_not_silently_reweighted_when_member_missing():
     cyc = result.loc[result.style_id.eq("cyc_def")].set_index("date")
     assert pd.isna(cyc.loc[sessions[70], "daily_relative_return"])
     assert pd.isna(cyc.loc[sessions[70], "relative_return_5d"])
+
+
+def test_return_window_availability_includes_the_prior_close_needed_for_first_return():
+    sessions, prices, availability = _inputs()
+    availability.loc[sessions[84], "IWM"] = pd.Timestamp("2025-06-01T00:00:00Z")
+    result = style_observations_v1(prices, availability)
+    size = result.loc[result.style_id.eq("size")].set_index("date")
+    # A five-session close-to-close return ending at session 89 uses prices
+    # from sessions 84 through 89, i.e. six dated price observations.
+    assert size.loc[sessions[89], "relative_return_5d_available_at"] == pd.Timestamp("2025-06-01T00:00:00Z")
