@@ -150,6 +150,10 @@ def _import_bars(store, args):
 
 
 def _import_universe(store, args):
+    if args.pit_status=="PIT_VERIFIED":
+        raise ValueError("PIT_VERIFIED_REQUIRES_INDEPENDENT_SIGNATURE_VERIFICATION")
+    if args.pit_status not in ("CURRENT_SNAPSHOT_ONLY","PIT_UNVERIFIED","PIT_ATTESTED"):
+        raise ValueError("UNSUPPORTED_PIT_STATUS")
     raw = args.input.read_bytes()
     frame = _read(args.input)
     if "session_date" not in frame and "date" in frame:
@@ -185,11 +189,70 @@ def _import_universe(store, args):
         metadata={"input_name":args.input.name,"universe_id":args.universe_id,
                   "snapshot_complete":bool(frame.snapshot_complete.all()),
                   "pit_status":args.pit_status,"membership_basis":args.membership_basis})
+    attestation_id=attestation_sha=attestation_provider=None
+    manifest_path=getattr(args,"pit_attestation_file",None)
+    if args.pit_status=="PIT_ATTESTED":
+        if manifest_path is None or not manifest_path.is_file():
+            raise ValueError("PIT_ATTESTATION_MANIFEST_REQUIRED")
+        manifest_raw=manifest_path.read_bytes()
+        try:
+            manifest=json.loads(manifest_raw)
+        except (UnicodeDecodeError,ValueError) as exc:
+            raise ValueError("PIT_ATTESTATION_MANIFEST_INVALID_JSON") from exc
+        required_manifest={
+            "attestation_id","provider","scope","coverage_start","coverage_end",
+            "source_data_sha256","security_identity_scheme","membership_point_in_time",
+            "delisted_included","known_at_semantics","license_scope",
+            "review_status","reviewed_at","reviewed_by",
+        }
+        missing=required_manifest-set(manifest) if isinstance(manifest,dict) else required_manifest
+        if missing:
+            raise ValueError("PIT_ATTESTATION_FIELDS_MISSING:"+",".join(sorted(missing)))
+        if manifest["source_data_sha256"]!=digest:
+            raise ValueError("PIT_ATTESTATION_SOURCE_HASH_MISMATCH")
+        if manifest["scope"] not in ("US_COMMON_STOCKS","US_EQUITIES","INDEX_CONSTITUENTS"):
+            raise ValueError("PIT_ATTESTATION_SCOPE_UNSUPPORTED")
+        if manifest["membership_point_in_time"] is not True or manifest["delisted_included"] is not True:
+            raise ValueError("PIT_ATTESTATION_REQUIRES_PIT_AND_DELISTED_COVERAGE")
+        if manifest["known_at_semantics"]!="point_in_time":
+            raise ValueError("PIT_ATTESTATION_KNOWN_AT_SEMANTICS_INVALID")
+        if manifest["review_status"]!="OPERATOR_REVIEWED":
+            raise ValueError("PIT_ATTESTATION_REVIEW_REQUIRED")
+        if not all(str(manifest[x]).strip() for x in
+                   ("attestation_id","provider","security_identity_scheme",
+                    "license_scope","reviewed_by")):
+            raise ValueError("PIT_ATTESTATION_IDENTITY_REQUIRED")
+        coverage_start=_date(manifest["coverage_start"])
+        coverage_end=_date(manifest["coverage_end"])
+        if coverage_start>min(frame.session_date) or coverage_end<max(frame.session_date):
+            raise ValueError("PIT_ATTESTATION_COVERAGE_DOES_NOT_CONTAIN_IMPORT")
+        reviewed_at=_aware(manifest["reviewed_at"])
+        attestation_id=str(manifest["attestation_id"])
+        attestation_provider=str(manifest["provider"])
+        attestation_sha=sha256(manifest_raw).hexdigest()
+        store.write_receipt(provider=attestation_provider,
+            dataset="pit_universe_attestation_manifest",
+            fetched_at=datetime.now(timezone.utc),available_at=reviewed_at,
+            receipt_sha256=attestation_sha,payload=manifest_raw,
+            metadata={"attestation_id":attestation_id,"scope":manifest["scope"],
+                "coverage_start":coverage_start.isoformat(),
+                "coverage_end":coverage_end.isoformat(),
+                "license_scope":manifest["license_scope"],
+                "review_status":manifest["review_status"],
+                "reviewed_by":manifest["reviewed_by"],
+                "source_data_sha256":digest})
+    elif manifest_path is not None:
+        raise ValueError("PIT_ATTESTATION_MANIFEST_REQUIRES_PIT_ATTESTED_STATUS")
+    frame["pit_attestation_id"]=attestation_id
+    frame["pit_attestation_sha256"]=attestation_sha
+    frame["pit_attestation_provider"]=attestation_provider
     frame["receipt_sha256"] = digest
     count = store.write_universe(frame.to_dict("records"))
     return {"status":"IMPORTED","rows":count,"universe_id":args.universe_id,
             "snapshot_complete":bool(frame.snapshot_complete.all()),
-            "pit_status":args.pit_status,"receipt_sha256":digest}
+            "pit_status":args.pit_status,"receipt_sha256":digest,
+            "pit_attestation_id":attestation_id,
+            "pit_attestation_sha256":attestation_sha}
 
 
 def _import_events(store, args):
@@ -300,7 +363,11 @@ def main(argv=None) -> int:
     universe.add_argument("--known-at",help="Timezone-aware availability time when absent from file")
     universe.add_argument("--session-date",help="Session date when absent from file")
     universe.add_argument("--membership-basis",default="CURRENT_VENDOR_DIRECTORY")
-    universe.add_argument("--pit-status",default="CURRENT_SNAPSHOT_ONLY")
+    universe.add_argument("--pit-status",
+        choices=("CURRENT_SNAPSHOT_ONLY","PIT_UNVERIFIED","PIT_ATTESTED"),
+        default="CURRENT_SNAPSHOT_ONLY")
+    universe.add_argument("--pit-attestation-file",type=Path,
+        help="Operator-reviewed JSON manifest binding this universe file to a PIT data source")
     universe.add_argument("--snapshot-complete",action="store_true")
     events=sub.add_parser("import-events",help="Append dated economic event calendar records")
     events.add_argument("--root",type=Path,default=Path("."))
