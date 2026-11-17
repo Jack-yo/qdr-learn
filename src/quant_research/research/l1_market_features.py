@@ -268,6 +268,22 @@ def _breadth_features(bars, cutoffs, universe, min_coverage):
               current_membership_basis!=ad_line_membership_basis):
             ad_line_valid=False
         members = rows.loc[rows.is_member]
+        attestation_ids=set(rows.get("pit_attestation_id",
+            pd.Series(index=rows.index,dtype=object)).dropna().astype(str))
+        attestation_shas=set(rows.get("pit_attestation_sha256",
+            pd.Series(index=rows.index,dtype=object)).dropna().astype(str))
+        attestation_providers=set(rows.get("pit_attestation_provider",
+            pd.Series(index=rows.index,dtype=object)).dropna().astype(str))
+        pit_attested=(
+            "pit_status" in rows and rows.pit_status.astype(str).eq("PIT_ATTESTED").all()
+            and len(attestation_ids)==1 and len(attestation_shas)==1
+            and len(attestation_providers)==1
+        )
+        attestation_id=next(iter(attestation_ids)) if pit_attested else None
+        attestation_sha=next(iter(attestation_shas)) if pit_attested else None
+        attestation_provider=next(iter(attestation_providers)) if pit_attested else None
+        breadth_pit_status=("PIT_ATTESTED" if pit_attested
+                            else "PIT_UNVERIFIED_CURRENT_UNIVERSE")
         expected = len(members)
         if expected < 30:
             if ad_line_started:
@@ -338,15 +354,20 @@ def _breadth_features(bars, cutoffs, universe, min_coverage):
             feature_dimension = FEATURE_BY_KEY[feature_id].dimension
             output.append(_record(day, feature_dimension, feature_id, value, unit,
                 available, digest, quality="OBSERVED" if pd.notna(value) else "MISSING",
-                pit="PIT_UNVERIFIED_CURRENT_UNIVERSE", coverage_n=len(current), expected_n=expected,
+                pit=breadth_pit_status, coverage_n=len(current), expected_n=expected,
                 source="CURRENT_COMPLETE_UNIVERSE_SNAPSHOT",
                 metadata={"universe_id": str(members.universe_id.iloc[0]),
                           "advances": advances, "declines": declines,
                           "unchanged": unchanged, "coverage": coverage,
-                          "pit_attested": False}))
+                          "pit_attested": pit_attested,
+                          "pit_attestation_id": attestation_id,
+                          "pit_attestation_sha256": attestation_sha,
+                          "pit_attestation_provider": attestation_provider}))
         quality.append({"session_date": day.date().isoformat(), "dimension": "breadth",
-                        "status": "OBSERVED_CURRENT_SNAPSHOT_NOT_PIT",
-                        "reason": "CURRENT_UNIVERSE_ONLY",
+                        "status": ("PARTIAL" if pit_attested else
+                                   "OBSERVED_CURRENT_SNAPSHOT_NOT_PIT"),
+                        "reason": ("PIT_ATTESTED_PENDING_INDEPENDENT_VERIFICATION"
+                                   if pit_attested else "CURRENT_UNIVERSE_ONLY"),
                         "coverage_n": len(current), "expected_n": expected})
     return output, quality
 
