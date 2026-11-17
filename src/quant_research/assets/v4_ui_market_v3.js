@@ -353,8 +353,9 @@ function evidence(v2,official,extended,marketData){
  const fallbackIds=Object.keys(DOMAIN_NAMES);
  const statusesHtml=(dimensions.length?dimensions.map(x=>
    '<div class="lv3-domain-row"><span>'+e(x.name)+'</span>'+
-   '<b>'+e(x.coverage.available)+' / '+e(x.coverage.registered)+'</b>'+
-   '<small>'+e(x.status==='OBSERVED'?'已观测':x.status==='PARTIAL'?'部分覆盖':x.status==='BLOCKED'?'来源阻断':'待接入')+
+   '<b>'+e(x.coverage.current??x.coverage.available)+' / '+e(x.coverage.registered)+'</b>'+
+   '<small>'+e(x.status==='OBSERVED'?'已观测':x.status==='STALE'?'数据已过期':x.status==='PARTIAL'?'部分覆盖':x.status==='BLOCKED'?'来源阻断':'待接入')+
+   (x.coverage.stale?' · 过期 '+e(x.coverage.stale)+' 项':'')+
    (x.historical_pit_verified?' · PIT 已核验':
       x.pit_attestation_status==='PIT_ATTESTED_PENDING_VERIFICATION'
         ?' · PIT 已审阅待独立核验':' · PIT 未核验')+
@@ -368,21 +369,39 @@ function evidence(v2,official,extended,marketData){
       '<b>'+count+' 项</b><small>'+status+'</small></div>';
  }).join(''));
  const systemHtml=systems.map(x=>'<div class="lv3-domain-row"><span>'+e(x.name)+'</span>'+
-   '<b>'+e(x.coverage.available)+' / '+e(x.coverage.registered)+'</b>'+
-   '<small>'+e(x.status==='OBSERVED'?'有观测':x.status==='PARTIAL'?'部分覆盖':'待接入')+'</small></div>').join('');
+   '<b>'+e(x.coverage.current??x.coverage.available)+' / '+e(x.coverage.registered)+'</b>'+
+   '<small>'+e(x.status==='OBSERVED'?'有观测':x.status==='STALE'?'数据已过期':x.status==='PARTIAL'?'部分覆盖':'待接入')+
+   (x.coverage.stale?' · 过期 '+e(x.coverage.stale)+' 项':'')+'</small></div>').join('');
  const events=extended?.calendar_events||[];
  const eventRows=events.slice(0,8).map(x=>'<div class="lv3-event-row"><span>'+
     e(x.name||'经济发布')+'</span><b>'+stripTime(x.start_utc)+' UTC</b></div>').join('');
  const summary=marketData?.coverage?.summary;
+ const featureHealth=marketData?.coverage?.feature_health||[];
+ const featureNames=new Map((marketData?.catalog?.features||[]).map(x=>[x.key,x.name]));
+ const staleFeatures=featureHealth.filter(x=>['STALE','UNKNOWN_DATE','FUTURE_OBSERVATION'].includes(x.status));
+ const freshnessDetail=staleFeatures.length?
+   '<details class="lv3-evidence-details"><summary>查看 '+staleFeatures.length+' 项过期或日期异常指标</summary>'+
+   '<div class="lv3-domains">'+staleFeatures.slice(0,30).map(x=>
+     '<div class="lv3-domain-row"><span>'+e(featureNames.get(x.id)||x.id)+'</span>'+
+     '<b>'+e(x.status==='STALE'?'已过期':x.status==='UNKNOWN_DATE'?'日期不明':'未来数据')+'</b>'+
+     '<small>'+e(x.observed_date||'无观测日期')+
+     (x.age_days!=null?' · 距参考日期 '+e(x.age_days)+' 天':'')+
+     (x.max_age_days!=null?' · 宽限 '+e(x.max_age_days)+' 天':'')+'</small></div>').join('')+
+   '</div></details>':'';
  const coverageSummary=summary?
-   '<p class="lv3-small">已观测特征 '+e(summary.features_observed)+' / '+e(summary.features_registered)+
-   ' · 6 个体系 / 12 个维度 · 历史 PIT 尚未核验</p>':
+   '<p class="lv3-small">未过期观测 '+e(summary.features_current)+' / '+e(summary.features_registered)+
+   ' · 过期 '+e(summary.features_stale)+
+   ' · 日期异常 '+e(summary.features_unknown_date)+
+   ' · 已入库观测（含旧值） '+e(summary.features_observed)+
+   ' · 时效参考日 '+e(marketData.coverage.freshness_asof||'未核验')+
+   ' · 研究数据不代表实时报价</p>':
    '<p class="lv3-small">统一数据覆盖存储尚未返回；以下为本次扫描结果。</p>';
  return '<div class="lv3-extra-grid">'+box('lv3-source-evidence',title('六大数据体系 / 十二维覆盖',
    '<span class="lv3-soft">以已持久化观测为准，不以注册数量冒充覆盖</span>')+
    coverageSummary+
    '<details class="lv3-evidence-details"><summary>查看六大体系与十二维实际覆盖</summary>'+
    '<div class="lv3-domains">'+systemHtml+statusesHtml+'</div></details>'+
+   freshnessDetail+
    '<button class="lv3-legacy-button" type="button" data-lv3-old>打开原 L1 完整研究视图（E01/E02/E03）</button>')+
    box('lv3-events',title('近期已公布日程',
     '<span class="lv3-soft">BLS 官方排程 · UTC</span>')+

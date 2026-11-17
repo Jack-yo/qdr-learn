@@ -304,6 +304,11 @@ def market_data_snapshot(root, *, asof=None, db_path=None):
         latest_health = []
         health_map = {}
         if not health.empty:
+            # An as-of query cannot expose a source-health result fetched after
+            # the requested day, even if its observed session belongs to that day.
+            if asof:
+                health = health.loc[
+                    health["fetched_at"].astype(str).str.slice(0, 10).le(str(asof))]
             health = health.sort_values("fetched_at")
             for source_key, group in health.groupby("source_key", sort=True):
                 row = group.iloc[-1].to_dict()
@@ -313,7 +318,10 @@ def market_data_snapshot(root, *, asof=None, db_path=None):
                     row["fetched_at"]=row["fetched_at"].isoformat()
                 latest_health.append(row)
                 health_map[str(source_key)] = {"status":str(row.get("status") or "MISSING")}
-        coverage = coverage_matrix(combined, source_health=health_map, asof=asof)
+        reference_date = str(asof or datetime.now(timezone.utc).date().isoformat())
+        coverage = coverage_matrix(
+            combined, source_health=health_map, asof=asof,
+            freshness_asof=reference_date)
         path_summary = {
             "rows":len(labels),
             "horizons":sorted({int(x) for x in labels.horizon.tolist()}) if not labels.empty else [],
@@ -322,6 +330,7 @@ def market_data_snapshot(root, *, asof=None, db_path=None):
         }
         return {
             "schema":"qdr.l1.market_data_snapshot.v1",
+            "generated_at_utc":datetime.now(timezone.utc).isoformat(),
             "catalog":catalog_payload(),
             "status":status,
             "coverage":coverage,
