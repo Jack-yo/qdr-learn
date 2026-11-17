@@ -355,7 +355,9 @@ function evidence(v2,official,extended,marketData){
    '<div class="lv3-domain-row"><span>'+e(x.name)+'</span>'+
    '<b>'+e(x.coverage.available)+' / '+e(x.coverage.registered)+'</b>'+
    '<small>'+e(x.status==='OBSERVED'?'已观测':x.status==='PARTIAL'?'部分覆盖':x.status==='BLOCKED'?'来源阻断':'待接入')+
-   (x.historical_pit_verified?' · PIT 已核验':' · PIT 未核验')+
+   (x.historical_pit_verified?' · PIT 已核验':
+      x.pit_attestation_status==='PIT_ATTESTED_PENDING_VERIFICATION'
+        ?' · PIT 已审阅待独立核验':' · PIT 未核验')+
    (x.blocked_sources?.length?' · 阻断 '+e(x.blocked_sources.join(', ')):'')+'</small></div>'
  ).join(''):fallbackIds.map(id=>{
    const base=lookup.get(id);
