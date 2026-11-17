@@ -46,6 +46,7 @@ _SOURCE_ALIASES = {
     "cboe_options": "cboe_daily_options",
     "cboe_equity_volume": "cboe_market_volume",
     "fomc_calendar": "fed_calendar",
+    "fred_cross_asset": "fred_alfred",
     "market_breadth": "market_breadth",
     "stock_sample": "alpaca_bars",
 }
