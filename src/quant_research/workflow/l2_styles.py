@@ -25,7 +25,7 @@ def calculate(root: Path, *, asof: str | None = None,
     if source.lower() != "yahoo":
         raise ValueError("L2_V1_REQUIRES_SPLIT_ADJUSTED_YAHOO_PRICE_BASIS")
     bundle = load_real_bundle(
-        root / "data/real_v21.duckdb",
+        root / "data/research.duckdb",
         source=source,
         asof=asof,
         cutoff=cutoff,
