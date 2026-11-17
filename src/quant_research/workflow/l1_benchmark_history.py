@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 from hashlib import sha256
 import json
 import math
+import time
 
 from quant_research.clock import TradingClock
 from quant_research.data.l1_light_sources import LiveSources, SourceUnavailable
@@ -23,6 +24,25 @@ OVERLAP_CALENDAR_DAYS = 10
 
 # Public/current-vintage history for charts, distributions and data diagnostics.
 # It is not admitted as historical PIT evidence.
+_RETRYABLE_SOURCE_ERRORS = {
+    "PROVIDER_UNAVAILABLE", "HTTP_408", "HTTP_425", "HTTP_429",
+    "HTTP_500", "HTTP_502", "HTTP_503", "HTTP_504",
+}
+
+
+def _call_with_retry(fn, *, attempts=3):
+    last = None
+    for attempt in range(attempts):
+        try:
+            return fn()
+        except SourceUnavailable as exc:
+            last = exc
+            if exc.code not in _RETRYABLE_SOURCE_ERRORS or attempt + 1 >= attempts:
+                raise
+            time.sleep(min(1.0 * (2 ** attempt), 4.0))
+    raise last
+
+
 FRED_BASELINES = {
     "hy_oas": ("BAMLH0A0HYM2", "cross_asset", "bps", 100.0),
     "real_yield_10y": ("DFII10", "cross_asset", "%", 1.0),
@@ -200,12 +220,12 @@ def _sync_bars(store, sources, *, years, refresh, history_feed, asof, stamp,
     else:
         start = full_start
     days = (date.fromisoformat(asof) - start).days + 1
-    raw, receipts = sources.bars(
+    raw, receipts = _call_with_retry(lambda: sources.bars(
         days=days, symbols=BENCHMARK_SYMBOLS,
         start_date=start.isoformat(), end_date=asof,
         adjustment=BAR_BASIS, history_feed=history_feed,
         refresh=refresh,
-    )
+    ))
     input_hashes = _register_transport_receipts(
         store, receipts, dataset="core_benchmark_daily_bars_page")
     aggregate = _derived_digest({
@@ -301,7 +321,8 @@ def _sync_macro(store, sources, *, years, refresh, asof):
 
     # VIX public historical download.
     try:
-        values, receipt = sources.cboe_vix(refresh=refresh)
+        values, receipt = _call_with_retry(
+            lambda: sources.cboe_vix(refresh=refresh))
         selected = {d: v for d, v in values.items() if start <= d <= asof}
         if not selected:
             raise SourceUnavailable("CBOE_VIX_HISTORY_EMPTY")
@@ -322,8 +343,9 @@ def _sync_macro(store, sources, *, years, refresh, asof):
     loaded = {}
     for feature, (series_id, dimension, unit, scale) in FRED_BASELINES.items():
         try:
-            values, receipt = sources.fred(series_id, refresh=refresh,
-                                           days=int(years * 366) + 30)
+            values, receipt = _call_with_retry(
+                lambda: sources.fred(series_id, refresh=refresh,
+                                     days=int(years * 366) + 30))
             selected = {d: float(v) * scale for d, v in values.items()
                         if start <= d <= asof and math.isfinite(float(v))}
             if not selected:
@@ -346,8 +368,9 @@ def _sync_macro(store, sources, *, years, refresh, asof):
 
     # Broad trade-weighted USD is an explicit DXY proxy.
     try:
-        values, receipt = sources.fred(USD_SERIES, refresh=refresh,
-                                       days=int(years * 366) + 60)
+        values, receipt = _call_with_retry(
+            lambda: sources.fred(USD_SERIES, refresh=refresh,
+                                 days=int(years * 366) + 60))
         selected = sorted((d, float(v)) for d, v in values.items()
                           if start <= d <= asof and math.isfinite(float(v)) and float(v) > 0)
         if len(selected) < 6:
