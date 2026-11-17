@@ -145,6 +145,16 @@ class L1MarketStore:
             vintage_id VARCHAR NOT NULL, ingested_at TIMESTAMPTZ NOT NULL,
             PRIMARY KEY(session_date, security_id, feature_id, provider, vintage_id, receipt_sha256))
         """)
+        self.conn.execute("""CREATE TABLE IF NOT EXISTS l1_market_reference_series (
+            observation_date DATE NOT NULL, series_id VARCHAR NOT NULL,
+            feature_id VARCHAR, value DOUBLE NOT NULL, unit VARCHAR NOT NULL,
+            provider VARCHAR NOT NULL, source VARCHAR NOT NULL,
+            available_at TIMESTAMPTZ NOT NULL, receipt_sha256 VARCHAR NOT NULL,
+            vintage_id VARCHAR NOT NULL, pit_status VARCHAR NOT NULL,
+            quality_status VARCHAR NOT NULL, metadata_json VARCHAR NOT NULL,
+            ingested_at TIMESTAMPTZ NOT NULL,
+            PRIMARY KEY(observation_date, series_id, provider, vintage_id, receipt_sha256))
+        """)
         self.conn.execute("""CREATE TABLE IF NOT EXISTS l1_market_events (
             event_id VARCHAR NOT NULL, source VARCHAR NOT NULL,
             event_type VARCHAR NOT NULL, scheduled_at TIMESTAMPTZ NOT NULL,
@@ -187,6 +197,9 @@ class L1MarketStore:
             [datetime.now(timezone.utc)])
         self.conn.execute("""INSERT INTO l1_market_schema
             SELECT 3, ? WHERE NOT EXISTS (SELECT 1 FROM l1_market_schema WHERE version=3)""",
+            [datetime.now(timezone.utc)])
+        self.conn.execute("""INSERT INTO l1_market_schema
+            SELECT 4, ? WHERE NOT EXISTS (SELECT 1 FROM l1_market_schema WHERE version=4)""",
             [datetime.now(timezone.utc)])
 
     def close(self):
@@ -385,6 +398,60 @@ class L1MarketStore:
         return self.conn.execute(sql, params).fetchdf()
 
 
+    def write_reference_series(self, records):
+        rows, now = [], datetime.now(timezone.utc)
+        for item in records:
+            digest = item.get("receipt_sha256")
+            self._require_receipt(digest)
+            series_id = str(item.get("series_id") or "").strip()
+            provider = str(item.get("provider") or "").strip()
+            source = str(item.get("source") or "").strip()
+            unit = str(item.get("unit") or "").strip()
+            if not series_id or not provider or not source or not unit:
+                raise ValueError("REFERENCE_SERIES_IDENTITY_REQUIRED")
+            rows.append((
+                _date(item.get("observation_date") or item.get("session_date")),
+                series_id, str(item.get("feature_id") or "") or None,
+                _finite(item.get("value")), unit, provider, source,
+                _timestamp(item.get("available_at")), digest,
+                str(item.get("vintage_id") or "CURRENT_DOWNLOAD"),
+                str(item.get("pit_status") or "CURRENT_VINTAGE_NOT_HISTORICAL_PIT"),
+                str(item.get("quality_status") or "OBSERVED"),
+                _json(item.get("metadata")), now,
+            ))
+        if rows:
+            self.conn.executemany("""INSERT INTO l1_market_reference_series VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING""", rows)
+        return len(rows)
+
+    def read_reference_series(self, *, start=None, end=None, series_ids=None,
+                              feature_ids=None):
+        predicates, params = [], []
+        if start:
+            predicates.append("observation_date>=?")
+            params.append(_date(start))
+        if end:
+            predicates.append("observation_date<=?")
+            params.append(_date(end))
+        if series_ids:
+            clean = sorted({str(x) for x in series_ids})
+            predicates.append("series_id IN (" + ",".join("?" for _ in clean) + ")")
+            params.extend(clean)
+        if feature_ids:
+            clean = sorted({str(x) for x in feature_ids})
+            predicates.append("feature_id IN (" + ",".join("?" for _ in clean) + ")")
+            params.extend(clean)
+        where = (" WHERE " + " AND ".join(predicates)) if predicates else ""
+        sql = ("SELECT observation_date,series_id,feature_id,value,unit,provider,source,"
+               "available_at,receipt_sha256,vintage_id,pit_status,quality_status,"
+               "metadata_json,ingested_at FROM (SELECT *,ROW_NUMBER() OVER ("
+               "PARTITION BY observation_date,series_id,provider ORDER BY "
+               "ingested_at DESC,available_at DESC,receipt_sha256 DESC) AS _version_rank "
+               "FROM l1_market_reference_series" + where +
+               ") AS versioned WHERE _version_rank=1 ORDER BY observation_date,series_id")
+        return self.conn.execute(sql, params).fetchdf()
+
+
     def write_source_health(self, records):
         rows = []
         for item in records:
@@ -562,6 +629,9 @@ class L1MarketStore:
         health = self.conn.execute("SELECT COUNT(*) FROM l1_market_source_health").fetchone()[0]
         quality = self.conn.execute("SELECT COUNT(*) FROM l1_market_quality_checks").fetchone()[0]
         labels = self.conn.execute("SELECT COUNT(*) FROM l1_market_path_labels").fetchone()[0]
+        reference = self.conn.execute("""SELECT COUNT(*), COUNT(DISTINCT series_id),
+            MIN(observation_date), MAX(observation_date)
+            FROM l1_market_reference_series""").fetchone()
         receipts = self.conn.execute("SELECT COUNT(*) FROM l1_market_source_receipts").fetchone()[0]
         return {
             "schema": "qdr.l1.market_data_store_status.v1",
@@ -577,6 +647,9 @@ class L1MarketStore:
                          "last_session": str(universe[2]) if universe[2] else None},
             "source_receipts": receipts, "source_health_rows": health,
             "quality_check_rows": quality, "path_label_rows": labels,
+            "reference_series":{"rows":reference[0],"series":reference[1],
+                                "first_date":str(reference[2]) if reference[2] else None,
+                                "last_date":str(reference[3]) if reference[3] else None},
             "historical_pit_verified": False,
             "forecast_eligible": False, "trade_eligible": False,
         }
