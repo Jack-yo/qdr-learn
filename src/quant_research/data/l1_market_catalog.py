@@ -7,6 +7,7 @@ dataset completeness, PIT eligibility, or predictive validity.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import json
 from typing import Iterable
 
 
@@ -328,8 +329,21 @@ def coverage_matrix(observations: Iterable[dict] = (), *,
                   all(x == "OBSERVED" for x in latest_quality) and not blocked_sources
                   else "PARTIAL" if count else "BLOCKED" if blocked_sources else "MISSING")
         rows_for_pit = [feature_rows[x.key]["row"] for x in observed]
+        def pit_attestation_id(row):
+            direct=row.get("pit_attestation_id")
+            if direct is not None and str(direct).strip() and str(direct).lower() not in ("nan","<na>"):
+                return str(direct)
+            metadata=row.get("metadata")
+            if not isinstance(metadata,dict):
+                raw=row.get("metadata_json")
+                try:
+                    metadata=json.loads(raw) if isinstance(raw,str) and raw else {}
+                except (TypeError,ValueError):
+                    metadata={}
+            value=metadata.get("pit_attestation_id") if isinstance(metadata,dict) else None
+            return str(value) if value is not None and str(value).strip() else None
         pit = bool(rows_for_pit) and len(observed) == total and all(
-            x.get("pit_status") == "PIT_VERIFIED" and x.get("pit_attestation_id")
+            x.get("pit_status") == "PIT_VERIFIED" and pit_attestation_id(x)
             for x in rows_for_pit)
         dimensions.append({
             "id": dimension.key, "name": dimension.name, "role": dimension.role,
