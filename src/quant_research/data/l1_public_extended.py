@@ -12,6 +12,7 @@ import csv
 import io
 import json
 import math
+from hashlib import sha256
 import re
 from collections import defaultdict
 from html.parser import HTMLParser
@@ -453,6 +454,83 @@ class ExtendedPublicSources:
         raise SourceUnavailable("FINRA_SHORT_VOLUME_UNAVAILABLE_"+failures[-1]
                                 if failures else "FINRA_NO_REPORT")
 
+    def market_breadth(self,limit,*,refresh=False):
+        """Broad current active/tradable non-OTC US-equity breadth from Alpaca snapshots.
+
+        This is a current vendor universe, not historical PIT membership. Snapshot
+        coverage and batch failures are returned with every metric.
+        """
+        assets,asset_receipt=self.live.assets(refresh=refresh)
+        symbols=[x["symbol"] for x in assets]
+        snapshots,snapshot_receipts,batch_errors=self.live.snapshots_for_symbols(
+            symbols,refresh=refresh,batch_size=200,max_workers=4)
+        by_day=defaultdict(list)
+        for symbol,record in snapshots.items():
+            daily=record.get("dailyBar") or record.get("daily_bar") or {}
+            previous=record.get("prevDailyBar") or record.get("prev_daily_bar") or {}
+            try:
+                day=_date(daily.get("t"))
+                close=_finite(daily.get("c"),0)
+                prev_close=_finite(previous.get("c"),0)
+                volume=_finite(daily.get("v"),0)
+                if close<=0 or prev_close<=0 or volume<0:
+                    continue
+                by_day[day].append((symbol,close/prev_close-1,volume))
+            except (SourceUnavailable,ValueError,TypeError,KeyError):
+                continue
+        if not by_day:
+            raise SourceUnavailable("ALPACA_BROAD_SNAPSHOT_HAS_NO_VALID_DAILY_BARS")
+        # Use the most populated latest session; mixed/stale dates reduce coverage.
+        latest_day=max(by_day,key=lambda day:(len(by_day[day]),day))
+        rows=by_day[latest_day]
+        expected=len(assets)
+        covered=len(rows)
+        coverage=covered/expected if expected else 0.0
+        if covered<30:
+            raise SourceUnavailable("ALPACA_BROAD_SNAPSHOT_COVERAGE_TOO_LOW")
+        returns=[x[1] for x in rows]
+        volumes=[x[2] for x in rows]
+        advances=sum(1 for x in returns if x>0)
+        declines=sum(1 for x in returns if x<0)
+        unchanged=sum(1 for x in returns if x==0)
+        total_volume=sum(volumes)
+        up_volume=sum(vol for (_,ret,vol) in rows if ret>0)
+        mean=sum(returns)/len(returns)
+        dispersion=math.sqrt(sum((x-mean)**2 for x in returns)/len(returns))*100
+        input_hashes=[asset_receipt["sha256"]]+[x["sha256"] for x in snapshot_receipts]
+        derived=sha256(json.dumps({"asof":latest_day,"inputs":sorted(input_hashes),
+            "universe":"ALPACA_ACTIVE_TRADABLE_NON_OTC_CURRENT_DIRECTORY_V1"},
+            sort_keys=True,separators=(",",":")).encode()).hexdigest()
+        fetched=max([asset_receipt["fetched_at"]]+[x["fetched_at"] for x in snapshot_receipts])
+        from quant_research.clock import TradingClock
+        clock=TradingClock()
+        latest_session=clock.calendar.date_to_session(datetime.fromisoformat(limit).date(),direction="none")
+        completed=clock.close(latest_session)+clock.delay<=datetime.now(timezone.utc)
+        mode=("COMPLETED_DAILY_BAR" if latest_day==limit and completed else
+              "INTRADAY_SNAPSHOT" if latest_day>limit else
+              "LATEST_AVAILABLE_DAILY_BAR" if latest_day==limit else "STALE_SNAPSHOT")
+        result={
+            "advances":advances,"declines":declines,"unchanged":unchanged,
+            "advance_share":advances/covered*100,
+            "up_volume_share":up_volume/total_volume*100 if total_volume else None,
+            "downside_sync_share":declines/covered*100,
+            "stock_dispersion_1":dispersion,
+            "market_snapshot_coverage_pct":coverage*100,
+            "coverage_n":covered,"expected_n":expected,
+            "observation_mode":mode,"observed_date":latest_day,
+            "batch_count":len(snapshot_receipts),"batch_error_count":len(batch_errors),
+            "batch_errors":batch_errors[:10],
+            "asset_receipt_sha256":asset_receipt["sha256"],
+            "snapshot_receipt_sha256":[x["sha256"] for x in snapshot_receipts],
+        }
+        receipt={"source":"ALPACA_ACTIVE_US_EQUITY_SNAPSHOT_BREADTH",
+            "fetched_at":fetched,"sha256":derived,
+            "pit":"CURRENT_ACTIVE_ASSET_UNIVERSE_NOT_HISTORICAL_PIT",
+            "coverage_n":covered,"expected_n":expected,"coverage":coverage,
+            "observation_mode":mode,"batch_error_count":len(batch_errors),
+            "input_receipts":input_hashes}
+        return {limit:result},receipt
+
     def stock_breadth(self,limit,*,refresh=False):
         raw,receipts=self.live.bars(days=55,refresh=refresh,symbols=EQUITY_SAMPLE)
         output=sample_stock_breadth(raw,limit)
@@ -483,6 +561,7 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
         "cftc_wti":lambda:provider.cftc_commodity("wti",refresh=refresh),
         "cboe_equity_volume":lambda:provider.cboe_equity_volume(limit,refresh=refresh),
         "stock_sample":lambda:provider.stock_breadth(limit,refresh=refresh),
+        "market_breadth":lambda:provider.market_breadth(limit,refresh=refresh),
         "ici_etf":lambda:provider.ici_weekly_etf(refresh=refresh),
         "finra_short_volume":lambda:provider.finra_short_volume(limit,refresh=refresh),
     }
@@ -534,12 +613,17 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
                 health[name]={"status":"OBSERVED","source":receipt["source"],
                               "effective_date":day,"fetched_at":receipt["fetched_at"],
                               "receipt_sha256":receipt["sha256"],"pit":receipt["pit"]}
-                def add(domain,fid,label,val,unit,scope="CURRENT_OBSERVATION_NOT_PIT"):
+                def add(domain,fid,label,val,unit,scope="CURRENT_OBSERVATION_NOT_PIT",
+                        *,status="OBSERVED",observed_day=None,coverage_n=None,
+                        expected_n=None,metadata=None):
                     features.append({"domain":domain,"id":fid,"label":label,
-                        "value":round(_finite(val),5),"unit":unit,"status":"OBSERVED",
-                        "source":receipt["source"],"observed_date":day,
+                        "value":None if val is None else round(_finite(val),5),"unit":unit,
+                        "status":status,"source":receipt["source"],
+                        "observed_date":observed_day or day,
                         "fetched_at":receipt["fetched_at"],"pit":scope,
-                        "receipt_sha256":receipt["sha256"]})
+                        "receipt_sha256":receipt["sha256"],
+                        "coverage_n":coverage_n,"expected_n":expected_n,
+                        "metadata":metadata or {}})
                 if name=="cboe_options":
                     for field,title in (("cboe_pcr_total","全市场期权成交 Put/Call"),
                                         ("cboe_pcr_index","指数期权成交 Put/Call"),
@@ -592,8 +676,31 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
                     ):
                         add("breadth",field,title,value[field],unit,
                             "FIXED_30_LARGE_CAP_STOCK_SAMPLE_NOT_FULL_MARKET_PIT")
+                elif name=="market_breadth":
+                    coverage_n=value["coverage_n"];expected_n=value["expected_n"]
+                    status="OBSERVED" if coverage_n/expected_n>=0.98 and not value["batch_error_count"] else "PARTIAL"
+                    scope="CURRENT_ACTIVE_TRADABLE_ALPACA_UNIVERSE_NOT_HISTORICAL_PIT"
+                    meta={"observation_mode":value["observation_mode"],
+                          "coverage_pct":round(value["market_snapshot_coverage_pct"],3),
+                          "batch_count":value["batch_count"],
+                          "batch_error_count":value["batch_error_count"]}
+                    observed_day=value["observed_date"]
+                    for domain,field,title,unit in (
+                        ("breadth","advances","全市场活跃可交易证券上涨家数","只"),
+                        ("breadth","declines","全市场活跃可交易证券下跌家数","只"),
+                        ("breadth","unchanged","全市场活跃可交易证券平盘家数","只"),
+                        ("breadth","advance_share","全市场活跃可交易证券上涨占比","%"),
+                        ("breadth","up_volume_share","全市场活跃可交易证券上涨成交量占比","%"),
+                        ("breadth","market_snapshot_coverage_pct","全市场快照覆盖率","%"),
+                        ("correlation","downside_sync_share","全市场活跃可交易证券同步下跌占比","%"),
+                        ("correlation","stock_dispersion_1","全市场活跃可交易证券日收益离散度","%"),
+                    ):
+                        add(domain,field,title,value[field],unit,scope,status=status,
+                            observed_day=observed_day,coverage_n=coverage_n,
+                            expected_n=expected_n,metadata=meta)
             except (SourceUnavailable,ValueError,KeyError,TypeError,OverflowError) as exc:
-                health[name]={"status":"MISSING","code":getattr(exc,"code",type(exc).__name__)}
+                health[name]={"status":"MISSING","code":getattr(exc,"code",type(exc).__name__),
+                              "fetched_at":stamp.isoformat()}
     return {"schema":"qdr.l1.extended.v1","asof_session":limit,
             "status":"OBSERVATION_ONLY" if features else "NO_AVAILABLE_PUBLIC_FEED",
             "historical_pit_verified":False,"not_in_model_scores":True,
