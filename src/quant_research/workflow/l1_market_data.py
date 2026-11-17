@@ -162,6 +162,7 @@ def _import_universe(store, args):
         if not args.session_date:
             raise ValueError("UNIVERSE_SESSION_DATE_REQUIRED")
         frame["session_date"] = args.session_date
+    frame["session_date"] = frame.session_date.map(_date)
     required = {"security_id","symbol"}
     if required - set(frame.columns):
         raise ValueError("UNIVERSE_FILE_MISSING_IDENTITY")
