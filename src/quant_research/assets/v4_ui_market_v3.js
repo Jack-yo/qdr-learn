@@ -87,14 +87,19 @@ function fromSources(v3,v2,official,extended){
    add({...x,category:x.category||'price',source:x.source||'L1_V3_FROZEN'},
        'FROZEN_RESEARCH',v3?.asof_session,0);
  const fraction=new Set(['spy_return_1','spy_return_5','spy_return_20',
-   'breadth_proxy_rsp_spy_5','small_cap_relative_5',
-   'credit_proxy_hyg_lqd_5','downside_rv20','rv5','rv20','drawdown20']);
+   'breadth_proxy_rsp_spy_5','small_cap_relative_5','credit_proxy_hyg_lqd_5',
+   'downside_rv20','rv5','rv20','drawdown20','overnight','intraday',
+   'sector_dispersion_1','sector_up_share_1','duration_proxy_5']);
+ const basisPoints=new Set(['credit_spread','spy_level1_spread_bps']);
+ const unitById={vol_ratio:'倍',vix:'点',credit_spread:'bps',
+   treasury_yield:'%',sofr:'%',spy_level1_spread_bps:'bps',
+   close_location:'ratio',momentum_z:'z',pressure_z:'z',decay_z:'z'};
  for(const domain of (v2?.domains||[])){
    for(const x of (domain.features||[])){
-     if(x.status!=='OBSERVED'||!isNum(x.value))continue;
-     const scale=fraction.has(x.id)?100:1;
+     if(!['OBSERVED','PARTIAL'].includes(x.status)||!isNum(x.value))continue;
+     const scale=fraction.has(x.id)||basisPoints.has(x.id)?100:1;
      add({id:x.id,label:x.label||x.id,value:Number(x.value)*scale,
-          unit:fraction.has(x.id)?'%':x.id==='vol_ratio'?'倍':x.id==='vix'?'点':'',
+          unit:fraction.has(x.id)?'%':unitById[x.id]||'',status:x.status,
           source:x.source||'ALPACA_ETF_PROXY',
           observed_date:x.observed_date||v2.asof_session,fetched_at:x.fetched_at||v2.fetched_at,
           category:domainCategories[domain.id]||'events',history:[]},
@@ -118,7 +123,7 @@ function fromSources(v3,v2,official,extended){
  // Publication dates legitimately differ across daily, weekly and event sources.
  for(const source of [official,extended]){
    for(const feature of (Array.isArray(source?.features)?source.features:[])){
-     if(feature?.status!=='OBSERVED'||!isNum(feature.value))continue;
+     if(!['OBSERVED','PARTIAL'].includes(feature?.status)||!isNum(feature.value))continue;
      add({...feature,category:domainCategories[feature.domain]||'events',
           history:[]},'PUBLIC_OBSERVATION',source?.asof_session,3);
    }
@@ -274,7 +279,8 @@ function rawPanel(rows,official,extended,v3,v2){
      '<span class="lv3-change neutral">单期观测 · 无可比变化</span>';
    const basis=x.kind==='FROZEN_RESEARCH'?
      '<span class="lv3-monitor-alert">冻结快照（非实时）</span>':
-     x.kind==='LEVEL1_QUOTE'?'<span>Level-1 成交（可能延迟）</span>':'';
+     x.kind==='LEVEL1_QUOTE'?'<span>Level-1 成交（可能延迟）</span>':
+     x.status==='PARTIAL'?'<span class="lv3-monitor-alert">部分覆盖 · 不代表全市场完整值</span>':'';
    const search=e([x.label||x.id,x.id,x.source||''].join(' ').toLowerCase());
    return '<article class="lv3-raw-item" data-lv3-raw-card data-search="'+search+'">'+
      '<div class="lv3-raw-name" title="'+e(x.label||x.id)+'">'+e(x.label||x.id)+'</div>'+
@@ -283,6 +289,7 @@ function rawPanel(rows,official,extended,v3,v2){
      '<div class="lv3-raw-foot"><span title="'+e(x.source||'来源待核验')+'">'+
        e(x.source||'来源待核验')+'</span><span>'+e(x.observed_date||'日期待核验')+'</span></div>'+
      '<div class="lv3-monitor-foot">'+basis+
+       (x.coverage_n!=null?'<span>覆盖 '+e(x.coverage_n)+'/'+e(x.expected_n)+'</span>':'')+
        (x.fetched_at?'<span>取得 '+stripTime(x.fetched_at)+' UTC/源时区</span>':'')+
      '</div></article>';
  }).join('');
