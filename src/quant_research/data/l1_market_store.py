@@ -128,6 +128,15 @@ class L1MarketStore:
             expected_n BIGINT, receipt_sha256 VARCHAR NOT NULL,
             metadata_json VARCHAR NOT NULL, ingested_at TIMESTAMPTZ NOT NULL,
             PRIMARY KEY(session_date, feature_id, provider, vintage_id, receipt_sha256))""")
+        self.conn.execute("""CREATE TABLE IF NOT EXISTS l1_market_security_features (
+            session_date DATE NOT NULL, security_id VARCHAR NOT NULL, symbol VARCHAR NOT NULL,
+            feature_id VARCHAR NOT NULL, value DOUBLE, unit VARCHAR NOT NULL,
+            provider VARCHAR NOT NULL, source VARCHAR NOT NULL, available_at TIMESTAMPTZ NOT NULL,
+            receipt_sha256 VARCHAR NOT NULL, pit_status VARCHAR NOT NULL,
+            quality_status VARCHAR NOT NULL, price_basis VARCHAR NOT NULL,
+            vintage_id VARCHAR NOT NULL, ingested_at TIMESTAMPTZ NOT NULL,
+            PRIMARY KEY(session_date, security_id, feature_id, provider, vintage_id, receipt_sha256))
+        """)
         self.conn.execute("""CREATE TABLE IF NOT EXISTS l1_market_events (
             event_id VARCHAR NOT NULL, source VARCHAR NOT NULL,
             event_type VARCHAR NOT NULL, scheduled_at TIMESTAMPTZ NOT NULL,
@@ -271,6 +280,39 @@ class L1MarketStore:
             self.conn.executemany("""INSERT INTO l1_market_observations VALUES (
                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING""", rows)
         return len(rows)
+
+
+    def write_security_features(self, records):
+        rows, now = [], datetime.now(timezone.utc)
+        for item in records:
+            self._require_receipt(item.get("receipt_sha256"))
+            value = _finite(item.get("value"), optional=True)
+            status = str(item.get("quality_status") or "OBSERVED")
+            if status == "OBSERVED" and value is None:
+                raise ValueError("OBSERVED_SECURITY_FEATURE_VALUE_REQUIRED")
+            rows.append((_date(item.get("session_date")), str(item.get("security_id") or ""),
+                str(item.get("symbol") or "").upper(), str(item.get("feature_id") or ""),
+                value, str(item.get("unit") or ""), str(item.get("provider") or ""),
+                str(item.get("source") or ""), _timestamp(item.get("available_at")),
+                item["receipt_sha256"], str(item.get("pit_status") or "PIT_UNVERIFIED"),
+                status, str(item.get("price_basis") or ""), str(item.get("vintage_id") or "L1_FEATURES_V1"), now))
+        if any(not x[1] or not x[2] or not x[3] or not x[6] or not x[7] or not x[12] for x in rows):
+            raise ValueError("SECURITY_FEATURE_IDENTITY_REQUIRED")
+        if rows:
+            self.conn.executemany("""INSERT INTO l1_market_security_features VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING""", rows)
+        return len(rows)
+
+    def read_security_features(self, *, asof=None, symbols=None):
+        query, params = "SELECT * FROM l1_market_security_features WHERE 1=1", []
+        if asof:
+            query += " AND session_date<=?"
+            params.append(_date(asof))
+        if symbols:
+            clean = sorted({str(x).upper() for x in symbols})
+            query += " AND symbol IN (" + ",".join("?" for _ in clean) + ")"
+            params.extend(clean)
+        return self.conn.execute(query + " ORDER BY session_date, symbol, feature_id", params).fetchdf()
 
     def write_events(self, records):
         rows, now = [], datetime.now(timezone.utc)
