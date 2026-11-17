@@ -111,3 +111,29 @@ def test_breadth_moving_average_shares_exclude_missing_ma_from_denominator():
     ]
     assert not row.empty
     assert row.iloc[0].value==pytest.approx(100.0)
+
+def test_fomc_days_feature_uses_published_schedule_known_at_and_stays_non_pit():
+    bars,cutoffs,_=sample_market(n=30,members=30)
+    target=cutoffs.session_date.iloc[-1]
+    cutoff=cutoffs.decision_cutoff_utc.iloc[-1]
+    scheduled=target+pd.Timedelta(days=30)
+    events=pd.DataFrame([{
+        "event_id":"FOMC|"+scheduled.date().isoformat(),
+        "event_type":"FOMC",
+        "scheduled_at":(scheduled+pd.Timedelta(hours=23,minutes=59)).tz_localize("UTC"),
+        "schedule_known_at":cutoff-pd.Timedelta(hours=1),
+        "source":"FED_FOMC_CALENDAR",
+        "receipt_sha256":"a"*64,
+    }])
+    result=compute_l1_market_features(bars,cutoffs,events=events)
+    day=target.date().isoformat()
+    row=result["observations"].query(
+        "session_date == @day and feature_id == 'days_to_fomc'")
+    assert len(row)==1
+    assert row.iloc[0].value==30
+    assert row.iloc[0].pit_status=="CURRENT_SCHEDULE_NOT_HISTORICAL_PIT"
+
+    events.loc[0,"schedule_known_at"]=cutoff+pd.Timedelta(hours=1)
+    not_yet_known=compute_l1_market_features(bars,cutoffs,events=events)
+    assert not not_yet_known["observations"].query(
+        "session_date == @day and feature_id == 'days_to_fomc'").shape[0]
