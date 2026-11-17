@@ -376,6 +376,7 @@ def test_pit_attested_features_are_not_mistaken_for_pit_verified():
     result=coverage_matrix(rows,asof="2026-11-16")
     price=next(x for x in result["dimensions"] if x["id"]=="price")
     assert price["historical_pit_verified"] is False
+    assert price["pit_attestation_status"]=="PIT_ATTESTED_PENDING_VERIFICATION"
     assert price["model_eligible"] is False
 
 def test_store_schema_v2_migrates_pit_attestation_columns(tmp_path):
