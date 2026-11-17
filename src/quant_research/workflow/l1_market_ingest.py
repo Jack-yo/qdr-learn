@@ -292,6 +292,10 @@ def market_data_snapshot(root, *, asof=None, db_path=None):
             health = health.sort_values("fetched_at")
             for source_key, group in health.groupby("source_key", sort=True):
                 row = group.iloc[-1].to_dict()
+                if hasattr(row.get("asof_session"),"isoformat"):
+                    row["asof_session"]=row["asof_session"].isoformat()
+                if hasattr(row.get("fetched_at"),"isoformat"):
+                    row["fetched_at"]=row["fetched_at"].isoformat()
                 latest_health.append(row)
                 health_map[str(source_key)] = {"status":str(row.get("status") or "MISSING")}
         coverage = coverage_matrix(combined, source_health=health_map, asof=asof)

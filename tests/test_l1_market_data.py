@@ -152,6 +152,8 @@ def test_public_scan_persists_features_and_source_health(tmp_path):
             "status":"PARTIAL","source":"FIXTURE",
             "effective_date":"2026-11-16","fetched_at":"2026-11-16T22:00:00Z",
             "receipt_sha256":digest,"coverage_n":1250,"expected_n":3000,
+            "input_receipts":[hashlib.sha256(b"asset list").hexdigest(),
+                              hashlib.sha256(b"snapshot batch").hexdigest()],
         }},
         "calendar_events":[],
     }
@@ -163,3 +165,5 @@ def test_public_scan_persists_features_and_source_health(tmp_path):
     assert breadth["historical_pit_verified"] is False
     assert snapshot["policy"]["forecast_eligible"] is False
     assert snapshot["status"]["source_receipts"]>=1
+    health_keys={x["source_key"] for x in snapshot["source_health"]}
+    assert {"alpaca_assets","alpaca_snapshots","market_breadth"} <= health_keys
