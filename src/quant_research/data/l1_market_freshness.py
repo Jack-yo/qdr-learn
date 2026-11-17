@@ -61,6 +61,8 @@ def available_by_session_end(value, session_day):
     """
     if session_day is None or value is None:
         return True
+    if str(value).lower() in ("", "nat", "nan", "<na>", "none"):
+        return False
     day = observed_day(session_day)
     if day is None:
         raise ValueError("INVALID_ASOF_SESSION")
@@ -71,7 +73,10 @@ def available_by_session_end(value, session_day):
             stamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except (ValueError, TypeError, OverflowError):
         return False
-    if stamp.tzinfo is None or stamp.utcoffset() is None:
+    try:
+        if stamp.tzinfo is None or stamp.utcoffset() is None:
+            return False
+    except (TypeError, ValueError, OverflowError):
         return False
     cutoff = datetime.combine(day, time.max, tzinfo=timezone.utc)
     return stamp.astimezone(timezone.utc) <= cutoff
