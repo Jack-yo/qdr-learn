@@ -40,6 +40,7 @@ def test_workflow_uses_existing_bundle_read_only_and_returns_seven_styles(monkey
     monkeypatch.setattr(l2_styles, "load_real_bundle", load)
     payload = l2_styles.calculate(Path("."), asof="2025-04-09")
     assert len(calls) == 1
+    assert calls[0][0][0] == Path(".") / "data/research.duckdb"
     assert calls[0][1]["symbols"] == list(l2_styles.REQUIRED_SYMBOLS)
     assert payload["status"] == "OBSERVATION_ONLY"
     assert len(payload["latest"]) == 7
