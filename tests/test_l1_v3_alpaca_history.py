@@ -147,3 +147,21 @@ def test_historical_source_rejects_unclosed_future_session(tmp_path):
                        now=lambda:datetime(2026,11,16,20,0,tzinfo=timezone.utc))
     with pytest.raises(SourceUnavailable,match="HISTORICAL_SESSION_NOT_CLOSED"):
         source.bars(days=30,symbols=("SPY",),end_date="2026-11-16")
+
+
+
+def test_default_snapshot_covers_full_core_etf_basket(tmp_path):
+    seen=[]
+    def fake(url,headers):
+        query=parse_qs(urlsplit(url).query)
+        seen.append(query)
+        symbols=query["symbols"][0].split(",")
+        return json.dumps({"snapshots":{symbol:{} for symbol in symbols}}).encode()
+
+    source=LiveSources(tmp_path,fetch=fake,env=_env())
+    snapshots,receipt=source.snapshots()
+    assert set(snapshots)==set(LiveSources.ETF_SYMBOLS)
+    assert len(snapshots)==28
+    assert seen[0]["feed"]==["delayed_sip"]
+    assert set(seen[0]["symbols"][0].split(","))==set(LiveSources.ETF_SYMBOLS)
+    assert receipt["source"]=="ALPACA_delayed_sip"
