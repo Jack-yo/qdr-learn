@@ -42,7 +42,7 @@ def test_coverage_uses_actual_observations_not_registered_features():
     assert result["summary"]["features_observed"] == 0
     assert all(x["coverage"]["available"] == 0 for x in result["dimensions"])
     breadth = next(x for x in result["dimensions"] if x["id"] == "breadth")
-    assert breadth["status"] == "MISSING"
+    assert breadth["status"] == "BLOCKED"
     assert breadth["model_eligible"] is False
 
 
