@@ -236,3 +236,44 @@ def test_asset_directory_success_survives_snapshot_batch_failure(tmp_path):
     assert health["alpaca_snapshots"]["status"]=="MISSING"
     assert health["alpaca_snapshots"]["receipt_sha256"] is None
     assert health["market_breadth"]["status"]=="MISSING"
+
+def test_append_only_bar_and_universe_reads_select_latest_revision(tmp_path):
+    pytest.importorskip("duckdb")
+    from datetime import datetime,timezone
+    from quant_research.data.l1_market_store import L1MarketStore
+
+    first=b"first provider revision"
+    second=b"corrected provider revision"
+    first_sha=hashlib.sha256(first).hexdigest()
+    second_sha=hashlib.sha256(second).hexdigest()
+    stamp=datetime(2026,11,16,22,0,tzinfo=timezone.utc)
+    with L1MarketStore(tmp_path) as store:
+        for payload,digest in ((first,first_sha),(second,second_sha)):
+            store.write_receipt(provider="fixture",dataset="bars",
+                fetched_at=stamp,available_at=stamp,receipt_sha256=digest,payload=payload)
+        base={
+            "session_date":"2026-11-16","security_id":"ID:AAA","symbol":"AAA",
+            "open":100,"high":103,"low":99,"close":101,"volume":1000,
+            "provider":"fixture","price_basis":"raw","available_at":stamp,
+        }
+        store.write_bars([{**base,"receipt_sha256":first_sha}])
+        store.write_bars([{**base,"close":102,"receipt_sha256":second_sha}])
+        bars=store.read_bars()
+        assert len(bars)==1
+        assert bars.iloc[0].close==102
+        assert bars.iloc[0].receipt_sha256==second_sha
+
+        universe_base={
+            "session_date":"2026-11-16","universe_id":"CURRENT_SAMPLE",
+            "security_id":"ID:AAA","symbol":"AAA","is_member":True,
+            "provider":"fixture","membership_basis":"CURRENT_DIRECTORY",
+            "snapshot_complete":True,"pit_status":"CURRENT_SNAPSHOT_ONLY",
+            "known_at":stamp,
+        }
+        store.write_universe([{**universe_base,"receipt_sha256":first_sha}])
+        store.write_universe([{**universe_base,"is_member":False,
+                               "receipt_sha256":second_sha}])
+        universe=store.read_universe(universe_id="CURRENT_SAMPLE")
+        assert len(universe)==1
+        assert bool(universe.iloc[0].is_member) is False
+        assert universe.iloc[0].receipt_sha256==second_sha
