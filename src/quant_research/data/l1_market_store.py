@@ -424,6 +424,24 @@ class L1MarketStore:
                 ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING""", rows)
         return len(rows)
 
+    def read_quality_checks(self, *, asof=None, dimension=None, reason=None):
+        query, params = "SELECT * FROM l1_market_quality_checks", []
+        predicates = []
+        if asof:
+            predicates.append("session_date<=?")
+            params.append(_date(asof))
+        if dimension:
+            predicates.append("dimension=?")
+            params.append(str(dimension))
+        if reason:
+            predicates.append("reason=?")
+            params.append(str(reason))
+        if predicates:
+            query += " WHERE " + " AND ".join(predicates)
+        return self.conn.execute(
+            query + " ORDER BY session_date, checked_at", params).fetchdf()
+
+
     def write_path_labels(self, records):
         rows = []
         for item in records:
