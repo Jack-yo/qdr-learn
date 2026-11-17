@@ -114,10 +114,13 @@ class L1MarketStore:
             session_date DATE NOT NULL, universe_id VARCHAR NOT NULL,
             security_id VARCHAR NOT NULL, symbol VARCHAR NOT NULL,
             is_member BOOLEAN NOT NULL, provider VARCHAR NOT NULL,
-            membership_basis VARCHAR NOT NULL, pit_status VARCHAR NOT NULL,
-            known_at TIMESTAMPTZ NOT NULL, receipt_sha256 VARCHAR NOT NULL,
-            ingested_at TIMESTAMPTZ NOT NULL,
+            membership_basis VARCHAR NOT NULL, snapshot_complete BOOLEAN NOT NULL,
+            pit_status VARCHAR NOT NULL, known_at TIMESTAMPTZ NOT NULL,
+            receipt_sha256 VARCHAR NOT NULL, ingested_at TIMESTAMPTZ NOT NULL,
             PRIMARY KEY(session_date, universe_id, security_id, provider, receipt_sha256))""")
+        universe_columns = {row[1] for row in self.conn.execute("PRAGMA table_info('l1_market_universe')").fetchall()}
+        if "snapshot_complete" not in universe_columns:
+            self.conn.execute("ALTER TABLE l1_market_universe ADD COLUMN snapshot_complete BOOLEAN DEFAULT FALSE")
         self.conn.execute("""CREATE TABLE IF NOT EXISTS l1_market_observations (
             session_date DATE NOT NULL, dimension VARCHAR NOT NULL,
             feature_id VARCHAR NOT NULL, value DOUBLE, unit VARCHAR NOT NULL,
@@ -151,8 +154,31 @@ class L1MarketStore:
             started_at TIMESTAMPTZ NOT NULL, completed_at TIMESTAMPTZ,
             status VARCHAR NOT NULL, counts_json VARCHAR NOT NULL,
             errors_json VARCHAR NOT NULL)""")
+        self.conn.execute("""CREATE TABLE IF NOT EXISTS l1_market_source_health (
+            source_key VARCHAR NOT NULL, asof_session DATE NOT NULL,
+            fetched_at TIMESTAMPTZ NOT NULL, status VARCHAR NOT NULL,
+            error_code VARCHAR, receipt_sha256 VARCHAR,
+            metadata_json VARCHAR NOT NULL,
+            PRIMARY KEY(source_key, asof_session, fetched_at))""")
+        self.conn.execute("""CREATE TABLE IF NOT EXISTS l1_market_quality_checks (
+            session_date DATE NOT NULL, dimension VARCHAR NOT NULL,
+            status VARCHAR NOT NULL, reason VARCHAR NOT NULL,
+            coverage_n BIGINT, expected_n BIGINT,
+            checked_at TIMESTAMPTZ NOT NULL, metadata_json VARCHAR NOT NULL,
+            PRIMARY KEY(session_date, dimension, reason, checked_at))""")
+        self.conn.execute("""CREATE TABLE IF NOT EXISTS l1_market_path_labels (
+            session_date DATE NOT NULL, horizon INTEGER NOT NULL,
+            entry_date DATE NOT NULL, exit_date DATE NOT NULL,
+            forward_return DOUBLE NOT NULL, mfe DOUBLE NOT NULL, mae DOUBLE NOT NULL,
+            first_touch VARCHAR NOT NULL, status VARCHAR NOT NULL,
+            receipt_sha256 VARCHAR NOT NULL, available_at TIMESTAMPTZ NOT NULL,
+            up_barrier DOUBLE NOT NULL, down_barrier DOUBLE NOT NULL,
+            PRIMARY KEY(session_date, horizon, receipt_sha256))""")
         self.conn.execute("""INSERT INTO l1_market_schema
             SELECT 1, ? WHERE NOT EXISTS (SELECT 1 FROM l1_market_schema WHERE version=1)""",
+            [datetime.now(timezone.utc)])
+        self.conn.execute("""INSERT INTO l1_market_schema
+            SELECT 2, ? WHERE NOT EXISTS (SELECT 1 FROM l1_market_schema WHERE version=2)""",
             [datetime.now(timezone.utc)])
 
     def close(self):
@@ -243,17 +269,19 @@ class L1MarketStore:
             self._require_receipt(item.get("receipt_sha256"))
             if type(item.get("is_member")) is not bool:
                 raise ValueError("UNIVERSE_MEMBERSHIP_MUST_BE_BOOLEAN")
+            if type(item.get("snapshot_complete")) is not bool:
+                raise ValueError("UNIVERSE_SNAPSHOT_COMPLETENESS_REQUIRED")
             rows.append((_date(item.get("session_date") or item.get("date")),
                 str(item.get("universe_id") or ""), str(item.get("security_id") or ""),
                 str(item.get("symbol") or "").upper(), item["is_member"],
                 str(item.get("provider") or ""), str(item.get("membership_basis") or "UNATTESTED"),
-                str(item.get("pit_status") or "PIT_UNATTESTED"),
+                item["snapshot_complete"], str(item.get("pit_status") or "PIT_UNATTESTED"),
                 _timestamp(item.get("known_at")), item["receipt_sha256"], now))
         if any(not x[1] or not x[2] or not x[3] or not x[5] for x in rows):
             raise ValueError("UNIVERSE_IDENTITY_REQUIRED")
         if rows:
             self.conn.executemany("""INSERT INTO l1_market_universe VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING""", rows)
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING""", rows)
         return len(rows)
 
     def write_observations(self, records):
@@ -313,6 +341,73 @@ class L1MarketStore:
             query += " AND symbol IN (" + ",".join("?" for _ in clean) + ")"
             params.extend(clean)
         return self.conn.execute(query + " ORDER BY session_date, symbol, feature_id", params).fetchdf()
+
+
+    def write_source_health(self, records):
+        rows = []
+        for item in records:
+            digest = item.get("receipt_sha256")
+            if digest is not None:
+                self._require_receipt(digest)
+            rows.append((str(item.get("source_key") or item.get("id") or ""),
+                _date(item.get("asof_session") or item.get("session_date")),
+                _timestamp(item.get("fetched_at")), str(item.get("status") or "MISSING"),
+                str(item.get("error_code") or item.get("code") or "") or None,
+                digest, _json(item.get("metadata"))))
+        if any(not x[0] or not x[3] for x in rows):
+            raise ValueError("SOURCE_HEALTH_IDENTITY_REQUIRED")
+        if rows:
+            self.conn.executemany("""INSERT INTO l1_market_source_health VALUES (
+                ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING""", rows)
+        return len(rows)
+
+    def read_source_health(self, *, asof=None):
+        query, params = "SELECT * FROM l1_market_source_health", []
+        if asof:
+            query += " WHERE asof_session<=?"
+            params.append(_date(asof))
+        return self.conn.execute(query + " ORDER BY asof_session, source_key, fetched_at", params).fetchdf()
+
+    def write_quality_checks(self, records):
+        now = datetime.now(timezone.utc)
+        rows = [(_date(x.get("session_date")), str(x.get("dimension") or ""),
+            str(x.get("status") or "MISSING"), str(x.get("reason") or "UNSPECIFIED"),
+            _optional_int(x.get("coverage_n")), _optional_int(x.get("expected_n")),
+            _timestamp(x.get("checked_at") or now), _json(x.get("metadata"))) for x in records]
+        if any(not x[1] for x in rows):
+            raise ValueError("QUALITY_DIMENSION_REQUIRED")
+        if rows:
+            self.conn.executemany("""INSERT INTO l1_market_quality_checks VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING""", rows)
+        return len(rows)
+
+    def write_path_labels(self, records):
+        rows = []
+        for item in records:
+            self._require_receipt(item.get("receipt_sha256"))
+            rows.append((_date(item.get("session_date")), int(item.get("horizon")),
+                _date(item.get("entry_date")), _date(item.get("exit_date")),
+                _finite(item.get("forward_return")), _finite(item.get("mfe")),
+                _finite(item.get("mae")), str(item.get("first_touch") or ""),
+                str(item.get("status") or "OUTCOME_ONLY_NOT_PREDICTOR"),
+                item["receipt_sha256"], _timestamp(item.get("available_at")),
+                _finite(item.get("up_barrier")), _finite(item.get("down_barrier"))))
+        if any(x[8] != "OUTCOME_ONLY_NOT_PREDICTOR" for x in rows):
+            raise ValueError("PATH_LABEL_MUST_BE_OUTCOME_ONLY")
+        if rows:
+            self.conn.executemany("""INSERT INTO l1_market_path_labels VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING""", rows)
+        return len(rows)
+
+    def read_path_labels(self, *, asof=None):
+        query, params = "SELECT * FROM l1_market_path_labels", []
+        if asof:
+            query += " WHERE session_date<=?"
+            params.append(_date(asof))
+        return self.conn.execute(query + " ORDER BY session_date, horizon", params).fetchdf()
+
+    def read_events(self):
+        return self.conn.execute("SELECT * FROM l1_market_events ORDER BY scheduled_at").fetchdf()
 
     def write_events(self, records):
         rows, now = [], datetime.now(timezone.utc)
@@ -380,6 +475,9 @@ class L1MarketStore:
             MAX(session_date) FROM l1_market_universe""").fetchone()
         security = self.conn.execute("""SELECT COUNT(*), COUNT(DISTINCT feature_id),
             MAX(session_date) FROM l1_market_security_features""").fetchone()
+        health = self.conn.execute("SELECT COUNT(*) FROM l1_market_source_health").fetchone()[0]
+        quality = self.conn.execute("SELECT COUNT(*) FROM l1_market_quality_checks").fetchone()[0]
+        labels = self.conn.execute("SELECT COUNT(*) FROM l1_market_path_labels").fetchone()[0]
         receipts = self.conn.execute("SELECT COUNT(*) FROM l1_market_source_receipts").fetchone()[0]
         return {
             "schema": "qdr.l1.market_data_store_status.v1",
@@ -393,6 +491,8 @@ class L1MarketStore:
                                   "last_session": str(security[2]) if security[2] else None},
             "universe": {"rows": universe[0], "securities": universe[1],
                          "last_session": str(universe[2]) if universe[2] else None},
-            "source_receipts": receipts, "historical_pit_verified": False,
+            "source_receipts": receipts, "source_health_rows": health,
+            "quality_check_rows": quality, "path_label_rows": labels,
+            "historical_pit_verified": False,
             "forecast_eligible": False, "trade_eligible": False,
         }
