@@ -466,8 +466,50 @@ class ExtendedPublicSources:
         stamp=stamp.astimezone(timezone.utc)
         assets,asset_receipt=self.live.assets(refresh=refresh)
         symbols=[x["symbol"] for x in assets]
-        snapshots,snapshot_receipts,batch_errors=self.live.snapshots_for_symbols(
-            symbols,refresh=refresh,batch_size=200,max_workers=4)
+        def missing_snapshot_result(code, *, snapshot_receipts=(), batch_errors=(),
+                                    observation_mode="NO_SNAPSHOT_DATA"):
+            input_hashes=[asset_receipt["sha256"]]+[x["sha256"] for x in snapshot_receipts]
+            derived=sha256(json.dumps({"asof":None,"inputs":sorted(input_hashes),
+                "universe":"ALPACA_ACTIVE_TRADABLE_NON_OTC_CURRENT_DIRECTORY_V1",
+                "snapshot_error":code},sort_keys=True,separators=(",",":")).encode()).hexdigest()
+            fetched=max([asset_receipt["fetched_at"]]+[x["fetched_at"] for x in snapshot_receipts])
+            expected=len(assets)
+            errors=list(batch_errors)
+            if code:
+                errors.append({"code":code})
+            result={
+                "advances":None,"declines":None,"unchanged":None,
+                "advance_share":None,"up_volume_share":None,
+                "downside_sync_share":None,"stock_dispersion_1":None,
+                "market_snapshot_coverage_pct":0.0,
+                "coverage_n":0,"expected_n":expected,
+                "observation_mode":observation_mode,"observed_date":None,
+                "batch_count":len(snapshot_receipts),
+                "batch_error_count":max(1,len(errors)),
+                "feed_sources":sorted({x.get("source","UNKNOWN") for x in snapshot_receipts}),
+                "batch_errors":errors[:10],
+                "asset_receipt_sha256":asset_receipt["sha256"],
+                "snapshot_receipt_sha256":[x["sha256"] for x in snapshot_receipts],
+                "snapshot_error_code":code,
+            }
+            receipt={
+                "source":"ALPACA_ACTIVE_US_EQUITY_SNAPSHOT_BREADTH",
+                "fetched_at":fetched,"sha256":derived,
+                "pit":"CURRENT_ACTIVE_ASSET_UNIVERSE_NOT_HISTORICAL_PIT",
+                "coverage_n":0,"expected_n":expected,"coverage":0.0,
+                "observation_mode":observation_mode,
+                "batch_error_count":result["batch_error_count"],
+                "feed_sources":result["feed_sources"],
+                "input_receipts":input_hashes,
+                "snapshot_error_code":code,
+            }
+            return {limit:result},receipt
+
+        try:
+            snapshots,snapshot_receipts,batch_errors=self.live.snapshots_for_symbols(
+                symbols,refresh=refresh,batch_size=200,max_workers=4)
+        except SourceUnavailable as exc:
+            return missing_snapshot_result(exc.code)
         by_day=defaultdict(list)
         for symbol,record in snapshots.items():
             daily=record.get("dailyBar") or record.get("daily_bar") or {}
@@ -483,15 +525,17 @@ class ExtendedPublicSources:
             except (SourceUnavailable,ValueError,TypeError,KeyError):
                 continue
         if not by_day:
-            raise SourceUnavailable("ALPACA_BROAD_SNAPSHOT_HAS_NO_VALID_DAILY_BARS")
+            return missing_snapshot_result("ALPACA_BROAD_SNAPSHOT_HAS_NO_VALID_DAILY_BARS",
+                snapshot_receipts=snapshot_receipts,batch_errors=batch_errors,
+                observation_mode="NO_VALID_DAILY_BARS")
         # Use the most populated latest session; mixed/stale dates reduce coverage.
         latest_day=max(by_day,key=lambda day:(len(by_day[day]),day))
         rows=by_day[latest_day]
         expected=len(assets)
         covered=len(rows)
         coverage=covered/expected if expected else 0.0
-        if covered<30:
-            raise SourceUnavailable("ALPACA_BROAD_SNAPSHOT_COVERAGE_TOO_LOW")
+        # Keep low-but-nonzero coverage as PARTIAL evidence; never discard the
+        # asset-directory receipt or relabel a small sample as full-market coverage.
         returns=[x[1] for x in rows]
         volumes=[x[2] for x in rows]
         advances=sum(1 for x in returns if x>0)
@@ -692,8 +736,11 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
                     status=("OBSERVED" if coverage_n/expected_n>=0.98 and
                              not value["batch_error_count"] and
                              value["observation_mode"]!="STALE_SNAPSHOT" else "PARTIAL")
+                    if coverage_n == 0:
+                        status="MISSING"
                     health[name]["status"]=status
-                    health[name]["effective_date"]=value["observed_date"]
+                    health[name]["code"]=value.get("snapshot_error_code")
+                    health[name]["effective_date"]=value.get("observed_date")
                     scope="CURRENT_ACTIVE_TRADABLE_ALPACA_UNIVERSE_NOT_HISTORICAL_PIT"
                     meta={"observation_mode":value["observation_mode"],
                           "coverage_pct":round(value["market_snapshot_coverage_pct"],3),
@@ -712,8 +759,9 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
                         ("correlation","downside_sync_share","全市场活跃可交易证券同步下跌占比","%"),
                         ("correlation","stock_dispersion_1","全市场活跃可交易证券日收益离散度","%"),
                     ):
-                        feature_status=status if value[field] is not None else "MISSING"
-                        add(domain,field,title,value[field],unit,scope,status=feature_status,
+                        if value[field] is None:
+                            continue
+                        add(domain,field,title,value[field],unit,scope,status=status,
                             observed_day=observed_day,coverage_n=coverage_n,
                             expected_n=expected_n,metadata=meta)
             except (SourceUnavailable,ValueError,KeyError,TypeError,OverflowError) as exc:
