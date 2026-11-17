@@ -6,6 +6,7 @@ transport: receipt time does not establish point-in-time historical availability
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from hashlib import sha256
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
@@ -117,6 +118,8 @@ class LiveSources:
         host=urlsplit(endpoint).hostname
         allowed_static = {
             self.CBOE_VIX,
+            'https://paper-api.alpaca.markets/v2/assets',
+            'https://api.alpaca.markets/v2/assets',
             'https://data.alpaca.markets/v2/stocks/bars',
             'https://data.alpaca.markets/v2/stocks/snapshots',
             'https://api.stlouisfed.org/fred/series/observations',
@@ -259,6 +262,54 @@ class LiveSources:
                 raise SourceUnavailable('UNSORTED_ALPACA_BARS')
         return merged,receipts
 
+    def assets(self, *, refresh=False, max_assets=10000):
+        """Current active, tradable, non-OTC US-equity asset directory.
+
+        This is a current vendor directory, not historical index membership
+        and not a survivorship-bias-free point-in-time universe.
+        """
+        key=self.env.get('ALPACA_API_KEY');secret=self.env.get('ALPACA_SECRET_KEY')
+        if not key or not secret:
+            raise SourceUnavailable('MISSING_ALPACA_CREDENTIALS')
+        base=(self.env.get('ALPACA_TRADING_API_URL') or
+              self.env.get('APCA_API_BASE_URL') or
+              'https://paper-api.alpaca.markets').rstrip('/')
+        if base not in {'https://paper-api.alpaca.markets','https://api.alpaca.markets'}:
+            raise SourceUnavailable('UNAPPROVED_ALPACA_TRADING_API')
+        body,stamp,digest=self.request(base+'/v2/assets',
+            {'status':'active','asset_class':'us_equity'},
+            {'APCA-API-KEY-ID':key,'APCA-API-SECRET-KEY':secret},
+            ttl=21600,refresh=refresh)
+        try:
+            records=json.loads(body)
+            if not isinstance(records,list):
+                raise ValueError('Expected asset list')
+            clean=[]
+            for item in records:
+                if not isinstance(item,dict):
+                    continue
+                symbol=str(item.get('symbol') or '').upper()
+                exchange=str(item.get('exchange') or '').upper()
+                if (item.get('class')!='us_equity' or item.get('status')!='active' or
+                    item.get('tradable') is not True or exchange=='OTC' or
+                    not re.fullmatch(r'[A-Z][A-Z0-9.-]{0,13}',symbol)):
+                    continue
+                clean.append(item)
+            clean.sort(key=lambda x:x['symbol'])
+            if not clean:
+                raise ValueError('No active tradable US equities')
+            if len(clean)>max_assets:
+                raise SourceUnavailable('ALPACA_ASSET_UNIVERSE_EXCEEDS_LIMIT')
+            symbols=[x['symbol'] for x in clean]
+            if len(symbols)!=len(set(symbols)):
+                raise ValueError('Duplicate active symbols')
+        except SourceUnavailable:
+            raise
+        except (ValueError,TypeError,KeyError) as exc:
+            raise SourceUnavailable('INVALID_ALPACA_ASSET_DIRECTORY') from exc
+        return clean,{'fetched_at':stamp,'sha256':digest,'source':'ALPACA_ACTIVE_US_EQUITY_ASSETS',
+                      'asset_count':len(clean),'scope':'ACTIVE_TRADABLE_NON_OTC_CURRENT_DIRECTORY_NOT_PIT'}
+
     def snapshots(self, *, refresh=False, symbols=('SPY','QQQ','IWM','RSP','HYG','LQD')):
         key=self.env.get('ALPACA_API_KEY');secret=self.env.get('ALPACA_SECRET_KEY')
         if not key or not secret:raise SourceUnavailable('MISSING_ALPACA_CREDENTIALS')
@@ -273,6 +324,35 @@ class LiveSources:
         except (ValueError,TypeError) as exc:raise SourceUnavailable('INVALID_ALPACA_SNAPSHOTS') from exc
         return doc['snapshots'],{'fetched_at':stamp,'sha256':digest,'source':'ALPACA_'+feed,
                                  'scope':'LAST_TRADE_LEVEL1_QUOTE_NOT_FULL_DEPTH'}
+
+    def snapshots_for_symbols(self, symbols, *, refresh=False, batch_size=200, max_workers=4):
+        """Fetch current snapshots in bounded batches; return partial coverage explicitly."""
+        clean=tuple(sorted({str(x).upper() for x in symbols}))
+        if not clean or len(clean)>10000:
+            raise SourceUnavailable('INVALID_SNAPSHOT_UNIVERSE_SIZE')
+        if type(batch_size) is not int or not 1<=batch_size<=500:
+            raise SourceUnavailable('INVALID_SNAPSHOT_BATCH_SIZE')
+        batches=[clean[i:i+batch_size] for i in range(0,len(clean),batch_size)]
+        merged,receipts,errors={},[],[]
+        with ThreadPoolExecutor(max_workers=max(1,min(int(max_workers),8))) as pool:
+            futures={pool.submit(self.snapshots,refresh=refresh,symbols=batch): (i,batch)
+                     for i,batch in enumerate(batches)}
+            for future in as_completed(futures):
+                index,batch=futures[future]
+                try:
+                    values,receipt=future.result()
+                    merged.update(values)
+                    receipts.append(receipt)
+                    missing=sorted(set(batch)-set(values))
+                    if missing:
+                        errors.append({'batch':index,'code':'SYMBOL_SNAPSHOT_MISSING',
+                                       'missing_count':len(missing),'missing_sample':missing[:10]})
+                except SourceUnavailable as exc:
+                    errors.append({'batch':index,'code':exc.code,'symbol_count':len(batch)})
+        if not merged:
+            raise SourceUnavailable('ALL_ALPACA_SNAPSHOT_BATCHES_FAILED')
+        receipts.sort(key=lambda x:x.get('sha256',''))
+        return merged,receipts,errors
 
     def cboe_vix(self, *, refresh=False):
         body, stamp,digest=self.request(self.CBOE_VIX,ttl=7200,refresh=refresh)
