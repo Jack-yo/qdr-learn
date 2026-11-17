@@ -99,3 +99,18 @@ outputs/l1_v3_jobs/YYYYMMDD...json
 安全门槛：H1/H3/H5 到期、真实冻结早于 T+1 开盘、冻结具有 `minimum_embargo_sessions>=5`、到期后新获取的 `split` bar、有完整时间窗/Feed/页摘要的来源收据、真实交易日价格、原预测 SHA256。任何条件失败都不得追加评分；旧 7.2 快照保留但不进入当前合格前向评分。模型仍为 `RESEARCH_ONLY`，没有正式概率/实盘资格。
 
 执行 `python -m quant_research.workflow.l1_v3_pipeline --root . settle` 后检查输出中的 `blocked_price_evidence`、`new_outcomes`。若预测尚未到期，返回 `NO_DUE_OUTCOMES`，这是正确结果。真实 Alpaca 取数仍需要用户本机凭据及后续交易日，不能用合成数据宣称已产生真实前向评分。
+
+## 2026-11-17：Alpaca SIP 历史数据 HTTP 403 的安全排查
+
+- L1 每日研究使用历史 `1Day` bars，不是 Snapshot。历史 Feed 由 `QDR_L1_HISTORY_FEED` 控制（默认 `sip`），与 `QDR_L1_FEED` 快照权限分开。
+- 历史日线请求的 `end` 现在固定为 XNYS 交易日收盘 + 1 分钟，不再使用下一自然日 00:00。免费 SIP 的最近 15 分钟限制另留缓冲；太早则返回 `HISTORICAL_SIP_EMBARGO_PENDING`，等待下一轮定时任务，不会自动回退 IEX 或发布预测。
+- 使用本地合法环境变量运行（密钥仅在 `.env` 时可通过 `uv run --env-file .env` 显式加载），先做回归，再重跑一次每日任务：
+
+```bash
+uv run --locked pytest -q tests/test_l1_v3_alpaca_history.py tests/test_l1_v2.py --tb=short
+uv run --locked python -m quant_research.workflow.l1_v3_pipeline --root . daily
+uv run --locked python -m quant_research.workflow.l1_v3_pipeline --root . status
+```
+
+- 若日线截止时间已过、仍出现 `HTTP_403`，检查真实 API key/secret 对应账户及历史行情 Feed 权限（不要发送密钥或带认证的完整请求）。不要静默改成 `iex`：已有模型记录 Feed 身份，SIP/IEX 不能直接混用。
+- `/api/v1/l1/v3/latest` HTTP 200 仅说明旧归档可读取，不能证明每日任务成功。旧版 7.2 冻结不能重写；仅在新任务生成 `FROZEN_RESEARCH_ONLY` 且 asof 正确时才代表新增研究预测，且仍必须标记 `RESEARCH_ONLY`。
