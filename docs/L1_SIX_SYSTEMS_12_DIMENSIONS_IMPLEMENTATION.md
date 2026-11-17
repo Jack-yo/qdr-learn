@@ -66,6 +66,22 @@
 - 所有 registry 记录默认 forecast_eligible=false / trade_eligible=false。
 - 这是数据基础设施第一阶段；尚不等于全部 provider adapters、全市场 PIT universe 或六大体系实时接入已经完成。
 
+### 5.1 2026-11-17 数据链路与质量审计增量修复
+
+已落地的工程修复：
+- 全市场当前资产目录与快照批次分别记录健康状态；资产目录成功而快照失败时，不再把资产目录误报为缺失。
+- 快照覆盖率低于 98% 时保留非零观测并标记 PARTIAL；快照日期落后于目标交易日时标记 STALE_SNAPSHOT / PARTIAL。
+- 市场广度健康记录引用实际 Alpaca 快照批次回执；广度派生回执不再冒充底层快照回执。
+- DuckDB append-only bars、universe、security features 在读取时按稳定身份选取最新版本，避免重复导入后历史计算因重复 session/symbol 失败。
+- Coverage Matrix 按交易日、available_at、ingested_at 选择最新观测；最新 MISSING 记录会覆盖同一指标的旧 OBSERVED 值；全部为 PARTIAL 的维度不会被升级为 OBSERVED。
+- 修复 SourceSpec 状态字段引用错误，并使 PIT 阻断在覆盖矩阵中可见。
+
+验收边界：
+- 已提交确定性回归测试，覆盖快照批次全失败、低覆盖、回执归属、append-only 修订去重和最新缺失观测。
+- 这些测试尚未在本机依赖环境执行；GitHub 当前没有返回对应提交的 workflow run。不得将“测试已编写”表述为“测试通过”。
+- Alpaca 真实账户的资产目录、快照批次和历史 Bars 权限仍需在用户本机运行 `scan-live` / 历史回补任务验收。
+- 当前快照只代表 Alpaca 当前 active/tradable universe，不构成历史 PIT 股票池，也不具备模型或交易资格。
+
 ## 6. 本地使用
 
 \`\`\`bash
