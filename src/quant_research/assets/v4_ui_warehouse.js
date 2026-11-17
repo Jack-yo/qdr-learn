@@ -245,12 +245,10 @@
    '<td>'+e(x.latest_observation?.error_code||x.limitation||'—')+'</td></tr>').join('');
   const attentionBlock='<section class="card pad wh-attention-card"><div class="wh-section-title"><b>需要关注</b><span>阻断、过期、缺失与质量问题 · 按严重程度排序</span></div>'+
    renderAttention(data.attention||[])+'</section>';
-  const bottom='<div class="wh-bottom-grid"><section class="card pad"><div class="wh-section-title"><b>数据源监控</b><span>'+n(sources.length,0)+' 个注册来源</span></div>'+
+  const sourceMonitor='<section class="card pad wh-source-monitor"><div class="wh-section-title"><b>数据源监控</b><span>'+n(sources.length,0)+' 个注册来源</span></div>'+
    (sourceRows?'<div class="v4-table-scroll"><table class="table wh-table"><thead><tr><th>数据源</th><th>代码登记</th><th>运行状态</th><th>新鲜度</th><th>观测日</th><th>最近抓取</th><th>说明 / 错误</th></tr></thead><tbody>'+sourceRows+'</tbody></table></div>':empty('暂无来源登记','L1 来源注册表尚不可用。'))+
-   '<div class="wh-source-foot">注册状态不等于真实运行状态；没有运行记录时显示「尚无运行观测」。</div></section>'+
-   '<section class="card pad"><div class="wh-section-title"><b>最近维护任务</b><span>真实 manifest · 最近 '+n((maintenance.recent_runs||[]).length,0)+' 次</span></div>'+
-   renderHistory(maintenance.recent_runs||[])+'</section></div>';
-  const html=top+kpis+registryLine+attentionBlock+main+bottom;
+   '<div class="wh-source-foot">注册状态不等于真实运行状态；没有运行记录时显示「尚无运行观测」。</div></section>';
+  const html=top+kpis+registryLine+attentionBlock+main+sourceMonitor;
   return {title:'数据仓库',html,mount:()=>{
    document.getElementById('wh-refresh')?.addEventListener('click',()=>window.location.reload());
    document.getElementById('wh-search')?.addEventListener('input',ev=>{
