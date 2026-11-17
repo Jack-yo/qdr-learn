@@ -99,14 +99,15 @@ def test_breadth_rejects_mixed_universe_ids_in_a_single_session():
 
 
 def test_breadth_moving_average_shares_exclude_missing_ma_from_denominator():
-    bars,cutoffs,universe=sample_market(n_sessions=280,n_stocks=100)
+    bars,cutoffs,universe=sample_market(n=280,members=100)
     target=universe.session_date.max()
     missing_id=universe.loc[universe.session_date.eq(target),"security_id"].iloc[0]
     bars=bars.loc[~((bars.security_id==missing_id) &
-                    (bars.session_date>=target-pd.Timedelta(days=10)))]
+                    (bars.session_date<target-pd.Timedelta(days=10)))]
     result=compute_l1_market_features(bars,cutoffs,universe=universe)
     row=result["observations"].loc[
         result["observations"].session_date.eq(target.date().isoformat()) &
         result["observations"].feature_id.eq("pct_above_ma20")
     ]
-    assert row.empty or pd.isna(row.iloc[0].value)
+    assert not row.empty
+    assert row.iloc[0].value==pytest.approx(100.0)
