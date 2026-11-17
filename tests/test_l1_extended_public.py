@@ -14,7 +14,7 @@ from quant_research.data.l1_public_extended import (
     parse_bls_calendar, parse_cftc_contract, parse_cboe_equities_volume,
     sample_stock_breadth, scan_extended_public,
     parse_ici_weekly_etf_issuance, parse_finra_consolidated_short_volume,
-    parse_fomc_calendar,
+    parse_fomc_calendar, parse_fred_observations,
 )
 
 CLOCK = datetime(2026, 11, 15, 12, 0, tzinfo=timezone.utc)
@@ -440,3 +440,55 @@ def test_scan_extended_public_emits_fomc_feature_and_event(monkeypatch,tmp_path)
     assert fomc["pit"]=="CURRENT_PUBLISHED_EVENT_SCHEDULE_NOT_HISTORICAL_PIT"
     assert result["source_health"]["fomc_calendar"]["status"]=="OBSERVED"
     assert result["calendar_events"][0]["schedule_known_at"]=="2026-11-12T23:59:59+00:00"
+
+def test_fred_observation_parser_ignores_missing_values_and_preserves_vintage():
+    body=json.dumps({"observations":[
+        {"date":"2026-11-16","value":"2.10","realtime_start":"2026-11-17",
+         "realtime_end":"9999-12-31"},
+        {"date":"2026-11-17","value":".","realtime_start":"2026-11-17",
+         "realtime_end":"9999-12-31"},
+    ]}).encode()
+    rows=parse_fred_observations(body,"T10YIE")
+    assert len(rows)==1
+    assert rows[0]["date"]=="2026-11-16"
+    assert rows[0]["value"]==2.10
+    assert rows[0]["realtime_start"]=="2026-11-17"
+
+
+def test_fred_cross_asset_fetches_asof_vintage_and_computes_broad_usd_proxy():
+    import hashlib
+    from quant_research.data.l1_public_extended import ExtendedPublicSources,FRED_SERIES
+
+    days=["2026-11-10","2026-11-11","2026-11-12","2026-11-13","2026-11-16","2026-11-17"]
+    class FakeLive:
+        env={"FRED_API_KEY":"x"*32}
+        def request(self,endpoint,params,ttl=1800,refresh=False,feed=""):
+            assert endpoint=="https://api.stlouisfed.org/fred/series/observations"
+            assert params["realtime_start"]=="2026-11-17"
+            assert params["realtime_end"]=="2026-11-17"
+            series=params["series_id"]
+            if series=="DFII10":
+                values=[{"date":"2026-11-17","value":"1.75"}]
+            elif series=="T10YIE":
+                values=[{"date":"2026-11-17","value":"2.35"}]
+            elif series=="BAMLH0A0HYM2":
+                values=[{"date":"2026-11-17","value":"3.05"}]
+            else:
+                values=[{"date":day,"value":str(100+i*0.2)}
+                        for i,day in enumerate(days)]
+            body=json.dumps({"observations":[
+                {**x,"realtime_start":"2026-11-17","realtime_end":"9999-12-31"}
+                for x in values
+            ]}).encode()
+            return body,"2026-11-17T22:30:00+00:00",hashlib.sha256(series.encode()).hexdigest()
+
+    values,receipt=ExtendedPublicSources(FakeLive()).fred_cross_asset("2026-11-17")
+    row=values["2026-11-17"]
+    assert row["real_yield_10y"]["value"]==1.75
+    assert row["breakeven_10y"]["value"]==2.35
+    assert row["hy_oas"]["value"]==305.0
+    assert row["dxy_return_5"]["value"]==pytest.approx(1.0)
+    assert row["dxy_return_5"]["proxy"]=="DTWEXBGS_BROAD_TRADE_WEIGHTED_USD_NOT_DXY"
+    assert receipt["coverage_n"]==4
+    assert receipt["pit"]=="ALFRED_ASOF_CURRENT_SESSION_NOT_FULL_HISTORICAL_ARCHIVE"
+    assert len(receipt["input_receipts"])==4
