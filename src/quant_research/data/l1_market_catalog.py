@@ -248,6 +248,9 @@ SOURCES = (
     SourceSpec("licensed_earnings_calendar","财报与预期数据","fundamental_vendor",("earnings calendar","consensus estimates"),"event","按证券及历史发布日期","license_required","PLANNED","CONSENSUS_VINTAGE_REQUIRED","免费日历不足以恢复历史一致预期及指引版本。"),
 )
 
+SOURCE_BY_KEY = {x.key: x for x in SOURCES}
+
+
 def _dict(value):
     result = asdict(value)
     for key, item in tuple(result.items()):
@@ -298,7 +301,9 @@ def coverage_matrix(observations: Iterable[dict] = (), *,
         for feature in specs:
             for source in feature.sources:
                 state = health.get(source, {})
-                if state.get("status") in ("BLOCKED", "MISSING", "ERROR"):
+                source_spec = SOURCE_BY_KEY.get(source)
+                if (state.get("status") in ("BLOCKED", "MISSING", "ERROR") or
+                    (source_spec is not None and source_spec.implementation == "BLOCKED")):
                     blocked_sources.append(source)
         count, total = len(observed), len(specs)
         status = "OBSERVED" if total and count == total else (

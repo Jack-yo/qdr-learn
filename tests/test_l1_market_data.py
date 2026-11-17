@@ -167,3 +167,24 @@ def test_public_scan_persists_features_and_source_health(tmp_path):
     assert snapshot["status"]["source_receipts"]>=1
     health_keys={x["source_key"] for x in snapshot["source_health"]}
     assert {"alpaca_assets","alpaca_snapshots","market_breadth"} <= health_keys
+
+
+def test_registry_blocked_pit_universe_is_visible_without_runtime_failure():
+    from quant_research.data.l1_market_catalog import coverage_matrix
+    result=coverage_matrix([],source_health={})
+    breadth=next(x for x in result["dimensions"] if x["id"]=="breadth")
+    assert breadth["status"]=="BLOCKED"
+    assert "pit_universe" in breadth["blocked_sources"]
+    assert breadth["model_eligible"] is False
+
+
+def test_partial_breadth_keeps_pit_universe_blocker_visible():
+    from quant_research.data.l1_market_catalog import coverage_matrix
+    result=coverage_matrix([{
+        "session_date":"2026-11-16","feature_id":"advances","value":1200,
+        "quality_status":"PARTIAL","pit_status":"PIT_UNVERIFIED_CURRENT_UNIVERSE",
+    }],source_health={"alpaca_assets":{"status":"OBSERVED"},
+                      "alpaca_snapshots":{"status":"PARTIAL"}})
+    breadth=next(x for x in result["dimensions"] if x["id"]=="breadth")
+    assert breadth["status"]=="PARTIAL"
+    assert "pit_universe" in breadth["blocked_sources"]

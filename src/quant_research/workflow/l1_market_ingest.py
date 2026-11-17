@@ -272,6 +272,10 @@ def persist_l1_v2(root, payload):
             health.append({"source_key":"l1_v2."+str(domain.get("id") or "unknown"),
                 "asof_session":asof,"fetched_at":now,"status":domain.get("status") or "MISSING",
                 "metadata":{"coverage":domain.get("coverage"),"reason":domain.get("reason")}})
+        if input_hashes:
+            health.append({"source_key":"alpaca_bars","asof_session":asof,
+                "fetched_at":available,"status":"OBSERVED","receipt_sha256":input_hashes[-1],
+                "metadata":{"source_receipts":len(input_hashes),"scope":"ETF_HISTORICAL_BARS"}})
         written_health = store.write_source_health(health)
     return {"status":"PERSISTED","features":written,"source_health":written_health,
             "source_receipts":len(input_hashes)}
