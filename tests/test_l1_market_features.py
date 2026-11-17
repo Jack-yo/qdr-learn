@@ -137,3 +137,18 @@ def test_fomc_days_feature_uses_published_schedule_known_at_and_stays_non_pit():
     not_yet_known=compute_l1_market_features(bars,cutoffs,events=events)
     assert not not_yet_known["observations"].query(
         "session_date == @day and feature_id == 'days_to_fomc'").shape[0]
+
+def test_breadth_features_propagate_operator_reviewed_pit_attestation_but_not_verified():
+    bars,cutoffs,universe=sample_market(n=280,members=40)
+    universe["pit_status"]="PIT_ATTESTED"
+    universe["pit_attestation_id"]="CRSP-US-COMMON-2026-11"
+    universe["pit_attestation_sha256"]="a"*64
+    universe["pit_attestation_provider"]="CRSP"
+    result=compute_l1_market_features(bars,cutoffs,universe=universe)
+    latest_day=cutoffs.session_date.iloc[-1].date().isoformat()
+    breadth=result["observations"].query(
+        "session_date == @latest_day and dimension == 'breadth'")
+    assert set(breadth.pit_status)=={"PIT_ATTESTED"}
+    assert all(x["pit_attestation_id"]=="CRSP-US-COMMON-2026-11"
+               for x in breadth.metadata)
+    assert result["policy"]["forecast_eligible"] is False
