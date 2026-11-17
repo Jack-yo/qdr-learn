@@ -3,7 +3,7 @@
 All figures in fixtures are artificial; tests do not attest live vendor data.
 """
 from datetime import datetime, date, timedelta, timezone
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 import json
 
 import pytest
@@ -103,6 +103,21 @@ def fake_source(tmp_path,broken=None,with_stocks=True):
         if broken and broken in url:
             raise SourceUnavailable("HTTP_503")
         p=urlparse(url)
+        if p.path.endswith("/v2/assets"):
+            return json.dumps([
+                {"symbol":f"BRD{i:03d}","class":"us_equity","status":"active",
+                 "tradable":True,"exchange":"NYSE"} for i in range(40)
+            ]).encode()
+        if p.path.endswith("/stocks/snapshots"):
+            symbols=parse_qs(p.query).get("symbols",[""])[0].split(",")
+            snapshots={}
+            for i,symbol in enumerate(symbols):
+                snapshots[symbol]={
+                    "dailyBar":{"t":"2026-11-13T21:00:00Z",
+                                "c":101 if i%2==0 else 99,"v":1000},
+                    "prevDailyBar":{"t":"2026-11-12T21:00:00Z","c":100},
+                }
+            return json.dumps({"snapshots":snapshots}).encode()
         if p.path.endswith("_daily_options"):
             return CBOE
         if p.path.endswith("/fsi.csv"):
@@ -203,9 +218,9 @@ def test_extended_scan_and_short_lived_cache(tmp_path):
     assert values["ici_weekly_etf_net_issuance_bn_usd"]["value"]==49.83
     assert values["ici_weekly_etf_net_issuance_bn_usd"]["published_date"]=="2026-11-10"
     assert round(values["finra_spy_short_volume_pct"]["value"],2)==56.67
-    assert a["features"]==b["features"] and len(calls)==10
+    assert a["features"]==b["features"] and len(calls)==12
     cache=list((tmp_path/"data"/"cache"/"l1_on_demand").glob("*.json"))
-    assert len(cache)==10 and sum(x.stat().st_size for x in cache)<32_000_000
+    assert len(cache)==12 and sum(x.stat().st_size for x in cache)<32_000_000
 
 
 def test_isolated_feed_failure_and_no_alpaca_credentials(tmp_path):
