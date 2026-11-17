@@ -369,6 +369,8 @@ def current_l1_v2(root, *, refresh=False, sources=None, now=None):
         errors.update({'funding':'FRED_API_KEY_NOT_CONFIGURED','cross_asset':'FRED_API_KEY_NOT_CONFIGURED'})
     result=analyze_market(raw,receipts=receipts,extras=extras,errors=errors,asof_limit=limit)
     result['latest_quotes']=snapshot_prices
+    result['expected_asof_session']=limit
+    result['data_freshness']='CURRENT_COMPLETED_SESSION' if result['asof_session']==limit else 'STALE_COMPLETED_SESSION'
     return result
 
 
