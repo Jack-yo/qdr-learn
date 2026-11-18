@@ -6,6 +6,7 @@ is read or saved into the frozen research forecast.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -22,6 +23,9 @@ from quant_research.research.v4_forecast_archive import (freeze_research_forecas
 from quant_research.workflow.v4_study_cli import _checked_inputs
 
 
+FORWARD_PROTOCOL_VERSION="v4-forward-layered-signal-v2"
+
+
 def run_managed_forward(root: Path, *, bundle_id: str, asof_session: str) -> dict:
     root=Path(root).resolve()
     inputs,manifest=_checked_inputs(root,bundle_id)
@@ -33,14 +37,26 @@ def run_managed_forward(root: Path, *, bundle_id: str, asof_session: str) -> dic
     protocol=OOSProtocol(**policy['oos'])
     clock=TradingClock()
     day=clock.session(asof_session)
-    signal=clock.signal(day)  # Cannot generate a pre-close "after-close" prediction.
-    # Model-only historical studies may omit candidate metadata, but any
-    # forward bundle claiming candidate provenance must pass the complete
-    # same-day cohort audit even when called outside the V4 daily orchestrator.
+    base_signal=clock.signal(day)
+    window=clock.window(day,1)
+    layer_signal=base_signal
+    # Model-only historical studies may omit candidate metadata, but a forward
+    # bundle with candidates uses the exact same staged cutoff as preflight.
     if 'candidate_meta' in inputs:
-        from quant_research.workflow.v4_bundle_contract import audit_forward_candidate_cohort
-        audit_forward_candidate_cohort(inputs,manifest,day,signal)
-    config_sha=sha256(config_path.read_bytes()).hexdigest()
+        from quant_research.workflow.v4_bundle_contract import (
+            audit_forward_candidate_cohort,
+            layered_current_signal,
+        )
+        layer_signal=layered_current_signal(
+            inputs,manifest,day,base_signal,window.entry_time,
+            now_utc=datetime.now(timezone.utc),
+        )
+        audit_forward_candidate_cohort(
+            inputs,manifest,day,layer_signal
+        )
+    config_sha=sha256(
+        config_path.read_bytes()+FORWARD_PROTOCOL_VERSION.encode("utf-8")
+    ).hexdigest()
     binding_receipt=manifest.get('l2_style_context_receipt')
     if binding_receipt is not None:
         from quant_research.workflow.l2_l3_binding import (
@@ -70,6 +86,22 @@ def run_managed_forward(root: Path, *, bundle_id: str, asof_session: str) -> dic
     features,scope=prepare_v4_alpha_panel(
         inputs['factors'],inputs['labels'],inputs['market_style'],clock,
         expected_factor_names=factor_names)
+    current_mask=pd.to_datetime(features["date"]).eq(pd.Timestamp(day))
+    if current_mask.any():
+        existing=pd.to_datetime(
+            features.loc[current_mask,"signal_time"],utc=True
+        )
+        effective=pd.concat([
+            existing.reset_index(drop=True),
+            pd.Series([pd.Timestamp(layer_signal)]*len(existing)),
+        ],axis=1).max(axis=1)
+        features.loc[current_mask,"signal_time"]=effective.to_numpy()
+        if pd.to_datetime(
+            features.loc[current_mask,"signal_time"],utc=True
+        ).ge(pd.Timestamp(window.entry_time)).any():
+            raise ValueError(
+                "L3_LAYER_SIGNAL_REACHES_NEXT_SESSION_ENTRY"
+            )
     feature_columns=scope['market_style_columns']
     market=[x for x in feature_columns if x.startswith('market_') and pd.api.types.is_numeric_dtype(features[x])]
     style=[x for x in feature_columns if x.startswith('style_') and pd.api.types.is_numeric_dtype(features[x])]
@@ -93,7 +125,9 @@ def run_managed_forward(root: Path, *, bundle_id: str, asof_session: str) -> dic
                   'factor_names','source_symbols','l2_style_context_receipt'):
         if current_manifest.get(field)!=manifest.get(field):
             raise ValueError('MODEL_INPUT_CHANGED_DURING_FIT_NO_ARCHIVE_WRITE')
-    if sha256(config_path.read_bytes()).hexdigest()!=config_sha:
+    if sha256(
+        config_path.read_bytes()+FORWARD_PROTOCOL_VERSION.encode("utf-8")
+    ).hexdigest()!=config_sha:
         raise ValueError('MODEL_PROTOCOL_CHANGED_DURING_FIT_NO_ARCHIVE_WRITE')
     frozen=freeze_research_forecast(root,report,
                                    protocol_sha256=config_sha,
