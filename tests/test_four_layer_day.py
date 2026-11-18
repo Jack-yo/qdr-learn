@@ -105,8 +105,12 @@ def test_admitted_l2_can_progress_through_bound_bundle_l3_and_l4(
     )
     monkeypatch.setattr(
         four_layer_day, "create_l2_bound_v4_bundle",
-        lambda root, source_bundle_id, output_bundle_id: (
-            calls.append(("bundle", source_bundle_id, output_bundle_id))
+        lambda root, source_bundle_id, output_bundle_id,
+               expected_current_session=None: (
+            calls.append((
+                "bundle", source_bundle_id, output_bundle_id,
+                expected_current_session,
+            ))
             or {
                 "status": "L2_BOUND_V4_BUNDLE_CREATED_RESEARCH_ONLY",
                 "output_bundle_id": output_bundle_id,
@@ -138,7 +142,7 @@ def test_admitted_l2_can_progress_through_bound_bundle_l3_and_l4(
     assert result["status"] == "FOUR_LAYER_RESEARCH_DAY_SAVED"
     assert result["l2_admitted_units"] == 3
     assert calls == [
-        ("bundle", "source-v1", "source-v1-l2-20260130"),
+        ("bundle", "source-v1", "source-v1-l2-20260130", "2026-01-30"),
         ("pipeline", "source-v1-l2-20260130", 100000.0),
     ]
     assert result["four_layer"]["complete_four_layer_context"] is True
