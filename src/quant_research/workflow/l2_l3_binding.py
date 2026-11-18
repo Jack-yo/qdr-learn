@@ -68,7 +68,8 @@ def validate_l2_style_binding_receipt(receipt: dict) -> dict:
             raise ValueError("L3_L2_STYLE_BINDING_RECEIPT_VERSION_INVALID")
         required=base_required|{
             "context_modes", "admission_asof_session",
-            "admission_validation_identity", "current_forward_session",
+            "admission_validation_identity", "admission_frozen_at_utc",
+            "current_forward_session",
             "historical_replay_rows", "current_forward_rows",
         }
         if required-set(receipt):
@@ -142,6 +143,9 @@ def validate_l2_style_binding_receipt(receipt: dict) -> dict:
             raise ValueError("L3_L2_ADMISSION_SESSION_INVALID")
         if not _SHA.fullmatch(str(receipt["admission_validation_identity"])):
             raise ValueError("L3_L2_ADMISSION_IDENTITY_INVALID")
+        admission_frozen=pd.Timestamp(receipt["admission_frozen_at_utc"])
+        if admission_frozen.tzinfo is None:
+            raise ValueError("L3_L2_ADMISSION_FREEZE_TIME_INVALID")
         current=receipt["current_forward_session"]
         if current is not None:
             try:
@@ -317,6 +321,7 @@ def build_l2_style_history_binding(
     context_modes = set()
     admission_identities = set()
     admission_sessions = set()
+    admission_freeze_times = set()
     current_forward_sessions = []
     replay_rows = 0
     forward_rows = 0
@@ -332,6 +337,7 @@ def build_l2_style_history_binding(
             raise ValueError("L3_L2_CONTEXT_MODE_MISSING:" + session)
         admission_identity=context.get("admission_validation_identity")
         admission_session=context.get("admission_asof_session")
+        admission_freeze=context.get("admission_frozen_at_utc")
         if not _SHA.fullmatch(str(admission_identity or "")):
             raise ValueError("L3_L2_ADMISSION_IDENTITY_MISSING:" + session)
         try:
@@ -340,6 +346,9 @@ def build_l2_style_history_binding(
             raise ValueError("L3_L2_ADMISSION_SESSION_MISSING:" + session) from None
         if admission_day.tzinfo is not None or admission_day!=admission_day.normalize():
             raise ValueError("L3_L2_ADMISSION_SESSION_MISSING:" + session)
+        admission_frozen=pd.Timestamp(admission_freeze)
+        if admission_frozen.tzinfo is None:
+            raise ValueError("L3_L2_ADMISSION_FREEZE_TIME_MISSING:" + session)
         if not _SHA.fullmatch(str(context.get("forecast_identity") or "")):
             raise ValueError("L3_L2_FORECAST_IDENTITY_MISSING:" + session)
         if not _SHA.fullmatch(str(context.get("validation_identity") or "")):
@@ -405,6 +414,9 @@ def build_l2_style_history_binding(
         context_modes.add(mode)
         admission_identities.add(str(admission_identity))
         admission_sessions.add(admission_day.date().isoformat())
+        admission_freeze_times.add(
+            admission_frozen.tz_convert("UTC").isoformat()
+        )
         if mode=="CURRENT_FROZEN_FORWARD":
             current_forward_sessions.append(session)
             forward_rows+=1
@@ -435,7 +447,11 @@ def build_l2_style_history_binding(
             },
         })
 
-    if len(admission_identities)!=1 or len(admission_sessions)!=1:
+    if (
+        len(admission_identities)!=1
+        or len(admission_sessions)!=1
+        or len(admission_freeze_times)!=1
+    ):
         raise ValueError("L3_L2_ADMISSION_IDENTITY_CHANGED_ACROSS_HISTORY")
     if len(current_forward_sessions)>1:
         raise ValueError("L3_L2_MULTIPLE_CURRENT_FORWARD_ROWS")
@@ -460,6 +476,7 @@ def build_l2_style_history_binding(
         "context_modes": sorted(context_modes),
         "admission_asof_session": next(iter(admission_sessions)),
         "admission_validation_identity": next(iter(admission_identities)),
+        "admission_frozen_at_utc": next(iter(admission_freeze_times)),
         "current_forward_session": current_forward_session,
         "historical_replay_rows": int(replay_rows),
         "current_forward_rows": int(forward_rows),
@@ -503,6 +520,8 @@ def verify_l2_style_history_binding(
                     !=supplied.get("admission_validation_identity")
                 or admission.get("asof_session")
                     !=supplied.get("admission_asof_session")
+                or pd.Timestamp(admission.get("frozen_at_utc")).tz_convert("UTC").isoformat()
+                    !=supplied.get("admission_frozen_at_utc")
             ):
                 raise ValueError("L3_L2_ADMISSION_REPORT_CHANGED")
         else:
