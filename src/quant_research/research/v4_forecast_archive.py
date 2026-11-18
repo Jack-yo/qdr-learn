@@ -23,11 +23,13 @@ _BANNED=frozenset({'gross_return','excess_return','actual_return','future_return
                    'realized_return','net_pnl','broker_order_id'})
 
 def _validated_input_contract(contract):
-    """Bind every input Parquet byte digest and factor/cohort registry to a run."""
+    """Bind exact input bytes/cohort and optional verified L2 style receipt."""
     if contract is None:
         return None  # Legacy v1 research-only archive compatibility.
-    if not isinstance(contract,dict) or set(contract)!={
-            'artifacts_sha256','factor_names','source_symbols'}:
+    required={'artifacts_sha256','factor_names','source_symbols'}
+    optional={'l2_style_context_receipt'}
+    if (not isinstance(contract,dict) or required-set(contract)
+            or set(contract)-required-optional):
         raise ValueError('Invalid V4 forward input provenance contract')
     files,names,symbols=(contract[key] for key in
                          ('artifacts_sha256','factor_names','source_symbols'))
@@ -42,8 +44,14 @@ def _validated_input_contract(contract):
             or not isinstance(symbols,list) or len(set(symbols))!=len(symbols)
             or any(not isinstance(x,str) or not x for x in symbols)):
         raise ValueError('Invalid V4 factor/security cohort fingerprint')
-    return {'artifacts_sha256':dict(sorted(files.items())),
+    output={'artifacts_sha256':dict(sorted(files.items())),
             'factor_names':list(names),'source_symbols':list(symbols)}
+    if 'l2_style_context_receipt' in contract:
+        from quant_research.workflow.l2_l3_binding import (
+            validate_l2_style_binding_receipt)
+        output['l2_style_context_receipt']=validate_l2_style_binding_receipt(
+            contract['l2_style_context_receipt'])
+    return output
 
 
 def forecast_archive_identity(day,source,protocol_sha256,*,input_contract=None):
@@ -217,11 +225,20 @@ def latest_forward_research(root, *, limit=5):
                 continue
             try:
                 item=read_research_forecast(root,session_dir.name,folder.name)
+                receipt=(item['manifest'].get('input_contract') or {}).get(
+                    'l2_style_context_receipt')
                 items.append({'session_date_et':session_dir.name,
                               'identity':folder.name,'status':item['status'],
                               'forecast_rows':item['manifest']['forecast_rows'],
                               'model_cards':item['manifest']['model_cards'],
-                              'source_snapshot_sha256':item['manifest']['source_snapshot_sha256']})
+                              'source_snapshot_sha256':item['manifest']['source_snapshot_sha256'],
+                              'l2_style_binding_verified':bool(
+                                  receipt and receipt.get('binding_verified') is True),
+                              'l2_style_historical_pit_attested':bool(
+                                  receipt and receipt.get('historical_pit_attested') is True),
+                              'l2_style_binding_context_sha256':(
+                                  receipt.get('context_identity_sha256')
+                                  if receipt else None)})
             except (ValueError,OSError,KeyError,TypeError):
                 items.append({'session_date_et':session_dir.name,
                               'identity':folder.name,'status':'CORRUPT_FORECAST_ARCHIVE'})
