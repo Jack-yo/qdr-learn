@@ -41,9 +41,17 @@ def run_managed_forward(root: Path, *, bundle_id: str, asof_session: str) -> dic
         from quant_research.workflow.v4_bundle_contract import audit_forward_candidate_cohort
         audit_forward_candidate_cohort(inputs,manifest,day,signal)
     config_sha=sha256(config_path.read_bytes()).hexdigest()
+    binding_receipt=manifest.get('l2_style_context_receipt')
+    if binding_receipt is not None:
+        from quant_research.workflow.l2_l3_binding import (
+            verify_l2_style_history_binding)
+        binding_receipt=verify_l2_style_history_binding(
+            root,inputs['market_style'],binding_receipt)
     input_contract={'artifacts_sha256':manifest['artifacts_sha256'],
                     'factor_names':factor_names,
                     'source_symbols':manifest.get('source_symbols') or []}
+    if binding_receipt is not None:
+        input_contract['l2_style_context_receipt']=binding_receipt
     archive_id=forecast_archive_identity(str(day.date()),
         manifest['source_snapshot_sha256'],config_sha,input_contract=input_contract)
     try:
