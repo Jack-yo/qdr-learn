@@ -134,6 +134,60 @@ function quality(data){
    '<div class="l2-source-line">数据指纹：'+short(data?.source_snapshot_sha256,24)+' · 分割调整价格（不含完整分红总收益）</div>',
    '缺失不补值 · 失败关闭');
 }
+function validationResearch(result){
+ const d=result?.ok?result.data:null;
+ if(!d){
+  return problem(result,'P5 样本外验证');
+ }
+ if(d.status==='BLOCKED'){
+  return card('P5 · 样本外验证与模型资格',
+    empty('尚无冻结验证报告',String(d.code||'L2_P5_VALIDATION_REPORT_NOT_FOUND'))+
+    note('P5 不会在页面打开时重跑 Walk-forward；需要先显式运行并冻结验证任务。'),
+    'BLOCKED · 只读验证报告');
+ }
+ const qualification=Array.isArray(d.qualification)?d.qualification:[];
+ const oos=Array.isArray(d.oos_validation)?d.oos_validation:[];
+ const forward=Array.isArray(d.forward_validation)?d.forward_validation:[];
+ const key=(style,h)=>style+'::'+Number(h);
+ const qmap=new Map(qualification.map(x=>[key(x.style_id,x.horizon),x]));
+ const omap=new Map(oos.map(x=>[key(x.style_id,x.horizon),x]));
+ const fmap=new Map(forward.map(x=>[key(x.style_id,x.horizon),x]));
+ const selected=[1,3,5].map(h=>{
+  const q=qmap.get(key(state.l2Style,h))||{};
+  const o=omap.get(key(state.l2Style,h))||{};
+  const fw=fmap.get(key(state.l2Style,h))||{};
+  const status=q.qualification_status||'RESEARCH_ONLY';
+  const tone=status==='MODEL_ADMITTED'?'green':status==='OOS_VALIDATED'?'blue':'amber';
+  const gain=finite(o.relative_mse_gain_vs_best_baseline)?signed(o.relative_mse_gain_vs_best_baseline):'—';
+  const direction=finite(o.directional_accuracy)?pct(o.directional_accuracy):'—';
+  const rank=finite(o.rank_ic)?n(o.rank_ic,3):'—';
+  const fwd=finite(fw.genuine_forward_sessions)?n(fw.genuine_forward_sessions,0):'0';
+  return '<div class="l2-validation-unit"><div class="l2-validation-head"><b>H'+h+'</b>'+badge(status,tone)+'</div>'+
+    '<div class="l2-mini-grid">'+
+    '<div class="l2-mini"><span>相对最佳基准 MSE 改善</span><b>'+gain+'</b></div>'+
+    '<div class="l2-mini"><span>方向准确率</span><b>'+direction+'</b></div>'+
+    '<div class="l2-mini"><span>跨风格 Rank IC</span><b>'+rank+'</b></div>'+
+    '<div class="l2-mini"><span>真实前向冻结交易日</span><b>'+fwd+'</b></div>'+
+    '</div>'+
+    ((q.reasons||[]).length?'<div class="l2-source-line">当前阻断：'+e((q.reasons||[]).join(' · '))+'</div>':'')+
+    '</div>';
+ }).join('');
+ const summary=d.summary||{};
+ return '<div class="l2-main-grid">'+
+  card('P5 · '+itemName(state.l2Style)+' 验证证据',selected,
+    '连续收益模型 · '+e(d.probability_calibration_status||'NOT_APPLICABLE'))+
+  card('P5 · 全局资格概览',
+    '<div class="l2-mini-grid">'+
+    '<div class="l2-mini"><span>OOS 通过单元</span><b>'+n(summary.oos_validated_units,0)+' / '+n(summary.total_units||21,0)+'</b></div>'+
+    '<div class="l2-mini"><span>拥有真实前向证据</span><b>'+n(summary.genuine_forward_units,0)+' / '+n(summary.total_units||21,0)+'</b></div>'+
+    '<div class="l2-mini"><span>MODEL_ADMITTED</span><b>'+n(summary.model_admitted_units,0)+' / '+n(summary.total_units||21,0)+'</b></div>'+
+    '<div class="l2-mini"><span>自动准入开关</span><b>'+(summary.model_admission_enabled?'已开启':'关闭')+'</b></div>'+
+    '</div>'+
+    note('OOS_VALIDATED 仅表示预先冻结的样本外门槛通过；MODEL_ADMITTED 还需要真实前向冻结证据，并且准入开关必须显式开启。'),
+    '冻结验证报告 · '+date(d.asof_session))+
+  '</div>';
+}
+
 function forecastResearch(result){
  const d=result?.ok?result.data:null;
  if(!d){
@@ -242,8 +296,12 @@ pages.style=async()=>{
     '<div class="l2-main-grid">'+details(data,rot)+transitions(rot)+'</div>';
  }else if(state.l2Tab==='forecast'){
   const forecastArgs=state.l2AsOf?'?asof='+encodeURIComponent(state.l2AsOf):'';
-  const forecast=await settle('/api/v1/l2/styles/forecast'+forecastArgs);
-  body=forecastResearch(forecast);
+  const validationArgs=state.l2AsOf?'?asof='+encodeURIComponent(state.l2AsOf):'';
+  const [forecast,validation]=await Promise.all([
+    settle('/api/v1/l2/styles/forecast'+forecastArgs),
+    settle('/api/v1/l2/styles/validation'+validationArgs)
+  ]);
+  body=forecastResearch(forecast)+validationResearch(validation);
  }else if(state.l2Tab==='evidence'){
   body='<div class="l2-main-grid">'+quality(data)+details(data,rot)+'</div>'+
     card('计算口径与验证边界','<div class="l2-protocol">'+
