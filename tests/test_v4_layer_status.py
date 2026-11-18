@@ -328,6 +328,7 @@ def _wire_ready_four_layers(monkeypatch, *, l3_overrides=None):
             "status": "RESEARCH_PLANS_ONLY",
             "research_plan_count": 2,
             "source_snapshot_sha256": "8" * 64,
+            "source_forecast_identity": "l3-current",
         }]},
     )
 
@@ -379,4 +380,27 @@ def test_l3_receipt_must_cover_current_signal_session(tmp_path, monkeypatch):
         tmp_path, asof="2026-01-30", horizon=3
     )
     assert "L3_L2_BINDING_SESSION_MISMATCH" in result["blockers"]
+    assert result["complete_four_layer_context"] is False
+
+
+def test_l4_review_must_point_to_exact_current_l3_forecast_identity(
+    tmp_path, monkeypatch
+):
+    _wire_ready_four_layers(monkeypatch)
+    monkeypatch.setattr(
+        v4_layer_status,
+        "latest_indicative_reviews",
+        lambda root, limit=30: {"records": [{
+            "session_date_et": "2026-01-30",
+            "identity": "l4-wrong",
+            "status": "RESEARCH_PLANS_ONLY",
+            "research_plan_count": 2,
+            "source_snapshot_sha256": "8" * 64,
+            "source_forecast_identity": "different-l3-archive",
+        }]},
+    )
+    result = v4_layer_status.four_layer_status(
+        tmp_path, asof="2026-01-30", horizon=3
+    )
+    assert "L4_L3_FORECAST_IDENTITY_MISMATCH" in result["blockers"]
     assert result["complete_four_layer_context"] is False
