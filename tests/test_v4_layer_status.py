@@ -196,3 +196,67 @@ def test_even_admitted_l1_l2_cannot_claim_complete_context_without_l3_binding(
     assert result["layers"]["l3_alpha"]["style_input_binding_verified"] is False
     assert result["blockers"] == ["L3_L2_STYLE_BINDING_NOT_VERIFIED"]
     assert result["complete_four_layer_context"] is False
+
+
+def test_verified_l2_l3_identity_binding_is_separate_from_historical_pit(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        v4_layer_status,
+        "market_overview_for_api",
+        lambda root, horizon, asof=None: {
+            "status": "MODEL_OOS_ADMITTED",
+            "asof_session": "2026-01-30",
+            "model_version": "l1-v1",
+            "model_admitted": True,
+            "forecast": {"expected_return": 0.001},
+            "source_snapshot_sha256": "a" * 64,
+        },
+    )
+    monkeypatch.setattr(
+        v4_layer_status,
+        "build_downstream_context",
+        lambda root, asof=None: {
+            "status": "MODEL_ADMITTED_CONTEXT",
+            "asof_session": "2026-01-30",
+            "model_version": "ridge-v1",
+            "admitted_units": 2,
+            "l3_style_context_available": True,
+            "source_snapshot_sha256": "b" * 64,
+            "label_bundle_id": "accepted-v1",
+        },
+    )
+    monkeypatch.setattr(
+        v4_layer_status,
+        "latest_forward_research",
+        lambda root, limit=20: [{
+            "session_date_et": "2026-01-30",
+            "identity": "l3",
+            "status": "VERIFIED_LOCAL_FORWARD_RESEARCH_ONLY",
+            "forecast_rows": 50,
+            "source_snapshot_sha256": "c" * 64,
+            "l2_style_binding_verified": True,
+            "l2_style_historical_pit_attested": False,
+            "l2_style_binding_context_sha256": "9" * 64,
+        }],
+    )
+    monkeypatch.setattr(
+        v4_layer_status,
+        "latest_indicative_reviews",
+        lambda root, limit=30: {"records": [{
+            "session_date_et": "2026-01-30",
+            "identity": "l4",
+            "status": "RESEARCH_PLANS_ONLY",
+            "research_plan_count": 2,
+            "source_snapshot_sha256": "c" * 64,
+        }]},
+    )
+    result = v4_layer_status.four_layer_status(
+        tmp_path, asof="2026-01-30", horizon=3
+    )
+    l3 = result["layers"]["l3_alpha"]
+    assert l3["style_input_binding_verified"] is True
+    assert l3["style_historical_pit_attested"] is False
+    assert l3["style_binding_context_sha256"] == "9" * 64
+    assert result["blockers"] == ["L3_L2_STYLE_HISTORY_NOT_PIT_ATTESTED"]
+    assert result["complete_four_layer_context"] is False
