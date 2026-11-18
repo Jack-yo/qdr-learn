@@ -30,7 +30,10 @@ def test_l1_browser_horizons_domains_replay_no_overflow(width,height):
         try:
             browser=p.chromium.launch(headless=True, executable_path=shutil.which('chromium') or shutil.which('google-chrome'))
         except Exception:
-            pytest.skip('No permitted Chromium runtime; execute visual contract on developer machine')
+            try:
+                browser=p.chromium.launch(headless=True, channel='chrome')
+            except Exception:
+                pytest.skip('No permitted Chromium runtime; execute visual contract on developer machine')
         page=browser.new_page(viewport={'width':width,'height':height})
         errors=[]
         page.on('pageerror',lambda error:errors.append(str(error)))

@@ -53,7 +53,8 @@ class_logits:[.62,.38,.22],raw_probabilities:{UP:.47,FLAT:.34,DOWN:.19},
 calibrated_probabilities:{UP:.43,FLAT:.37,DOWN:.20}},
 train_samples:720,calibration_samples:150,trace_sha256:'a'.repeat(64)};
 const V3={schema:'qdr.l1.probability.v3',status:'RESEARCH_ONLY',
-asof_session:'2026-11-13',data_feed:'iex',model_version:'L1_V3_ETF7.1',
+asof_session:'2026-11-13',data_feed:'iex',model_version:'L1_V3_ETF7.2',
+frozen_at_utc:'2026-11-15T07:52:02+00:00',model_reference:{model_sha256:'old'},
 feature_version:'L1_V3_ETF7',horizons:{1:{...h,horizon:1},3:h,5:{...h,horizon:5}},
 raw_observations:[{id:'SPY',label:'SPY收盘',value:670,unit:'美元',delta:3,
 history:[660,665,667,670],category:'price',source:'ALPACA',
@@ -74,7 +75,7 @@ const V={pages:{market:async()=>{oldCount++;return{html:'原版研究'};}},
 state:{marketHorizon:3},e:x=>String(x??'').replace(/[&<>"]/g,'_'),
 n:(x,d=2)=>Number(x).toFixed(d),show(){},
 settle:async url=>{seen.push(url);
-if(url.includes('/v3/status'))return {ok:true,data:{schema:'qdr.l1.v3.pipeline.status',status:'CURRENT_RESEARCH',model_retrain_due:false,model_reference:{asof_session:'2026-11-01'}}};
+if(url.includes('/v3/status'))return {ok:true,data:{schema:'qdr.l1.v3.pipeline.status',status:'CURRENT_RESEARCH',model_retrain_due:false,model_reference:{asof_session:'2026-11-01',model_sha256:'new'}}};
 if(url.includes('/v3/outcomes'))return {ok:true,data:{
  schema:'qdr.l1.v3.outcomes',records:[{asof_session:'2026-11-10',horizon:1,
  actual_scenario:'UP',actual_return:.011,brier_3class:.15,frozen_sha256:'b'.repeat(64)}]}};
@@ -90,6 +91,8 @@ assert.equal(seen.length,6);
 assert.match(seen[0],/v3\/latest$/);
 assert.match(seen[1],/v3\/status$/);
 assert.match(html,/H3 · 这次概率如何算出/);
+assert.match(html,/旧版 H1\/H3 未满足五交易日隔离/);
+assert.match(html,/当前预测使用先前模型/);
 assert.match(html,/SPY五日收益/);
 assert.match(html,/1\.23 %/);
 assert.match(html,/47\.0%/);
@@ -110,7 +113,8 @@ assert.doesNotMatch(html,/第二屏/);
 assert.equal(oldCount,0);
 ready=false;seen=[];
 const partial=(await V.pages.market()).html;
-assert.equal(seen.length,5);
+assert.equal(seen.length,6);
+assert.match(seen[5],/v3\/outcomes$/);
 assert.match(partial,/正在读取真实数据/);
 assert.doesNotMatch(partial,/47\.0%/);
 assert.doesNotMatch(partial,/43\.0%/);

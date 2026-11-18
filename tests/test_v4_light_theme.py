@@ -31,7 +31,7 @@ def test_light_theme_is_last_and_served_for_all_workspaces():
                    ".lv3-panel",".lv3-status-strip",".l1-panel",
                    ".lv3-raw-item",".lv3-trace-table th"):
         assert module in css
-    assert "Math.random" not in SCRIPT.read_text()
+    assert "Math.random" not in SCRIPT.read_text(encoding="utf-8")
 
 
 def test_light_theme_toggle_respects_preference_without_touching_numbers():

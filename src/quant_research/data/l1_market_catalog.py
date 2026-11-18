@@ -155,7 +155,7 @@ _FEATURE_ROWS = (
     ("trin","breadth","TRIN / Arms Index","倍","daily",("pit_universe","alpaca_bars"),1260,"P1","PARTIAL","credentialed","pit_membership_and_bars"),
     ("rv5","volatility","5 日实现波动率","%","daily",("alpaca_bars",),1260,"P0","IMPLEMENTED","credentialed","bar_available_at"),
     ("rv20","volatility","20 日实现波动率","%","daily",("alpaca_bars",),1260,"P0","IMPLEMENTED","credentialed","bar_available_at"),
-    ("rv60","volatility","60 日实现波动率","%","daily",("alpaca_bars",),1260,"P1","PLANNED","credentialed","bar_available_at"),
+    ("rv60","volatility","60 日实现波动率","%","daily",("alpaca_bars",),1260,"P1","PARTIAL","credentialed","bar_available_at"),
     ("downside_rv20","volatility","20 日下行实现波动率","%","daily",("alpaca_bars",),1260,"P0","IMPLEMENTED","credentialed","bar_available_at"),
     ("vix_close","volatility","VIX 收盘","点","daily",("cboe_vix",),1260,"P0","IMPLEMENTED","public","published_at"),
     ("vix9d","volatility","VIX9D","点","daily",("cboe_indices",),1260,"P1","PLANNED","public_or_licensed","published_at"),
@@ -298,6 +298,22 @@ def coverage_matrix(observations: Iterable[dict] = (), *,
         return None
 
     latest_rows = {}
+    entity_latest_rows = {}
+    security_feature_keys = {
+        "security_return_1", "security_return_5", "security_return_20",
+        "security_return_60", "sector_relative_5", "style_relative_5",
+        "atr14_pct", "drawdown20", "rv20",
+    }
+    def sort_stamp(value):
+        if value is None:
+            return ""
+        return value.isoformat() if hasattr(value, "isoformat") else str(value)
+
+    def row_rank(row, day):
+        return (day, sort_stamp(source_timestamp(row)),
+                sort_stamp(row.get("ingested_at")), str(row.get("provider") or ""),
+                str(row.get("receipt_sha256") or ""))
+
     for row in rows:
         key = row.get("feature_id") or row.get("id")
         day = str(row.get("session_date") or row.get("observed_date") or "")
@@ -308,16 +324,77 @@ def coverage_matrix(observations: Iterable[dict] = (), *,
             continue
         if key not in FEATURE_BY_KEY:
             continue
-        def sort_stamp(value):
-            if value is None:
-                return ""
-            return value.isoformat() if hasattr(value, "isoformat") else str(value)
-        rank = (day, sort_stamp(source_timestamp(row)),
-                sort_stamp(row.get("ingested_at")), str(row.get("provider") or ""),
-                str(row.get("receipt_sha256") or ""))
+        rank = row_rank(row, day)
+        security_id = row.get("security_id")
+        if key in security_feature_keys and security_id is not None and str(security_id).strip():
+            entity_key = (key, str(security_id))
+            previous = entity_latest_rows.get(entity_key)
+            if previous is None or rank > previous["rank"]:
+                entity_latest_rows[entity_key] = {
+                    "date": day, "row": row, "rank": rank,
+                }
+            continue
         previous = latest_rows.get(key)
         if previous is None or rank > previous["rank"]:
             latest_rows[key] = {"date": day, "row": row, "rank": rank}
+
+    # Per-security observations must be aggregated across securities, not
+    # arbitrarily reduced to whichever symbol happens to win a receipt-hash tie.
+    # The denominator is the stored bar universe, never the full US equity market.
+    entity_stats = {}
+    for key in security_feature_keys:
+        items = [item for (feature_id, _), item in entity_latest_rows.items()
+                 if feature_id == key]
+        if not items:
+            continue
+        latest_day = max(item["date"] for item in items)
+        latest_items = [item for item in items if item["date"] == latest_day]
+        valid_items = [
+            item for item in latest_items
+            if item["row"].get("status", item["row"].get("quality_status", "OBSERVED"))
+               in ("OBSERVED", "PARTIAL")
+            and numeric_or_class_value(item["row"].get("value"),
+                                       unit=FEATURE_BY_KEY[key].unit)
+        ]
+        valid_item_ids = {id(item) for item in valid_items}
+        missing_items = [item for item in latest_items if id(item) not in valid_item_ids]
+        lagging_items = [item for item in items if item["date"] < latest_day]
+        representative = max(latest_items, key=lambda item: item["rank"])
+        symbols = sorted({
+            str(item["row"].get("symbol"))
+            for item in latest_items if item["row"].get("symbol")
+        })
+        entity_stats[key] = {
+            "entity_scope": "STORED_BAR_UNIVERSE_NOT_FULL_MARKET",
+            "entity_count": len(items),
+            "observed_entity_count": len(valid_items),
+            "missing_entity_count": len(missing_items),
+            "lagging_entity_count": len(lagging_items),
+            "symbols_sample": symbols[:12],
+            "latest_entity_session": latest_day,
+        }
+        if key not in latest_rows:
+            row = dict(representative["row"])
+            if valid_items:
+                row["value"] = valid_items[0]["row"].get("value")
+                row["quality_status"] = (
+                    "OBSERVED" if len(valid_items) == len(items) and
+                    not missing_items and not lagging_items else "PARTIAL"
+                )
+            else:
+                row["value"] = None
+                row["quality_status"] = "MISSING"
+            row["coverage_n"] = len(valid_items)
+            row["expected_n"] = len(items)
+            metadata = row.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = {}
+            row["metadata"] = {**metadata, **entity_stats[key]}
+            latest_rows[key] = {
+                "date": latest_day, "row": row,
+                "rank": representative["rank"],
+            }
+
     # A newer MISSING/NULL observation supersedes an older valid value for the
     # same feature. Otherwise a failed latest scan can leave stale values looking current.
     feature_rows = {
@@ -336,13 +413,28 @@ def coverage_matrix(observations: Iterable[dict] = (), *,
         observed = entry["date"] if entry else None
         freshness_info = freshness(observed, spec.cadence, freshness_asof)
         quality = str(row.get("status", row.get("quality_status", "MISSING")))
+        feature_sources = []
+        for source_key in spec.sources:
+            source_state = health.get(source_key, {}).get("status")
+            source_spec = SOURCE_BY_KEY.get(source_key)
+            if (source_state in ("BLOCKED", "MISSING", "ERROR") or
+                (source_spec is not None and source_spec.code_status == "BLOCKED")):
+                feature_sources.append(source_key)
         if spec.key not in feature_rows:
-            state = "PLANNED" if entry is None and spec.implementation == "PLANNED" else (
-                "BLOCKED" if quality == "BLOCKED" else "MISSING")
+            state = ("BLOCKED" if quality == "BLOCKED" or feature_sources else
+                     "PLANNED" if entry is None and spec.implementation == "PLANNED"
+                     else "MISSING")
         elif freshness_info["status"] in ("STALE", "UNKNOWN_DATE", "FUTURE_OBSERVATION"):
             state = freshness_info["status"]
         else:
             state = quality
+        metadata = row.get("metadata")
+        if not isinstance(metadata, dict):
+            raw_metadata = row.get("metadata_json")
+            try:
+                metadata = json.loads(raw_metadata) if isinstance(raw_metadata, str) else {}
+            except (TypeError, ValueError):
+                metadata = {}
         feature_health[spec.key] = {
             "id": spec.key, "dimension": spec.dimension, "status": state,
             "implementation": spec.implementation, "cadence": spec.cadence,
@@ -351,6 +443,17 @@ def coverage_matrix(observations: Iterable[dict] = (), *,
             "max_age_days": freshness_info["max_age_days"],
             "freshness": freshness_info["status"],
             "source": str(row.get("source") or row.get("provider") or "") or None,
+            "pit_status": str(row.get("pit_status") or "PIT_UNVERIFIED"),
+            "proxy": bool(metadata.get("proxy") or
+                          "PROXY" in str(row.get("pit_status") or "") or
+                          "PROXY" in spec.pit_requirement.upper()),
+            "proxy_definition": (metadata.get("proxy_definition") or metadata.get("definition") or
+                                 (spec.pit_requirement if "PROXY" in spec.pit_requirement.upper() else None)),
+            "input_symbols": metadata.get("input_symbols") or metadata.get("symbols"),
+            "coverage_n": row.get("coverage_n"),
+            "expected_n": row.get("expected_n"),
+            "entity_coverage": entity_stats.get(spec.key),
+            "blocked_sources": feature_sources,
             "availability_timestamp_recorded": source_timestamp(row) is not None,
         }
     dimensions = []

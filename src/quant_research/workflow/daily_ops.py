@@ -91,7 +91,7 @@ def _execute_locked(args, root, run_id, ownership):
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "offline": args.offline,
         "stages": {name: {"status": "NOT_RUN"} for name in
-                   ("maintain-data", "capture", "daily-observation", "data-catalog")},
+                   ("maintain-data", "capture", "l1-observation-audit", "l1-retrospective-observation", "daily-observation", "data-catalog")},
         "real_orders_enabled": False,
     }
     _write(manifest_path, manifest)
@@ -138,6 +138,32 @@ def _execute_locked(args, root, run_id, ownership):
     manifest["capture_sha256"] = snapshot["capture_sha256"]
     manifest["stages"]["capture"]["result"] = {"inserted": bool(inserted), "capture_sha256": snapshot["capture_sha256"]}
     _write(manifest_path, manifest)
+
+    def l1_observe():
+        from quant_research.workflow.l1_snapshot_audit import audit_snapshot
+        target = root / 'outputs' / 'l1_snapshot_audits' / session / run_id
+        result = audit_snapshot(root, session, target)
+        if result['source_snapshot_sha256'] != snapshot['source_snapshot_sha256']:
+            raise PolicyError('L1_SNAPSHOT_MISMATCH', 'L1 observation does not match the frozen close snapshot')
+        return {'status': result['status'], 'observed_features': result['observed_features'],
+                'registered_features': result['registered_features'],
+                'output': target.relative_to(root).as_posix(), 'forecast_generated': False}
+
+    ok, _ = _stage(manifest, manifest_path, 'l1-observation-audit', l1_observe)
+    if not ok:
+        return 4
+
+    def l1_retrospective():
+        from quant_research.workflow.l1_retrospective_report import write_retrospective_report
+        target=root/'outputs'/'l1_retrospective_observations'/session/run_id
+        result=write_retrospective_report(root,session,target)
+        return {'status':result['status'],'observed_features':result['observed_features'],
+                'registered_features':result['registered_features'],
+                'output':target.relative_to(root).as_posix(),'forecast_generated':False}
+
+    ok, _ = _stage(manifest, manifest_path, 'l1-retrospective-observation', l1_retrospective)
+    if not ok:
+        return 4
 
     def observe():
         # A repeat with the same frozen SHA reuses the existing report, while

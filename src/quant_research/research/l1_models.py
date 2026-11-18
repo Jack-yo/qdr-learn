@@ -17,6 +17,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import brier_score_loss, mean_squared_error
 from scipy.special import softmax
 from scipy.optimize import minimize_scalar
+from quant_research.research.l1_observatory import aware_utc
 
 HORIZONS=(1,3,5)
 QUANTILES=np.array([.10,.25,.50,.75,.90])
@@ -35,12 +36,13 @@ class L1Protocol:
     train_window_sessions:int=1260
     embargo_sessions:int=5
     calibration_sessions:int=84
-    refit_every:int=21
+    refit_every:int=1
     upper_barrier:float=.02
     lower_barrier:float=.02
     seed:int=42
+    include_extended:bool=True
     def __post_init__(self):
-        if not 30<=self.min_train_sessions<=self.train_window_sessions or self.embargo_sessions<5 or self.calibration_sessions<15 or self.refit_every<1 or not 0<self.upper_barrier<.5 or not 0<self.lower_barrier<.5:
+        if not 30<=self.min_train_sessions<=self.train_window_sessions or self.embargo_sessions<5 or self.calibration_sessions<15 or self.refit_every<1 or not 0<self.upper_barrier<.5 or not 0<self.lower_barrier<.5 or type(self.include_extended) is not bool:
             raise ValueError('Unsafe L1 protocol')
 
 
@@ -49,11 +51,11 @@ def _validate(bars, observations, cutoffs):
     if req-set(bars):raise ValueError('Missing benchmark OHLCV')
     if {'date','decision_cutoff_utc'}-set(cutoffs):raise ValueError('Missing decision clock')
     if {'date'}-set(observations):raise ValueError('Missing observation dates')
-    c=cutoffs.copy();c.date=pd.to_datetime(c.date);c.decision_cutoff_utc=pd.to_datetime(c.decision_cutoff_utc,utc=True)
+    c=cutoffs.copy();c.date=pd.to_datetime(c.date);c.decision_cutoff_utc=aware_utc(c.decision_cutoff_utc,'decision cutoff')
     if c.date.duplicated().any() or not c.date.is_monotonic_increasing or c.decision_cutoff_utc.isna().any():raise ValueError('Invalid trading calendar')
     o=observations.copy();o.date=pd.to_datetime(o.date)
     if o.date.duplicated().any():raise ValueError('Duplicate observations')
-    b=bars.loc[bars.symbol.eq('SPY')].copy();b.date=pd.to_datetime(b.date);b.available_at=pd.to_datetime(b.available_at,utc=True)
+    b=bars.loc[bars.symbol.eq('SPY')].copy();b.date=pd.to_datetime(b.date);b.available_at=aware_utc(b.available_at,'bar available_at')
     if b.date.duplicated().any():raise ValueError('Duplicate SPY session')
     b=c.merge(b,on='date',how='left',validate='one_to_one')
     if b[['open','high','low','close']].isna().any().any() or b.available_at.isna().any():raise ValueError('Incomplete SPY calendar')
@@ -66,18 +68,23 @@ def _validate(bars, observations, cutoffs):
     return b,f,c
 
 
-def first_touch_label(bars, origin_index:int, horizon:int, up:float, down:float):
-    """OHLC touch relative to T+1 open; same-bar dual hit is UNKNOWN."""
-    if origin_index+1>=len(bars) or origin_index+horizon>=len(bars):return None
+def first_touch_event(bars, origin_index:int, horizon:int, up:float, down:float):
+    """Return the label and session offset; same-bar dual hits stay ambiguous."""
+    if origin_index+1>=len(bars) or origin_index+horizon>=len(bars):return None,None
     path=bars.iloc[origin_index+1:origin_index+horizon+1]
     entry=float(path.open.iloc[0]);high=entry*(1+up);low=entry*(1-down)
-    for day in path.itertuples():
+    for step,day in enumerate(path.itertuples(),start=1):
         hit_up=day.high>=high
         hit_down=day.low<=low
-        if hit_up and hit_down:return 'AMBIGUOUS'
-        if hit_up:return 'UP'
-        if hit_down:return 'DOWN'
-    return 'NEITHER'
+        if hit_up and hit_down:return 'AMBIGUOUS',step
+        if hit_up:return 'UP',step
+        if hit_down:return 'DOWN',step
+    return 'NEITHER',None
+
+
+def first_touch_label(bars, origin_index:int, horizon:int, up:float, down:float):
+    """OHLC touch relative to T+1 open; same-bar dual hit is UNKNOWN."""
+    return first_touch_event(bars,origin_index,horizon,up,down)[0]
 
 
 def make_l1_labels(bars:pd.DataFrame,observations:pd.DataFrame,cutoffs:pd.DataFrame,
@@ -93,8 +100,9 @@ def make_l1_labels(bars:pd.DataFrame,observations:pd.DataFrame,cutoffs:pd.DataFr
             entry=float(future.open.iloc[0]);exit_close=float(future.close.iloc[-1])
             target=exit_close/entry-1
             rv=float(np.sqrt(252*np.mean(np.square(daily[i+1:i+h+1])))) if np.isfinite(daily[i+1:i+h+1]).all() else np.nan
+            touch,touch_step=first_touch_event(b,i,h,protocol.upper_barrier,protocol.lower_barrier)
             result.append({'date':b.date.iloc[i],'horizon':h,'gross_price_return':target,
-                           'forward_rv':rv,'first_touch':first_touch_label(b,i,h,protocol.upper_barrier,protocol.lower_barrier),
+                           'forward_rv':rv,'first_touch':touch,'first_touch_step':touch_step,
                            'label_available_at':future.available_at.iloc[-1],
                            'exit_date':future.date.iloc[-1],
                            'entry_open':entry,'exit_close':exit_close})
@@ -108,9 +116,19 @@ def _features(train,test,columns):
             test[list(columns)].fillna(med).replace([np.inf,-np.inf],0))
 
 
-def _ewma_rv(rv_series,decay=.94):
-    # Previous date's volatility is known. This is a conservative daily decay proxy.
-    return float(np.sqrt(max(1e-12,decay*rv_series.iloc[-1]**2+(1-decay)*np.mean(rv_series.tail(20)**2))))
+def _ewma_rv(returns,decay=.94):
+    """Annualized recursive EWMA of squared observed daily returns.
+
+    The caller provides the purged training window, so this benchmark is
+    deliberately lagged and never uses observations from the embargo gap.
+    """
+    if not 0 < decay < 1 or len(returns)==0:
+        raise ValueError('EWMA requires returns and a decay between zero and one')
+    squared=pd.to_numeric(returns,errors='coerce').dropna().pow(2)
+    if squared.empty or not np.isfinite(squared).all():
+        raise ValueError('EWMA requires finite returns')
+    variance=squared.ewm(alpha=1-decay,adjust=False).mean().iloc[-1]
+    return float(np.sqrt(252*max(0.0,variance)))
 
 
 def _calibrate_multiclass(train_x,train_y,cal_x,cal_y,test_x,seed):
@@ -139,7 +157,7 @@ def _fit_predict(train:pd.DataFrame,test:pd.DataFrame,protocol:L1Protocol)->dict
     additions=[c for c in EXTENDED_CANDIDATES
                if c in train and c in test and pd.notna(test[c].iloc[0])
                and pd.to_numeric(train[c],errors='coerce').notna().mean()>=.85
-               and pd.to_numeric(train[c],errors='coerce').std(skipna=True)>1e-12]
+               and pd.to_numeric(train[c],errors='coerce').std(skipna=True)>1e-12] if protocol.include_extended else []
     cols+=additions[:12]
     x,tx=_features(train,test,cols)
     result={'features_used':cols,'extra_features_used':additions[:12]}
@@ -147,7 +165,7 @@ def _fit_predict(train:pd.DataFrame,test:pd.DataFrame,protocol:L1Protocol)->dict
     rvtrain=train.dropna(subset=['forward_rv'])
     if len(rvtrain)<protocol.min_train_sessions:raise ValueError('Insufficient E01 labels')
     base_rv=float(rvtrain.forward_rv.tail(20).mean())
-    ewma_rv=_ewma_rv(train.market_vol_20.dropna()) if train.market_vol_20.notna().sum()>=20 else base_rv
+    ewma_rv=_ewma_rv(train.market_return_1.dropna()) if train.market_return_1.notna().sum()>=20 else base_rv
     reg=make_pipeline(StandardScaler(),Ridge(alpha=10))
     reg.fit(x.loc[rvtrain.index],np.log(np.maximum(rvtrain.forward_rv,1e-6)))
     pred_rv=float(np.exp(np.clip(reg.predict(tx)[0],-10,3)))
@@ -164,6 +182,8 @@ def _fit_predict(train:pd.DataFrame,test:pd.DataFrame,protocol:L1Protocol)->dict
     scale=np.clip(pred_rv / max(float(train.forward_rv.mean()),1e-5),.35,3)
     quant=np.sort(pred_mu+np.quantile(resid,QUANTILES)*scale)
     result.update({'e03_baseline_mean':float(np.mean(y)),'e03_baseline_quantiles':[float(t) for t in base_quant],
+                   'e03_baseline_p_up':float((y>0).mean()),
+                   'e03_baseline_p_downside':float((y<=-protocol.lower_barrier).mean()),
                    'e03_expected_return':pred_mu,'e03_quantiles':[float(t) for t in quant],
                    'e03_p_up_unverified':float((resid*scale+pred_mu>0).mean()),
                    'e03_p_downside_unverified':float((resid*scale+pred_mu<=-protocol.lower_barrier).mean())})
@@ -249,6 +269,7 @@ def run_l1_oos(bars:pd.DataFrame,observations:pd.DataFrame,cutoffs:pd.DataFrame,
                 'target_return':float(actual.gross_price_return),
                 'target_forward_rv':float(actual.forward_rv),
                 'target_first_touch':actual.first_touch,
+                'target_first_touch_step':actual.first_touch_step,
                 **model})
     return pd.DataFrame(outputs)
 
@@ -263,20 +284,88 @@ def score_l1_oos(predictions:pd.DataFrame,protocol:L1Protocol=L1Protocol())->pd.
         qloss=np.array([_distribution_loss(p,v) for p,v in zip(group.e03_quantiles,y)])
         baseline=np.array([_distribution_loss(p,v) for p,v in zip(group.e03_baseline_quantiles,y)])
         eligible=group[group.e02_probs.map(lambda x:isinstance(x,dict)) & group.target_first_touch.isin(['UP','DOWN','NEITHER'])]
-        brier=brier0=None; event_n=0
+        brier=brier0=event_logloss=event_lead=None; event_n=0; event_counts={}
         if len(eligible):
             labels=['UP','DOWN','NEITHER'];obs=np.array([[float(x==actual) for x in labels] for actual in eligible.target_first_touch])
             pred=np.array([[p[k] for k in labels] for p in eligible.e02_probs]); prior=np.array([[p[k] for k in labels] for p in eligible.e02_baseline])
             brier=float(((pred-obs)**2).sum(axis=1).mean());brier0=float(((prior-obs)**2).sum(axis=1).mean());event_n=len(eligible)
+            event_logloss=float(-np.sum(obs*np.log(np.clip(pred,1e-12,1)),axis=1).mean())
+            chosen=np.argmax(pred,axis=1)
+            for i,label in enumerate(labels):
+                positive=obs[:,i].astype(bool); predicted=chosen==i
+                event_counts[label]={'actual':int(positive.sum()),
+                    'false_positives':int((predicted & ~positive).sum()),
+                    'false_negatives':int((~predicted & positive).sum())}
+            if 'target_first_touch_step' in eligible:
+                correct_event=(np.asarray(labels)[chosen]==eligible.target_first_touch.to_numpy()) & eligible.target_first_touch.isin(['UP','DOWN']).to_numpy()
+                steps=pd.to_numeric(eligible.target_first_touch_step,errors='coerce').to_numpy(float)
+                valid=correct_event & np.isfinite(steps)
+                if valid.any():event_lead=float(steps[valid].mean())
+        mean_pred=group.e03_expected_return.to_numpy(float)
+        mean_base=group.e03_baseline_mean.to_numpy(float)
+        up=(y>0).astype(float);down=(y<=-protocol.lower_barrier).astype(float)
+        p_up=group.e03_p_up_unverified.to_numpy(float)
+        p_down=group.e03_p_downside_unverified.to_numpy(float)
+        quantiles=np.asarray(group.e03_quantiles.tolist(),dtype=float)
         report.append({'horizon':int(h),'samples':len(group),
           'e01_rv_mse':float(np.mean((r1-rv)**2)),'e01_baseline_mse':float(np.mean((r0-rv)**2)),
+          'e01_ewma_mse':float(np.mean((group.e01_rv_ewma.to_numpy(float)-rv)**2)),
           'e01_paired_delta_95ci':_bootstrap_delta((r1-rv)**2-(r0-rv)**2,seed=protocol.seed),
           'e03_pinball_loss':float(qloss.mean()),'e03_baseline_pinball_loss':float(baseline.mean()),
           'e03_paired_delta_95ci':_bootstrap_delta(qloss-baseline,seed=protocol.seed),
           'e03_q10_q90_coverage':float(np.mean([(q[0]<=v<=q[4]) for q,v in zip(group.e03_quantiles,y)])),
+          'e03_quantile_hit_rates':{f'q{int(q*100)}':float(np.mean(y<=quantiles[:,i])) for i,q in enumerate(QUANTILES)},
+          'e03_mean_mse':float(np.mean((mean_pred-y)**2)),
+          'e03_baseline_mean_mse':float(np.mean((mean_base-y)**2)),
+          'e03_up_brier_unverified':float(np.mean((p_up-up)**2)),
+          'e03_up_baseline_brier':float(np.mean((group.e03_baseline_p_up.to_numpy(float)-up)**2)),
+          'e03_downside_brier_unverified':float(np.mean((p_down-down)**2)),
+          'e03_downside_baseline_brier':float(np.mean((group.e03_baseline_p_downside.to_numpy(float)-down)**2)),
+          'e03_probability_status':'NOT_CALIBRATED_RESEARCH_ONLY',
+          'e03_downside_threshold':-protocol.lower_barrier,
           'e02_scored_samples':event_n,'e02_brier':brier,'e02_baseline_brier':brier0,
+          'e02_log_loss':event_logloss,
+          'e02_event_counts':event_counts,
+          'e02_ambiguous_samples':int(group.target_first_touch.eq('AMBIGUOUS').sum()),
+          'e02_correct_event_mean_lead_sessions':event_lead,
           'research_only':True,'model_admitted':False})
     return pd.DataFrame(report)
+
+
+def compare_l1_ablation(base:pd.DataFrame,extended:pd.DataFrame,protocol:L1Protocol)->pd.DataFrame:
+    """Pair preselected feature-set experiments on exactly the same dated labels."""
+    if base.empty and extended.empty:
+        return pd.DataFrame(columns=['horizon','samples'])
+    if base.empty or extended.empty:
+        raise ValueError('Ablation samples do not match')
+    keys=['date','horizon']
+    if base.duplicated(keys).any() or extended.duplicated(keys).any():
+        raise ValueError('Duplicate ablation prediction keys')
+    paired=base.merge(extended,on=keys,how='outer',suffixes=('_base','_extended'),
+                      indicator=True,validate='one_to_one')
+    if not paired['_merge'].eq('both').all():
+        raise ValueError('Ablation samples do not match')
+    for target in ('target_return','target_forward_rv','target_first_touch','target_first_touch_step'):
+        a=paired[target+'_base']; b=paired[target+'_extended']
+        if not (a.eq(b) | (a.isna() & b.isna())).all():
+            raise ValueError('Ablation labels do not match')
+    output=[]
+    for horizon,group in paired.sort_values('date').groupby('horizon'):
+        y=group.target_return_base.to_numpy(float)
+        rv=group.target_forward_rv_base.to_numpy(float)
+        base_rv=group.e01_rv_model_base.to_numpy(float)
+        ext_rv=group.e01_rv_model_extended.to_numpy(float)
+        rv_delta=(ext_rv-rv)**2-(base_rv-rv)**2
+        dist_delta=np.array([_distribution_loss(e,v)-_distribution_loss(b,v)
+                             for b,e,v in zip(group.e03_quantiles_base,group.e03_quantiles_extended,y)])
+        output.append({'horizon':int(horizon),'samples':len(group),
+            'e01_extended_minus_base_mse':float(rv_delta.mean()),
+            'e01_paired_delta_95ci':_bootstrap_delta(rv_delta,seed=protocol.seed),
+            'e03_extended_minus_base_pinball':float(dist_delta.mean()),
+            'e03_paired_delta_95ci':_bootstrap_delta(dist_delta,seed=protocol.seed),
+            'bootstrap_unit':'evaluation_rows', 'evaluation_step_sessions':protocol.refit_every,
+            'research_only':True,'model_admitted':False})
+    return pd.DataFrame(output)
 
 
 def forecast_l1_research(bars:pd.DataFrame,observations:pd.DataFrame,
@@ -301,5 +390,5 @@ def forecast_l1_research(bars:pd.DataFrame,observations:pd.DataFrame,
                     'train_last_label_available_at':past.label_available_at.max().isoformat(),
                     'train_sessions':len(past)})
     return {'asof_session':str(day.date()),'status':'RETROSPECTIVE_RESEARCH_ONLY',
-            'model_version':'l1-e01e02e03-'+hashlib.sha256(json.dumps(protocol.__dict__,sort_keys=True).encode()).hexdigest()[:16],
+            'model_version':'l1-e01e02e03-v4-'+hashlib.sha256(json.dumps(protocol.__dict__,sort_keys=True).encode()).hexdigest()[:16],
             'research_only':True,'trade_eligible':False,'horizons':out}

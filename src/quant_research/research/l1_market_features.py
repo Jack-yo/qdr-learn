@@ -373,79 +373,225 @@ def _breadth_features(bars, cutoffs, universe, min_coverage):
 
 
 def _market_level_features(bars, cutoffs):
+    """Compute SPY risk metrics and explicitly labelled core-ETF proxies.
+
+    Cross-sectional ETF proxies are never represented as full-market equity
+    breadth. Each row carries the actual contributing symbols and denominator.
+    """
     out = []
-    by_symbol = {symbol: group.sort_values("session_date").set_index("session_date")
-                 for symbol, group in bars.groupby("symbol", sort=False)}
+    by_symbol = {
+        symbol: group.sort_values("session_date").set_index("session_date")
+        for symbol, group in bars.groupby("symbol", sort=False)
+    }
     spy = by_symbol.get("SPY")
     if spy is None:
         return out
+
     sessions = pd.DatetimeIndex(cutoffs.session_date)
-    close = pd.to_numeric(spy.close.reindex(sessions), errors="coerce")
-    high = pd.to_numeric(spy.high.reindex(sessions), errors="coerce")
-    low = pd.to_numeric(spy.low.reindex(sessions), errors="coerce")
-    ret = close.pct_change(fill_method=None)
-    rv = {w: ret.rolling(w, min_periods=w).std() * np.sqrt(252) for w in (5,20,60)}
-    downside = ret.clip(upper=0).pow(2).rolling(20, min_periods=20).mean().mul(252).pow(.5)
+    closes = {
+        symbol: pd.to_numeric(group.close.reindex(sessions), errors="coerce")
+        for symbol, group in by_symbol.items()
+    }
+    highs = {
+        symbol: pd.to_numeric(group.high.reindex(sessions), errors="coerce")
+        for symbol, group in by_symbol.items()
+    }
+    lows = {
+        symbol: pd.to_numeric(group.low.reindex(sessions), errors="coerce")
+        for symbol, group in by_symbol.items()
+    }
+    opens = {
+        symbol: pd.to_numeric(group.open.reindex(sessions), errors="coerce")
+        for symbol, group in by_symbol.items()
+    }
+    returns_1 = {symbol: series.pct_change(fill_method=None)
+                 for symbol, series in closes.items()}
+    returns_5 = {symbol: series.div(series.shift(5)).sub(1)
+                 for symbol, series in closes.items()}
+
+    close = closes["SPY"]
+    high = highs["SPY"]
+    low = lows["SPY"]
+    open_ = opens["SPY"]
+    ret = returns_1["SPY"]
+    rv = {
+        window: ret.rolling(window, min_periods=window).std() * np.sqrt(252)
+        for window in (5, 20, 60)
+    }
+    downside = (
+        ret.clip(upper=0).pow(2).rolling(20, min_periods=20).mean()
+        .mul(252).pow(.5)
+    )
     dd20 = close.div(close.rolling(20, min_periods=20).max()).sub(1)
-    atr = pd.concat([high-low, (high-close.shift(1)).abs(),
-                     (low-close.shift(1)).abs()], axis=1).max(axis=1).rolling(14, min_periods=14).mean().div(close)
-    source = str(spy.provider.iloc[-1])
+    true_range = pd.concat([
+        high - low,
+        (high - close.shift(1)).abs(),
+        (low - close.shift(1)).abs(),
+    ], axis=1).max(axis=1)
+    atr = true_range.rolling(14, min_periods=14).mean().div(close)
+    overnight = open_.div(close.shift(1)).sub(1)
+    intraday = close.div(open_).sub(1)
+    close_location = (close - low).div((high - low).where((high - low) > 0))
+    vol_ratio = rv[5].div(rv[20].where(rv[20] > 0))
+
+    def input_receipt(day, symbols, version):
+        available, digests = [], []
+        for symbol in symbols:
+            group = by_symbol.get(symbol)
+            if group is None:
+                continue
+            past = group.loc[group.index <= day]
+            if past.empty:
+                continue
+            available.append(past.available_at.max())
+            digests.extend(past.receipt_sha256.dropna().astype(str).tolist())
+        if not available or not digests:
+            return None, None
+        return max(available), _receipt_digest(day, digests, version=version)
+
+    def emit(day, feature_id, value, symbols, *, scale=1.0, coverage_n=None,
+             expected_n=None, source="ALPACA_CORE_ETF_BASKET", metadata=None):
+        available, digest = input_receipt(
+            day, symbols, "L1_CORE_ETF_FEATURES_V1:" + feature_id)
+        if available is None or digest is None:
+            return
+        numeric = value * scale if pd.notna(value) else np.nan
+        quality = "MISSING" if pd.isna(numeric) else (
+            "PARTIAL" if coverage_n is not None and expected_n is not None
+            and coverage_n < expected_n else "OBSERVED")
+        spec = FEATURE_BY_KEY[feature_id]
+        out.append(_record(
+            day, spec.dimension, feature_id, numeric, spec.unit,
+            available, digest, quality=quality, source=source,
+            coverage_n=coverage_n, expected_n=expected_n,
+            pit="ETF_PROXY_NOT_FULL_MARKET_PIT" if (metadata or {}).get("proxy") else
+                "PIT_UNVERIFIED",
+            metadata={**(metadata or {}), "price_basis": str(spy.price_basis.iloc[-1])},
+        ))
+
+    sector_symbols = tuple(_SECTOR_ETFS)
+    pair_proxies = (
+        ("breadth_proxy_rsp_spy_5", "RSP", "SPY",
+         "RSP five-session return minus SPY five-session return; ETF proxy only"),
+        ("small_cap_relative_5", "IWM", "SPY",
+         "IWM five-session return minus SPY five-session return; ETF proxy only"),
+        ("credit_proxy_hyg_lqd_5", "HYG", "LQD",
+         "HYG five-session return minus LQD five-session return; ETF proxy only"),
+        ("duration_proxy_5", "TLT", "SHY",
+         "TLT five-session return minus SHY five-session return; ETF proxy only"),
+    )
+
     for i, day in enumerate(sessions):
         if pd.isna(close.loc[day]):
             continue
         source_rows = spy.loc[spy.index <= day]
-        available = source_rows.available_at.max()
-        digest = _receipt_digest(day, source_rows.receipt_sha256.tolist())
-        for feature_id, value, unit, scale in (
-            ("spy_return_1", ret.loc[day], "%", 100.0),
-            ("spy_return_5", close.loc[day] / close.shift(5).loc[day] - 1 if pd.notna(close.shift(5).loc[day]) else np.nan, "%", 100.0),
-            ("spy_return_20", close.loc[day] / close.shift(20).loc[day] - 1 if pd.notna(close.shift(20).loc[day]) else np.nan, "%", 100.0),
-            ("spy_return_60", close.loc[day] / close.shift(60).loc[day] - 1 if pd.notna(close.shift(60).loc[day]) else np.nan, "%", 100.0),
-            ("rv5", rv[5].loc[day], "%", 100.0), ("rv20", rv[20].loc[day], "%", 100.0),
-            ("rv60", rv[60].loc[day], "%", 100.0), ("downside_rv20", downside.loc[day], "%", 100.0),
-            ("drawdown20", dd20.loc[day], "%", 100.0), ("atr14_pct", atr.loc[day], "%", 100.0),
+        spy_available = source_rows.available_at.max()
+        spy_digest = _receipt_digest(day, source_rows.receipt_sha256.tolist())
+        for feature_id, value, scale in (
+            ("spy_return_1", ret.loc[day], 100.0),
+            ("spy_return_5", returns_5["SPY"].loc[day], 100.0),
+            ("spy_return_20", close.loc[day] / close.shift(20).loc[day] - 1
+             if pd.notna(close.shift(20).loc[day]) else np.nan, 100.0),
+            ("spy_return_60", close.loc[day] / close.shift(60).loc[day] - 1
+             if pd.notna(close.shift(60).loc[day]) else np.nan, 100.0),
+            ("rv5", rv[5].loc[day], 100.0),
+            ("rv20", rv[20].loc[day], 100.0),
+            ("rv60", rv[60].loc[day], 100.0),
+            ("downside_rv20", downside.loc[day], 100.0),
+            ("drawdown20", dd20.loc[day], 100.0),
+            ("atr14_pct", atr.loc[day], 100.0),
+            ("overnight", overnight.loc[day], 100.0),
+            ("intraday", intraday.loc[day], 100.0),
+            ("close_location", close_location.loc[day], 1.0),
+            ("vol_ratio", vol_ratio.loc[day], 1.0),
         ):
-            out.append(_record(day, FEATURE_BY_KEY[feature_id].dimension, feature_id,
-                value*scale if pd.notna(value) else np.nan, unit, available, digest,
+            spec = FEATURE_BY_KEY[feature_id]
+            out.append(_record(
+                day, spec.dimension, feature_id,
+                value * scale if pd.notna(value) else np.nan,
+                spec.unit, spy_available, spy_digest,
                 quality="OBSERVED" if pd.notna(value) else "MISSING",
-                source=source, metadata={"benchmark": "SPY", "price_basis": str(spy.price_basis.iloc[-1])}))
-        sector_returns, sector_sources, sector_available = {}, [], []
-        for symbol in _SECTOR_ETFS:
-            group = by_symbol.get(symbol)
-            if group is None:
-                continue
-            series = pd.to_numeric(group.close.reindex(sessions), errors="coerce")
-            prior = series.shift(5)
-            if pd.notna(series.loc[day]) and pd.notna(prior.loc[day]) and prior.loc[day] > 0:
-                sector_returns[symbol] = series.loc[day] / prior.loc[day] - 1
-                sector_available.append(group.loc[day, "available_at"])
-                sector_sources.extend(group.loc[group.index <= day, "receipt_sha256"].dropna().tolist())
-        if len(sector_returns) >= 6:
-            digest2 = _receipt_digest(day, sector_sources, version="L1_SECTOR_ETF_FEATURES_V1")
-            sector_avail = max(sector_available)
-            out.append(_record(day, "correlation", "sector_dispersion_5",
-                float(np.std(list(sector_returns.values()), ddof=0) * 100), "%",
-                sector_avail, digest2, coverage_n=len(sector_returns),
-                expected_n=len(_SECTOR_ETFS), source="ALPACA_SECTOR_ETF_CROSS_SECTION",
-                metadata={"symbols": sorted(sector_returns), "proxy": True}))
-            returns = pd.DataFrame({
-                s: pd.to_numeric(by_symbol[s].close.reindex(sessions), errors="coerce").pct_change(fill_method=None)
-                for s in sector_returns
-            })
-            window = returns.iloc[max(0, i-19):i+1]
-            corr_value = np.nan
-            if len(window) == 20 and window.notna().all().all():
-                corr = window.corr().to_numpy()
-                upper = corr[np.triu_indices_from(corr, 1)]
-                corr_value = float(np.mean(upper)) if len(upper) else np.nan
-            out.append(_record(day, "correlation", "sector_corr_20", corr_value,
-                "corr", sector_avail, digest2,
-                quality="OBSERVED" if pd.notna(corr_value) else "MISSING",
-                coverage_n=len(sector_returns), expected_n=len(_SECTOR_ETFS),
-                source="ALPACA_SECTOR_ETF_CROSS_SECTION",
-                metadata={"symbols": sorted(sector_returns), "proxy": True}))
-    return out
+                source=str(spy.provider.iloc[-1]),
+                metadata={"benchmark": "SPY",
+                          "price_basis": str(spy.price_basis.iloc[-1])},
+            ))
 
+        for feature_id, numerator, denominator, definition in pair_proxies:
+            available_symbols = [x for x in (numerator, denominator)
+                                 if x in by_symbol and pd.notna(closes[x].loc[day])]
+            value = np.nan
+            left = returns_5.get(numerator)
+            right = returns_5.get(denominator)
+            if (left is not None and right is not None and
+                pd.notna(left.loc[day]) and pd.notna(right.loc[day])):
+                value = (left.loc[day] - right.loc[day]) * 100.0
+            emit(
+                day, feature_id, value, (numerator, denominator),
+                coverage_n=len(available_symbols), expected_n=2,
+                metadata={"proxy": True, "proxy_definition": definition,
+                          "symbols": [numerator, denominator]},
+            )
+
+        sector_ret1 = {
+            symbol: returns_1[symbol].loc[day]
+            for symbol in sector_symbols if symbol in returns_1
+            and pd.notna(returns_1[symbol].loc[day])
+        }
+        sector_ret5 = {
+            symbol: returns_5[symbol].loc[day]
+            for symbol in sector_symbols if symbol in returns_5
+            and pd.notna(returns_5[symbol].loc[day])
+        }
+        if len(sector_ret1) >= 6:
+            emit(
+                day, "sector_dispersion_1",
+                float(np.std(list(sector_ret1.values()), ddof=0)) * 100.0,
+                sector_symbols, coverage_n=len(sector_ret1),
+                expected_n=len(sector_symbols),
+                source="ALPACA_SECTOR_ETF_CROSS_SECTION",
+                metadata={"proxy": True, "symbols": sorted(sector_ret1),
+                          "definition": "cross-sectional standard deviation of one-day sector ETF returns"},
+            )
+            emit(
+                day, "sector_up_share_1",
+                float(np.mean([value > 0 for value in sector_ret1.values()])) * 100.0,
+                sector_symbols, coverage_n=len(sector_ret1),
+                expected_n=len(sector_symbols),
+                source="ALPACA_SECTOR_ETF_CROSS_SECTION",
+                metadata={"proxy": True, "symbols": sorted(sector_ret1),
+                          "definition": "positive one-day sector ETF returns / available sector ETF count"},
+            )
+        if len(sector_ret5) >= 6:
+            emit(
+                day, "sector_dispersion_5",
+                float(np.std(list(sector_ret5.values()), ddof=0)) * 100.0,
+                sector_symbols, coverage_n=len(sector_ret5),
+                expected_n=len(sector_symbols),
+                source="ALPACA_SECTOR_ETF_CROSS_SECTION",
+                metadata={"proxy": True, "symbols": sorted(sector_ret5),
+                          "definition": "cross-sectional standard deviation of five-day sector ETF returns"},
+            )
+
+        corr_symbols = [
+            symbol for symbol in sector_symbols
+            if symbol in returns_1 and returns_1[symbol].iloc[max(0, i-19):i+1].notna().all()
+        ]
+        if len(corr_symbols) >= 6 and i >= 19:
+            window = pd.DataFrame({
+                symbol: returns_1[symbol].iloc[i-19:i+1]
+                for symbol in corr_symbols
+            })
+            corr = window.corr().to_numpy()
+            upper = corr[np.triu_indices_from(corr, 1)]
+            corr_value = float(np.mean(upper)) if len(upper) else np.nan
+            emit(
+                day, "sector_corr_20", corr_value, corr_symbols,
+                coverage_n=len(corr_symbols), expected_n=len(sector_symbols),
+                source="ALPACA_SECTOR_ETF_CROSS_SECTION",
+                metadata={"proxy": True, "symbols": corr_symbols,
+                          "definition": "mean pairwise correlation of 20 daily sector ETF returns"},
+            )
+    return out
 
 def _external_features(external, cutoffs):
     if external is None or external.empty:

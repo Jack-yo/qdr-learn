@@ -47,6 +47,13 @@ def _aware(value):
     return stamp.tz_convert("UTC")
 
 
+def _date(value):
+    stamp = pd.Timestamp(value)
+    if pd.isna(stamp) or stamp.tzinfo is not None:
+        raise ValueError("SESSION_DATE_MUST_BE_A_VALID_TIMEZONE_NAIVE_DATE")
+    return stamp.date()
+
+
 def _bool_series(series, field):
     def parse(value):
         if isinstance(value, bool):

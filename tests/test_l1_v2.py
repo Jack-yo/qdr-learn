@@ -67,6 +67,23 @@ def test_twelve_domains_important_proxy_names():
     assert names['price']['status']=='OBSERVED'
 
 
+def test_domain_features_expose_actual_core_etf_input_coverage():
+    full=market()
+    result=analyze_market(full,receipts=[])
+    features={item["id"]:item for domain in result["domains"] for item in domain["features"]}
+    assert features["breadth_proxy_rsp_spy_5"]["coverage_n"]==2
+    assert features["breadth_proxy_rsp_spy_5"]["expected_n"]==2
+    assert features["sector_up_share_1"]["coverage_n"]==11
+    assert features["sector_up_share_1"]["expected_n"]==11
+    assert features["sector_up_share_1"]["status"]=="OBSERVED"
+
+    partial=analyze_market(full.loc[full.symbol.ne("XLB")],receipts=[])
+    partial_features={item["id"]:item for domain in partial["domains"] for item in domain["features"]}
+    assert partial_features["sector_up_share_1"]["coverage_n"]==10
+    assert partial_features["sector_up_share_1"]["expected_n"]==11
+    assert partial_features["sector_up_share_1"]["status"]=="PARTIAL"
+
+
 def test_conditional_is_past_only_and_no_false_admission():
     b=market()
     orig=analyze_market(b,receipts=[])

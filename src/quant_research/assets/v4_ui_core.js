@@ -24,6 +24,8 @@ const note=(text)=>'<div class="v4-muted-note">'+e(text)+'</div>';
 const row=(label,value)=>'<div class="v4-stat-pair"><span class="muted">'+e(label)+'</span><b>'+value+'</b></div>';
 const table=(cols,data)=> data&&data.length?'<div class="v4-table-scroll"><table class="table"><thead><tr>'+cols.map(x=>'<th>'+e(x)+'</th>').join('')+'</tr></thead><tbody>'+data.map((r,i)=>'<tr'+(i===0?' class="selected"':'')+'>'+r.map(c=>'<td>'+c+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>':empty('暂无符合条件的数据','当前没有已验证的研究记录，不显示示意数据。');
 const fail=(error)=>empty('无法读取真实研究结果',String(error?.message||error?.code||'数据或来源资格尚未满足，请前往数据中心检查。'));
+const moduleLoading=(name)=>'<section class="v4-module-state is-loading" role="status" aria-live="polite"><span class="v4-module-spinner"></span><div><b>'+e(name)+'正在加载</b><small>其他模块可以继续使用；数据返回后会自动更新。</small></div></section>';
+const moduleError=(name,error,retryUrl='')=>'<section class="v4-module-state is-error" role="alert" data-v4-module-error><div><b>'+e(name)+'加载失败</b><small>'+e(error?.message||error?.code||'暂时无法读取，请稍后重试。')+'</small></div><button type="button" class="btn smallbtn" data-v4-retry="'+e(retryUrl)+'">重新加载</button></section>';
 const value=(d,k)=>Object.prototype.hasOwnProperty.call(d||{},k)?d[k]:null;
 const api=async (path,body,signal)=>{
  const opts=body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':window.CONSOLE_TOKEN},body:JSON.stringify(body)};
@@ -118,7 +120,7 @@ async function updateStatus(){
  $('#v4-model-status').textContent=latest?.session_date_et===clock?.asof_session?latest.status:'当前批次未完成';
 }
 function loadingSkeleton(key){
- const names={overview:'总览',market:'市场未来展望',style:'经典因子',lab:'因子实验室',screen:'选股研究',risk:'持仓与风控',data:'数据资格',warehouse:'数据仓库'};
+ const names={overview:'总览',market:'市场未来展望',style:'经典因子',lab:'因子实验室',screen:'选股研究',risk:'持仓与风控',data:'研究准入',warehouse:'数据仓库'};
  return '<div class="v4-page-skeleton" role="status" aria-live="polite"><h1>'+e(names[key]||'研究工作区')+'</h1><p>页面已就绪，各模块正在独立读取真实数据…</p><div class="v4-skeleton-grid">'+
    Array.from({length:4},()=>'<div class="v4-skeleton-block v4-skeleton-kpi"><i></i><b></b></div>').join('')+
    '</div><div class="v4-skeleton-grid two">'+
@@ -150,20 +152,34 @@ async function show(page,progressive=false){
    existingDetails.forEach((isOpen,i)=>{
      if(isOpen){const detail=root.querySelectorAll('details')[i];if(detail)detail.open=true;}
    });
-   if(typeof result.mount==='function')result.mount();
+   if(typeof result.mount==='function'){
+     try{result.mount();}
+     catch(error){root.insertAdjacentHTML('afterbegin',moduleError('页面交互模块',error));}
+   }
    if(focused){
      const node=document.getElementById(focused);
      if(node){node.focus({preventScroll:true});if(selection&&node.setSelectionRange){try{node.setSelectionRange(...selection)}catch(_){/* non-text input */}}}
    }
    document.title='QDR Quant Studio · '+e(result.title||key);
  }catch(error){
-   if(epoch===state.epoch)setContent(heading('研究数据暂不可用','该模块未获得合格数据')+fail(error));
+   if(epoch===state.epoch){
+     const oldError=root.querySelector('[data-v4-render-error]');
+     const failure=moduleError('当前模块',error);
+     if(oldError)oldError.outerHTML=failure.replace('data-v4-module-error','data-v4-render-error');
+     else if(changePage||!root.children.length)setContent(failure.replace('data-v4-module-error','data-v4-render-error'));
+     else root.insertAdjacentHTML('afterbegin',failure.replace('data-v4-module-error','data-v4-render-error'));
+   }
  }finally{buildingPage--;}
 }
 function go(page){
  const key=pages[page]?page:'overview';
  if(location.hash.slice(1)!==key)location.hash=key;
  else show(key);
+}
+function refresh(prefix=''){
+ if(!prefix)viewResults.clear();
+ else for(const key of [...viewResults.keys()])if(key.startsWith(prefix))viewResults.delete(key);
+ show(state.page,true);
 }
 function boot(){
  document.querySelectorAll('[data-page]').forEach(x=>{
@@ -172,9 +188,16 @@ function boot(){
   x.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();go(x.dataset.page)}});
  });
  window.addEventListener('hashchange',()=>show(location.hash.slice(1)));
+ root.addEventListener('click',event=>{
+   const retry=event.target?.closest?.('[data-v4-retry]');
+   if(!retry)return;
+   const url=retry.getAttribute('data-v4-retry')||'';
+   if(url)viewResults.delete(url);else viewResults.clear();
+   show(state.page,true);
+ });
  $('#v4-refresh')?.addEventListener('click',()=>{viewResults.clear();updateStatus();show(state.page)});
  updateStatus();show(location.hash.slice(1)||'overview');
 }
-window.V4={pages,state,$,e,n,pct,signed,date,short,badge,button,link,heading,card,kpi,empty,note,row,table,fail,value,api,settle,grid,toolbar,field,select,svgLine,progress,setContent,toast,show,go};
+window.V4={pages,state,$,e,n,pct,signed,date,short,badge,button,link,heading,card,kpi,empty,note,row,table,fail,value,api,settle,grid,toolbar,field,select,svgLine,progress,setContent,toast,moduleLoading,moduleError,show,go,refresh};
 document.addEventListener('DOMContentLoaded',boot);
 })();
