@@ -6,7 +6,7 @@ APP=ROOT/"src"/"quant_research"
 def test_v5_assets_and_navigation():
     shell=(APP/"v4_shell.html").read_text(encoding="utf-8")
     web=(APP/"web.py").read_text(encoding="utf-8")
-    for asset in ("v5_ux.css","v5_decision.js"):
+    for asset in ("v5_system.css","v5_decision.js"):
         assert "/assets/"+asset in shell
         assert "'/assets/"+asset+"'" in web
     assert ">每日决策<" in shell
@@ -17,7 +17,7 @@ def test_v5_assets_and_navigation():
 
 def test_v5_overview_is_decision_first():
     src=(APP/"assets"/"v5_decision.js").read_text(encoding="utf-8")
-    for marker in ("每日决策","今日候选","持仓与风险","今日变化","数据与模型状态"):
+    for marker in ("每日决策","今日候选","持仓与风险","今日变化","决策上下文"):
         assert marker in src
     for endpoint in ("/api/v1/l1/market/overview?horizon=3","/api/v1/l2/styles/overview?rotation=1","/api/v1/v4/plans/"):
         assert endpoint in src
@@ -34,8 +34,9 @@ def test_l1_uses_progressive_disclosure_for_evidence():
     assert "前向预测待验证 · 当前仅展示市场观察" in src
 
 def test_v5_visual_system_is_restrained():
-    css=(APP/"assets"/"v5_ux.css").read_text(encoding="utf-8")
-    for marker in (".v5-summary-strip",".v5-main-grid",".v5-candidate-table",".l1-audit-details"):
+    css=(APP/"assets"/"v5_system.css").read_text(encoding="utf-8")
+    for marker in (".desk-tape",".desk-layout",".desk-table",".desk-context-list"):
         assert marker in css
-    assert "box-shadow:none!important" in css
+    assert ".card,.kpi,.mini-stat" in css
+    assert "box-shadow:none" in css
     assert ".v5-top-hidden{display:none!important}" in css
