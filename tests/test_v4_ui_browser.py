@@ -264,15 +264,21 @@ def test_six_page_information_architecture_and_keyboard_tabs(browser,local_app):
 def test_overview_research_flow_and_market_validation(browser,local_app):
     page=_open(browser,local_app,"overview")
     try:
-        page.get_by_role('heading',name='每日决策').wait_for(timeout=10000)
-        assert page.get_by_text('今日候选',exact=True).count()==1
-        assert page.get_by_text('持仓与风险',exact=True).count()==1
-        assert page.get_by_text('今日变化',exact=True).count()==1
-        assert page.get_by_text('数据与模型状态',exact=True).count()==1
-        assert page.get_by_text('归档研究预测行数').count()==0
+        page.get_by_text('最新已收盘行情观察').wait_for(timeout=10000)
+        assert page.get_by_text('最新已收盘行情观察').count()==1
+        assert page.locator('.v4-current-quotes').get_by_text('$100.00').count()==1
+        assert page.get_by_text('采集时间晚于当日决策截止',exact=False).count()==1
+        assert page.locator(".v4-workflow-step").count()==5
+        assert page.locator(".v4-overview-trend .v4-spark").count()==1
+        page.locator("#v4-run-observation").click()
+        page.get_by_text("已提交日终观察", exact=False).first.wait_for()
         page.locator("#nav-market").click()
-        page.get_by_role('heading',name='市场展望').wait_for(timeout=10000)
-        assert page.get_by_text('模型验证与研究记录',exact=True).count()==1
+        page.locator('[data-lv3-old]').click(timeout=10000)
+        page.locator('.l1-v2-legacy > summary').click()
+        panel=page.locator('.l1-validation')
+        panel.get_by_text('预测验证与历史对照').wait_for()
+        panel.get_by_text('0.2200',exact=False).first.wait_for(timeout=10000)
+        assert panel.get_by_text('历史回溯 Brier 差',exact=False).count()==1
     finally:
         page.close()
 
@@ -280,17 +286,17 @@ def test_overview_research_flow_and_market_validation(browser,local_app):
 def test_latest_quote_does_not_use_freshness_for_a_different_date(browser,local_app):
     page=browser.new_page(viewport={'width':1536,'height':900})
     try:
-        payload={'asof_session':'2024-12-30','modules':{'market_observation':{
-                  'source_data_asof':'2024-12-27','freshness_status':'CURRENT',
-                  'known_by_decision_cutoff':True}}}
+        payload={'modules':{'market_observation':{'source_data_asof':'2024-12-27',
+                  'freshness_status':'CURRENT','known_by_decision_cutoff':True}}}
         page.route('**/api/v1/v4/freshness',lambda route:route.fulfill(
             status=200,content_type='application/json',body=json.dumps(payload)))
         page.goto(local_app+'/studio#overview',wait_until='domcontentloaded')
-        page.get_by_role('heading',name='每日决策').wait_for(timeout=10000)
+        page.locator('.v4-current-quotes').wait_for(timeout=10000)
         page.wait_for_load_state('networkidle',timeout=10000)
         page.locator('.v4-pending-banner').wait_for(state='hidden',timeout=10000)
-        assert page.locator('#v4-source-status').inner_text()=='正常'
-        assert page.get_by_text('2024-12-30 · 收盘后研究快照',exact=True).count()==1
+        strip=page.locator('.v4-current-quotes')
+        assert strip.get_by_text('日期待核验',exact=False).count()==1
+        assert strip.get_by_text('到达时间待核验',exact=False).count()==1
     finally:
         page.close()
 
