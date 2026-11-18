@@ -35,8 +35,10 @@ from quant_research.research.l2_validation_archive import (
     load_latest_validation_v1,
     load_validation_on_or_before_v1,
 )
-from quant_research.workflow.l2_forecast import _settings as forecast_settings
-from quant_research.workflow.l2_styles import load_observation_frame
+from quant_research.workflow.l2_forecast import (
+    _settings as forecast_settings,
+    load_model_feature_frame,
+)
 
 
 def _records(frame: pd.DataFrame) -> list[dict]:
@@ -86,14 +88,41 @@ def build_validation_report(root: Path, *, asof: str | None = None) -> dict:
             "asof_session": asof,
             "qualification": [],
             "probability_calibration_status": PROBABILITY_CALIBRATION_STATUS,
+            "historical_feature_pit_attested": False,
+            "real_orders_enabled": False,
+        }
+    feature_bundle_id = f_settings.get("feature_bundle_id")
+    if not feature_bundle_id:
+        return {
+            "schema": "qdr.l2.validation.v1",
+            "status": "BLOCKED",
+            "code": "L2_VERIFIED_FEATURE_BUNDLE_REQUIRED",
+            "asof_session": asof,
+            "qualification": [],
+            "probability_calibration_status": PROBABILITY_CALIBRATION_STATUS,
+            "historical_feature_pit_attested": False,
             "real_orders_enabled": False,
         }
 
     clock = TradingClock()
     labels, label_manifest = load_label_bundle_v1(root, bundle_id, clock)
-    observations, _, metadata, sessions, cutoff_timestamp = load_observation_frame(
-        root, asof=asof
+    model_features, _, metadata, sessions, cutoff_timestamp, feature_manifest = (
+        load_model_feature_frame(root, f_settings, asof=asof)
     )
+    if feature_manifest.get("historical_pit_attested") is not True:
+        return {
+            "schema": "qdr.l2.validation.v1",
+            "status": "BLOCKED",
+            "code": "L2_HISTORICAL_FEATURE_PIT_NOT_ATTESTED",
+            "asof_session": metadata.get("asof_date_et"),
+            "qualification": [],
+            "probability_calibration_status": PROBABILITY_CALIBRATION_STATUS,
+            "historical_feature_pit_attested": False,
+            "real_orders_enabled": False,
+        }
+    observations = model_features.loc[
+        model_features.model_feature_origin.eq("VERIFIED_PIT_BUNDLE")
+    ].drop(columns=["model_feature_origin"]).copy()
     config = validation_settings(root)
     forecast_config = ForecastConfig(
         min_training_sessions=f_settings["min_training_sessions"],
@@ -175,6 +204,11 @@ def build_validation_report(root: Path, *, asof: str | None = None) -> dict:
         "label_bundle_id": bundle_id,
         "label_bundle_sha256": label_manifest["labels_sha256"],
         "label_source_evidence_sha256": label_manifest["source_evidence_sha256"],
+        "feature_bundle_id": feature_bundle_id,
+        "feature_bundle_sha256": feature_manifest["features_sha256"],
+        "feature_source_evidence_sha256": feature_manifest["source_evidence_sha256"],
+        "feature_price_basis": feature_manifest["price_basis"],
+        "historical_feature_pit_attested": True,
         "model_version": MODEL_VERSION,
         "probability_calibration_status": PROBABILITY_CALIBRATION_STATUS,
         "evaluation": {
@@ -211,6 +245,7 @@ def build_validation_report(root: Path, *, asof: str | None = None) -> dict:
         "real_orders_enabled": False,
         "limitations": [
             "CONTINUOUS_RELATIVE_RETURN_MODEL_NO_PROBABILITY_TARGET",
+            "HISTORICAL_MODEL_FEATURES_FROM_VERIFIED_PIT_BUNDLE",
             "OOS_VALIDATION_DOES_NOT_ENABLE_ORDERS",
             "MODEL_ADMISSION_REQUIRES_GENUINE_FORWARD_EVIDENCE_AND_EXPLICIT_SWITCH",
         ],
