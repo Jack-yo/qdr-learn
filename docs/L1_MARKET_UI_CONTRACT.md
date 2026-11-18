@@ -4,7 +4,7 @@
 
 ## 1. 路由与使用位置
 
-现有 `/#market`（`/studio#market`）保留。先加载 `v4_ui_core.js`、`v4_ui_pages_a/b/c.js`、`v4_ui_fidelity.js`，**最后**加载 `v4_ui_market_v2.js`（覆盖 `pages.market`，不影响 L2/L3/L4）。同时加载 CSS `v4_ui_market_v2.css`，服务端资产白名单放行两文件。
+现有 `/#market`（`/studio#market`）保留。V4 主壳先加载 `v4_ui_core.js`、`v4_ui_pages_a/b/c.js`、`v4_ui_fidelity.js`、历史 `v4_ui_market_v2.js` / `v4_ui_market_v3.js` 和主题脚本，**最后**加载 `v4_ui_market_v4.js` 覆盖 `pages.market`；只替换 L1 市场预测页面，不改动 L2/L3/L4。CSS `v4_ui_market_v4.css` 在共享浅色主题之后加载，服务端静态资产白名单放行 JS/CSS。V4 页面复用已有 V4 API 与导航，不另建数据管理或采集接口。
 
 ## 2. 数据请求
 
@@ -41,7 +41,7 @@
 
 预测成功时：`forecast.quantiles` 固定为收益分布 `[q10, q25, q50, q75, q90]`，小数收益率而非百分号字符串；`expected_return` 同一交易窗口的预期总收益；`p_up` 和 `p_downside` 为 [0,1] 概率，明确下跌事件阈值及是否已校准（应追加到响应证据字段）；`first_passage = {up_first,down_first,neither,up_threshold,down_threshold}`，三事件互斥、穷尽、概率和为 1。首触事件若日线同日无法确定先后，必须按研究协议标记未知，不应强行分配标签。
 
-`status` 仅 `FROZEN_FORWARD_RESEARCH_ONLY` 或 `MODEL_OOS_ADMITTED` 可进入预测绘制逻辑；后者必须在后端有独立验收证明。`asof_session` 必须与最新完成交易日一致，预测冻结在正确时段；data digest、model version、timestamps 缺失时前端不展示预测。
+`status` 仅 `FROZEN_FORWARD_RESEARCH_ONLY` 或 `MODEL_OOS_ADMITTED` 可进入预测绘制逻辑。前者必须同时明确 `research_only=true`、`model_admitted=false`、`real_orders_enabled=false`；后者还必须提供 `model_admitted=true`、`historical_pit_verified=true`、`source_independently_attested=true` 和 `real_orders_enabled=false`。前端同时校验 `asof_session` 与最新完成交易日一致、来源 SHA-256、模型版本、可用时间、冻结时间、T+1 入场时间及收益分位单调；任何字段缺失或时间倒置都不展示预测。首触概率只有 `first_passage_calibration_status=CALIBRATED_TEMP_HOLDOUT` 且三个事件概率互斥、穷尽并通过阈值检查时才展示。
 
 `domains` 为 12 个维度观测，`{id,status,value,unit,label,precision,source_available_at,coverage}`，其中 `status` 为 `OBSERVED | PARTIAL | MISSING | BLOCKED | STALE`。只有 OBSERVED 并具备有效数字时显示数据；PARTIAL 展示覆盖缺口而不伪造完整结论。允许整个维度没有数据。
 
@@ -71,4 +71,4 @@
 
 ## 5. 完成状态
 
-前端源文件、样式和离线预览已完成。后端只读端点、离线研究引擎和实际 T 日冻结的研究接口已写好，均提供严格空态和研究资格标记。**真实供应商数据、历史 PIT 独立证明及真实样本外模型验收仍未完成，交由 Codex 做数据接入和本地实证**。新端点在缺少本地归档时返回结构化 409；有研究归档但没有真正冻结预测时，可返回 `OBSERVATION_ONLY` 和 12 维观测数据，`forecast=null`。本次不声称 H1/H3/H5 已具备实盘预测能力。新增接口细节见 `docs/L1_CODEX_DATA_HANDOFF.md`。
+L1 V4 研究驾驶舱已接入主 V4 页面：紧凑市场预测分布、路径事件、特征变化、12 维观测、历史验证与回放；使用共享浅色视觉主题。页面只消费既有只读 API，不负责数据采集、数据仓库或本地数据维护。预测展示执行严格的时点、哈希、模型准入、分位单调和首触概率校准检查；观察数据与前向预测分开呈现。**真实供应商数据、历史 PIT 独立证明及真实样本外模型验收仍由 Codex 负责接入和本地实证**。缺少本地研究归档时 API 返回结构化 409；有研究归档但没有真实冻结预测时返回 `OBSERVATION_ONLY`、12 维观测数据和 `forecast=null`。本次不声称 H1/H3/H5 已具备实盘预测能力。
