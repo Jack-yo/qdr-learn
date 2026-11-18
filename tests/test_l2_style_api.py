@@ -85,3 +85,39 @@ def test_l2_rotation_api_exposes_read_only_asof_replay(tmp_path, monkeypatch):
         server.shutdown()
         server.server_close()
         thread.join()
+
+
+def test_l2_overview_combines_rotation_without_second_data_read(tmp_path, monkeypatch):
+    from quant_research.workflow import l2_styles
+    called = []
+    def stub(root, **kwargs):
+        called.append(kwargs)
+        assert kwargs.get("include_rotation") is True
+        return {
+            "schema": "qdr.l2.style-registry.v1",
+            "status": "OBSERVATION_ONLY",
+            "latest": [],
+            "rotation": {"schema": "qdr.l2.rotation.v1", "latest": []},
+        }
+
+    monkeypatch.setattr(l2_styles, "calculate", stub)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler(Console(tmp_path)))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        with urlopen(base + "/api/v1/l2/styles/overview?rotation=1&asof=2025-04-09") as response:
+            payload = json.load(response)
+            assert response.status == 200
+        assert payload["rotation"]["schema"] == "qdr.l2.rotation.v1"
+        assert len(called) == 1
+        assert called[0]["asof"] == "2025-04-09"
+        for q in ("?rotation=0", "?rotation=true", "?rotation=1&rotation=1"):
+            with pytest.raises(HTTPError) as error:
+                urlopen(base + "/api/v1/l2/styles/overview" + q)
+            assert error.value.code == 400
+        assert len(called) == 1
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
