@@ -15,6 +15,8 @@ import pandas as pd
 
 from quant_research.research.l2_forecast import (
     FEATURES,
+    HORIZONS,
+    STYLE_IDS,
     ForecastConfig,
     walk_forward_oos_v1,
     score_oos_v1,
@@ -330,6 +332,29 @@ def validate_oos_v1(
             "decision_eligible": False,
             "real_orders_enabled": False,
         })
+    existing = {(row["style_id"], int(row["horizon"])) for row in output}
+    for style_id in STYLE_IDS:
+        for horizon in HORIZONS:
+            if (style_id, horizon) in existing:
+                continue
+            horizon_ic = rank_ic.get(int(horizon), {
+                "rank_ic": None, "rank_icir": None, "rank_ic_sessions": 0
+            })
+            output.append({
+                "style_id": style_id,
+                "horizon": int(horizon),
+                "status": "RESEARCH_ONLY",
+                "validation_passed": False,
+                "block_reasons": ["NO_SCORABLE_OOS_ROWS"],
+                "oos_sessions": 0,
+                "rank_ic": horizon_ic["rank_ic"],
+                "rank_icir": horizon_ic["rank_icir"],
+                "rank_ic_sessions": horizon_ic["rank_ic_sessions"],
+                "probability_calibration_status": PROBABILITY_CALIBRATION_STATUS,
+                "protocol_version": VALIDATION_PROTOCOL_VERSION,
+                "decision_eligible": False,
+                "real_orders_enabled": False,
+            })
     return pd.DataFrame(output).sort_values(
         ["style_id", "horizon"], kind="stable"
     ).reset_index(drop=True)
