@@ -1,3 +1,4 @@
+oos_evaluation_sessions: 252
 min_oos_sessions: 126
 min_relative_mse_gain_vs_best_baseline: 0.02
 min_directional_accuracy: 0.52
