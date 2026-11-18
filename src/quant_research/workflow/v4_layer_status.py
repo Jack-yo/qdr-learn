@@ -205,6 +205,20 @@ def four_layer_status(root: Path, *, asof: str | None = None,
             and l3_record.get("status") == "VERIFIED_LOCAL_FORWARD_RESEARCH_ONLY"
             and l3_record.get("l2_style_binding_verified") is True
             and l3_record.get("l2_style_historical_pit_attested") is True
+            and l3_record.get("l2_style_binding_end_session") == target_asof
+            and l3_record.get("l2_style_current_forward_session") == target_asof
+            and "CURRENT_FROZEN_FORWARD"
+                in (l3_record.get("l2_style_context_modes") or [])
+            and l2.get("model_version")
+                in (l3_record.get("l2_style_model_versions") or [])
+            and l3_record.get("l2_style_admission_validation_identity")
+                == l2.get("validation_identity")
+            and l2.get("label_bundle_sha256")
+                in (l3_record.get("l2_style_label_bundle_sha256s") or [])
+            and l2.get("feature_bundle_sha256")
+                in (l3_record.get("l2_style_feature_bundle_sha256s") or [])
+            and l2.get("source_snapshot_sha256")
+                in (l3_record.get("l2_style_source_snapshot_sha256s") or [])
         ),
     }
 
