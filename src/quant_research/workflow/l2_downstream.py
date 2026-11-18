@@ -7,8 +7,13 @@ context, and even then execution/order eligibility remains false.
 from __future__ import annotations
 
 from pathlib import Path
+import math
 
+import pandas as pd
+
+from quant_research.clock import TradingClock
 from quant_research.research.l2_forecast import HORIZONS, STYLE_IDS
+from quant_research.research.l2_forecast_archive import load_frozen_forecast_v1
 from quant_research.workflow.l2_forecast import calculate_forecast
 from quant_research.workflow.l2_validation import (
     read_latest_validation,
@@ -37,6 +42,9 @@ def build_downstream_context(root: Path, *, asof: str | None = None) -> dict:
         "label_bundle_id": forecast.get("label_bundle_id"),
         "label_bundle_sha256": forecast.get("label_bundle_sha256"),
         "source_snapshot_sha256": forecast.get("source_snapshot_sha256"),
+        "forecast_identity": None,
+        "validation_identity": validation.get("identity"),
+        "validation_asof_session": validation.get("asof_session"),
         "contexts": [],
         "admitted_units": 0,
         "l3_style_context_available": False,
@@ -68,16 +76,93 @@ def build_downstream_context(root: Path, *, asof: str | None = None) -> dict:
             "code": "L2_LABEL_BUNDLE_MISMATCH",
         }
 
+    try:
+        frozen = load_frozen_forecast_v1(
+            root, forecast["asof_session"], forecast["model_version"]
+        )
+    except FileNotFoundError:
+        return {
+            **base,
+            "status": "RESEARCH_ONLY",
+            "code": "L2_CURRENT_FORECAST_NOT_FROZEN",
+        }
+    if (
+        frozen.get("session_date_et") != forecast.get("asof_session")
+        or frozen.get("model_version") != forecast.get("model_version")
+        or frozen.get("label_bundle_sha256") != forecast.get("label_bundle_sha256")
+        or frozen.get("source_snapshot_sha256") != forecast.get("source_snapshot_sha256")
+    ):
+        return {
+            **base,
+            "status": "BLOCKED",
+            "code": "L2_FROZEN_FORECAST_PROVENANCE_MISMATCH",
+        }
+    clock = TradingClock()
+    window = clock.window(forecast["asof_session"], 1)
+    frozen_at = pd.Timestamp(frozen.get("frozen_at_utc"))
+    if (
+        frozen_at.tzinfo is None
+        or not (
+            pd.Timestamp(window.signal_time)
+            <= frozen_at.tz_convert("UTC")
+            < pd.Timestamp(window.entry_time)
+        )
+    ):
+        return {
+            **base,
+            "status": "RESEARCH_ONLY",
+            "code": "L2_FORECAST_NOT_FROZEN_BEFORE_NEXT_ENTRY",
+        }
+
+    live_map = {
+        (row.get("style_id"), int(row.get("horizon"))): row
+        for row in forecast.get("forecasts", [])
+        if row.get("style_id") in STYLE_IDS and row.get("horizon") in HORIZONS
+    }
+    frozen_map = {
+        (row.get("style_id"), int(row.get("horizon"))): row
+        for row in frozen.get("forecasts", [])
+        if row.get("style_id") in STYLE_IDS and row.get("horizon") in HORIZONS
+    }
+    expected = {(style, horizon) for style in STYLE_IDS for horizon in HORIZONS}
+    if set(live_map) != expected or set(frozen_map) != expected:
+        return {
+            **base,
+            "status": "BLOCKED",
+            "code": "L2_FROZEN_FORECAST_GRID_MISMATCH",
+        }
+    for key in expected:
+        live_row, frozen_row = live_map[key], frozen_map[key]
+        if live_row.get("forecast_status") != frozen_row.get("forecast_status"):
+            return {
+                **base,
+                "status": "BLOCKED",
+                "code": "L2_FROZEN_FORECAST_DIFFERS_FROM_CURRENT_MODEL_OUTPUT",
+            }
+        left = live_row.get("predicted_relative_return")
+        right = frozen_row.get("predicted_relative_return")
+        if (left is None) != (right is None) or (
+            left is not None and not math.isclose(
+                float(left), float(right), rel_tol=0.0, abs_tol=1e-15
+            )
+        ):
+            return {
+                **base,
+                "status": "BLOCKED",
+                "code": "L2_FROZEN_FORECAST_DIFFERS_FROM_CURRENT_MODEL_OUTPUT",
+            }
+
+    base = {
+        **base,
+        "forecast_identity": frozen.get("identity"),
+        "forecast_frozen_at_utc": frozen.get("frozen_at_utc"),
+    }
     qualification = {
         (row.get("style_id"), int(row.get("horizon"))): row
         for row in validation.get("qualification", [])
         if row.get("style_id") in STYLE_IDS and row.get("horizon") in HORIZONS
     }
-    forecasts = {
-        (row.get("style_id"), int(row.get("horizon"))): row
-        for row in forecast.get("forecasts", [])
-        if row.get("style_id") in STYLE_IDS and row.get("horizon") in HORIZONS
-    }
+    forecasts = frozen_map
     rows = []
     admitted = 0
     for style_id in STYLE_IDS:
