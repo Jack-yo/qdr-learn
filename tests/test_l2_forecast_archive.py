@@ -28,6 +28,10 @@ def _payload():
         "source_snapshot_sha256":"a"*64,
         "label_bundle_id":"accepted-v1","label_bundle_sha256":"b"*64,
         "label_source_evidence_sha256":"c"*64,
+        "feature_bundle_id":"features-v1","feature_bundle_sha256":"d"*64,
+        "feature_source_evidence_sha256":"e"*64,
+        "feature_price_basis":"VERIFIED_ACTION_CONSISTENT_HISTORICAL_FEATURE_BASIS",
+        "historical_feature_pit_attested":True,
         "forecast_protocol_version":"qdr-l2-style-forecast-v1",
         "model_version":MODEL_VERSION,
         "config":{"min_training_sessions":252,"embargo_sessions":5,"ridge_alpha":1.0},
@@ -106,3 +110,10 @@ def test_archive_detects_manifest_tampering(tmp_path):
     path.write_text(json.dumps(data),encoding="utf-8")
     with pytest.raises(ValueError,match="IDENTITY_MISMATCH"):
         load_frozen_forecast_v1(tmp_path,"2025-04-09",MODEL_VERSION)
+
+
+def test_new_p4_archive_requires_verified_feature_bundle(tmp_path):
+    payload=_payload()
+    payload.pop("feature_bundle_sha256")
+    with pytest.raises(ValueError,match="feature bundle"):
+        freeze_forecast_snapshot_v1(tmp_path,payload,now_utc=_forward_time())
