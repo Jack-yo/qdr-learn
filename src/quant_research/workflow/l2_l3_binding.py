@@ -198,9 +198,16 @@ def build_l2_style_history_binding(
         available = pd.Timestamp(row["state_available_at"])
         if available.tzinfo is None:
             raise ValueError("L3_L2_STATE_AVAILABILITY_UNZONED")
-        signal = pd.Timestamp(clock.signal(session))
-        if available.tz_convert("UTC") > signal:
-            raise ValueError("L3_L2_STATE_AVAILABLE_AFTER_SIGNAL")
+        frozen_at = pd.Timestamp(context.get("forecast_frozen_at_utc"))
+        if frozen_at.tzinfo is None:
+            raise ValueError("L3_L2_FORECAST_FREEZE_TIME_MISSING:" + session)
+        window = clock.window(session, 1)
+        available = available.tz_convert("UTC")
+        frozen_at = frozen_at.tz_convert("UTC")
+        if available < frozen_at:
+            raise ValueError("L3_L2_STATE_AVAILABLE_BEFORE_L2_FREEZE")
+        if available >= pd.Timestamp(window.entry_time):
+            raise ValueError("L3_L2_STATE_NOT_AVAILABLE_BEFORE_NEXT_ENTRY")
 
         model_versions.add(model_version)
         label_shas.add(str(context["label_bundle_sha256"]))
