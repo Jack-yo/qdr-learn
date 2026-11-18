@@ -33,6 +33,7 @@ from quant_research.research.l2_validation import (
 from quant_research.research.l2_validation_archive import (
     freeze_validation_report_v1,
     load_latest_validation_v1,
+    load_validation_on_or_before_v1,
 )
 from quant_research.workflow.l2_forecast import _settings as forecast_settings
 from quant_research.workflow.l2_styles import load_observation_frame
@@ -241,6 +242,22 @@ def read_latest_validation(root: Path, *, asof: str | None = None) -> dict:
     """Read P5 report only; never trigger validation computation."""
     try:
         return load_latest_validation_v1(root, asof=asof)
+    except FileNotFoundError:
+        return {
+            "schema": "qdr.l2.validation.v1",
+            "status": "BLOCKED",
+            "code": "L2_P5_VALIDATION_REPORT_NOT_FOUND",
+            "asof_session": asof,
+            "qualification": [],
+            "probability_calibration_status": PROBABILITY_CALIBRATION_STATUS,
+            "real_orders_enabled": False,
+        }
+
+
+def read_validation_on_or_before(root: Path, *, asof: str) -> dict:
+    """Read newest frozen P5 report not later than asof; never recompute."""
+    try:
+        return load_validation_on_or_before_v1(root, asof)
     except FileNotFoundError:
         return {
             "schema": "qdr.l2.validation.v1",
