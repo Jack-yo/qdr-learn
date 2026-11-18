@@ -10,7 +10,10 @@ from pathlib import Path
 
 from quant_research.research.l2_forecast import HORIZONS, STYLE_IDS
 from quant_research.workflow.l2_forecast import calculate_forecast
-from quant_research.workflow.l2_validation import read_latest_validation
+from quant_research.workflow.l2_validation import (
+    read_latest_validation,
+    read_validation_on_or_before,
+)
 
 
 CONTRACT_VERSION = "qdr-l2-downstream-context-v1"
@@ -19,7 +22,11 @@ CONTRACT_VERSION = "qdr-l2-downstream-context-v1"
 def build_downstream_context(root: Path, *, asof: str | None = None) -> dict:
     root = Path(root).resolve()
     forecast = calculate_forecast(root, asof=asof)
-    validation = read_latest_validation(root, asof=asof)
+    validation = (
+        read_validation_on_or_before(root, asof=asof)
+        if asof is not None
+        else read_latest_validation(root)
+    )
 
     base = {
         "schema": "qdr.l2.downstream-context.v1",
