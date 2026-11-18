@@ -259,10 +259,10 @@ Start the existing local console on the machine with access to the existing real
 
 ## 14. Remaining work
 
-- **P1–P3 release gate:** execute complete pytest and browser checks against the latest main baseline, validate real symbol coverage, rectify all failures and reconcile any further branch divergence.
-- **P4 target and baselines:** independently verified raw, corporate-action-consistent T+1-open-to-T+H-close relative return labels per style and H1/H3/H5; no model if verification is missing.
-- **P5 forecast validation:** purged and embargoed walk-forward; baseline comparisons; immutable prediction records; independent OOS admission and only then appropriately calibrated probability claims.
-- **P6 integration:** L1 regime and L3/L4 read-only contracts; no brokerage order execution.
+- **P1–P3 local release gate:** execute complete pytest/browser checks and verify real 14-symbol source coverage on the user's local repository.
+- **P4 local data gate:** build and accept the independently verified action-consistent label bundle. Engineering is present, but the committed default remains blocked until that evidence exists.
+- **P5 local validation gate:** run the fixed OOS/ablation protocol against the accepted bundle, freeze the report, accumulate genuine-forward P4 snapshots and review the admission evidence. Engineering is present; no model is claimed validated in this environment.
+- **P6 integration:** consume only explicit L1/L2 qualification states in L3/L4 read-only contracts; no brokerage order execution.
 
 ## 15. P4 implementation update (2026-11-18)
 
@@ -327,3 +327,77 @@ Local acceptance: [L2 P4 checklist](L2_P4_LOCAL_ACCEPTANCE.md).
 P5 remains responsible for adequate OOS sample size, baseline improvement,
 stability/ablation, immutable forward-outcome accumulation and any separately
 defined probability calibration/model admission.
+
+
+## 16. P5 implementation update (2026-11-18)
+
+P5 engineering is now implemented on `main` while preserving the P4
+research-only boundary.
+
+### Validation protocol
+
+- `configs/l2_validation.yaml` freezes a 252-session OOS evaluation span and
+  predeclared gates before local results are inspected.
+- Each of the 21 `style_id × H1/H3/H5` units is always explicit. Missing
+  evidence remains `RESEARCH_ONLY`; a unit never disappears from the report.
+- OOS validation requires at least 126 scorable sessions, Ridge improvement
+  against Zero / expanding mean / 5D momentum, at least 2% relative MSE gain
+  versus the best baseline, ≥52% directional accuracy, horizon-level
+  cross-style Rank IC ≥0.05, and chronological subperiod stability.
+- Probability calibration is intentionally
+  `NOT_APPLICABLE_CONTINUOUS_RETURN_ONLY`. P4/P5 predicts continuous relative
+  return, so no win-rate or probability field is inferred from the regression.
+
+### Ablation
+
+- P5 evaluates four nested feature sets on the exact same OOS dates:
+  `returns_only`, `returns_dynamics`, `returns_dynamics_risk`, and
+  `full`.
+- P4 forecasting now accepts a fixed feature subset solely for this ablation
+  research; the default production-research feature set is unchanged.
+- The `full` fold is reused from the ablation pass instead of being fitted a
+  second time.
+
+### Genuine-forward evidence and qualification
+
+- P5 reads integrity-checked P4 frozen snapshots and counts a forecast as
+  forward evidence only when
+  `signal_time <= frozen_at_utc < T+1 entry_time`.
+- Labels must remain unavailable until at least the corresponding H1/H3/H5
+  exit. Retrospectively frozen snapshots do not count.
+- Default forward admission gate requires 60 genuine-forward sessions for the
+  exact style/horizon, nonnegative MSE gain versus the best baseline and at
+  least 50% direction accuracy.
+- `model_admission_enabled: false` is committed intentionally. Even an
+  OOS/forward-passing unit remains `OOS_VALIDATED` until the admission switch
+  is explicitly enabled after local evidence review.
+- `MODEL_ADMITTED` remains scoped to style × horizon × model version ×
+  validation protocol and still sets `decision_eligible=false` and
+  `real_orders_enabled=false`.
+
+### Execution and artifacts
+
+- `python -m quant_research.workflow.l2_validation --date YYYY-MM-DD` runs a
+  dry P5 calculation with no report write.
+- Adding `--freeze` writes one immutable validation artifact under
+  `outputs/l2_validation/<session>/<identity>/manifest.json`.
+- `GET /api/v1/l2/styles/validation` reads only the latest frozen report.
+  The GET endpoint never triggers Walk-forward/ablation or an artifact write.
+- The existing L2 「领先预测」 page now displays P4 forecasts and P5 frozen
+  validation as separate evidence layers: MSE improvement, direction accuracy,
+  Rank IC, genuine-forward sessions and qualification status.
+- With no frozen P5 report the page shows
+  `L2_P5_VALIDATION_REPORT_NOT_FOUND`, not synthetic validation numbers.
+
+Tests cover OOS gates, poor-model rejection, insufficient samples,
+genuine-forward timing, default admission lock, explicit admission, immutable
+validation-report identity, read-only API behavior and P5 UI rendering. The
+actual committed L2 JavaScript has passed an isolated runtime smoke for both
+BLOCKED and OOS_VALIDATED states.
+
+**P5 status: engineering implemented, not locally accepted.** No real P5
+validation result is claimed until the user's accepted P4 label bundle,
+complete pytest, actual OOS/ablation run, forward archive evidence and browser
+acceptance are executed locally.
+
+Local acceptance: [L2 P5 checklist](L2_P5_LOCAL_ACCEPTANCE.md).
