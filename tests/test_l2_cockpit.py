@@ -27,6 +27,8 @@ def test_l2_cockpit_is_loaded_last_and_assets_are_allowlisted():
     assert "overview?rotation=1" in js
     assert "rotation_state" in js
     assert "OBSERVATION_ONLY" in js
+    assert "/api/v1/l2/styles/forecast" in js
+    assert "L2_VERIFIED_LABEL_BUNDLE_REQUIRED" not in js
     assert "NO_DATA" not in js
     assert ".l2-main-grid" in css
 
@@ -42,6 +44,7 @@ const assert = require('assert');
 const file = process.argv[1];
 const code = fs.readFileSync(file,'utf8');
 const calls=[];
+let forecastMode='blocked';
 const snapshot = {
   status:'OBSERVATION_ONLY',asof_session:'2025-04-09',source_snapshot_sha256:'a'.repeat(64),
   styles:[
@@ -88,6 +91,23 @@ const V4={
  settle:async path=>{
   calls.push(path);
   if(path.startsWith('/api/v1/l2/styles/overview'))return {ok:true,data:snapshot};
+  if(path.startsWith('/api/v1/l2/styles/forecast')){
+    if(forecastMode==='blocked')return {ok:true,data:{
+      schema:'qdr.l2.forecast.v1',status:'BLOCKED',
+      code:'L2_VERIFIED_LABEL_BUNDLE_REQUIRED',forecasts:[],
+      eligible_units:0,blocked_units:21,
+      missing_evidence:['verified labels'],real_orders_enabled:false
+    }};
+    return {ok:true,data:{
+      schema:'qdr.l2.forecast.v1',status:'RESEARCH_ONLY',
+      model_version:'ridge-v1',label_bundle_id:'accepted-v1',
+      eligible_units:3,blocked_units:18,
+      forecasts:[1,3,5].map(h=>({style_id:'size',horizon:h,
+        predicted_relative_return:0.001*h,mean_baseline:0.0002,
+        momentum_baseline:0.0004,train_sessions:80,
+        forecast_status:'RESEARCH_ONLY',block_reason:null}))
+    }};
+  }
   return {ok:false,error:{message:'source unavailable'}};
  },
  show:()=>{}
@@ -108,9 +128,20 @@ vm.runInNewContext(code,{window:{V4},console});
  const replay=await V4.pages.style();
  assert(calls[1].includes('&asof=2025-04-08'),'replay parameter must reach same source');
  assert(replay.html.includes('数据指纹'));
+ V4.state.l2Tab='forecast';
+ const blockedForecast=await V4.pages.style();
+ assert(calls[3].includes('/api/v1/l2/styles/forecast?asof=2025-04-08'));
+ assert(blockedForecast.html.includes('L2_VERIFIED_LABEL_BUNDLE_REQUIRED'));
+ assert(blockedForecast.html.includes('不会从当前版本 Yahoo 历史临时生成未来标签'));
+ forecastMode='eligible';
+ const researchForecast=await V4.pages.style();
+ assert(researchForecast.html.includes('Ridge 相对收益'));
+ assert(researchForecast.html.includes('RESEARCH_ONLY'));
+ assert(researchForecast.html.includes('accepted-v1'));
+ assert(!researchForecast.html.includes('胜率'));
  V4.state.l2Tab='french';
  const french=await V4.pages.style();
- assert(calls[3].includes('/api/v1/styles?mode=observation'));
+ assert(calls[7].includes('/api/v1/styles?mode=observation'));
  assert(french.html.includes('French'));
 })().catch(error=>{console.error(error);process.exitCode=1;});
 """
