@@ -385,6 +385,13 @@ def main(argv=None):
         "--output", type=Path, default=None,
         help="Optional new JSON receipt path; existing files are never overwritten",
     )
+    parser.add_argument(
+        "--materialized-market-style", type=Path, default=None,
+        help=(
+            "Optional new Parquet path. Adds exact MODEL_ADMITTED style_l2_* "
+            "columns and causal state_available_at; never overwrites the input."
+        ),
+    )
     args = parser.parse_args(argv)
     path = args.market_style
     if not path.is_file():
@@ -395,6 +402,15 @@ def main(argv=None):
         frame = pd.read_csv(path)
     else:
         parser.error("market_style must be Parquet or CSV")
+    if args.materialized_market_style is not None:
+        materialized_path = args.materialized_market_style.resolve()
+        if materialized_path.exists():
+            raise FileExistsError("L2_L3_MATERIALIZED_MARKET_STYLE_ALREADY_EXISTS")
+        if materialized_path.suffix.lower() != ".parquet":
+            parser.error("--materialized-market-style must end in .parquet")
+        frame = materialize_l2_style_history(args.root, frame)
+        materialized_path.parent.mkdir(parents=True, exist_ok=True)
+        frame.to_parquet(materialized_path, index=False)
     receipt = build_l2_style_history_binding(args.root, frame)
     encoded = json.dumps(
         receipt, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False
