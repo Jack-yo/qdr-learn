@@ -79,9 +79,26 @@ def run_managed_alpha_study(root: Path, *, bundle_id: str, run_id: str,
     binding_receipt=manifest.get('l2_style_context_receipt')
     if binding_receipt is not None:
         from quant_research.workflow.l2_l3_binding import (
-            verify_l2_style_history_binding)
+            CONTRACT_VERSION, verify_l2_style_history_binding)
         verify_l2_style_history_binding(
             root,frames['market_style'],binding_receipt)
+        if (
+            binding_receipt.get('contract_version')==CONTRACT_VERSION
+            and 'HISTORICAL_PIT_REPLAY'
+                in set(binding_receipt.get('context_modes') or [])
+        ):
+            admission_day=pd.Timestamp(
+                binding_receipt['admission_asof_session']
+            )
+            requested_start=pd.Timestamp(evaluation_start)
+            if (
+                requested_start.tzinfo is not None
+                or admission_day.tzinfo is not None
+                or requested_start<=admission_day
+            ):
+                raise ValueError(
+                    'V4_L3_OOS_MUST_START_AFTER_L2_ADMISSION'
+                )
     protocol_path=root/'configs/experiments/v4_research.yaml'
     config=yaml.safe_load(protocol_path.read_text(encoding='utf-8'))
     protocol=OOSProtocol(**config['oos'])
