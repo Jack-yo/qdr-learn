@@ -43,7 +43,8 @@ def validate_l2_style_binding_receipt(receipt: dict) -> dict:
     required = {
         "contract_version", "scope", "start_session", "end_session", "rows",
         "style_columns", "context_identity_sha256", "model_versions",
-        "label_bundle_sha256s", "binding_verified", "historical_pit_attested",
+        "label_bundle_sha256s", "source_snapshot_sha256s",
+        "binding_verified", "historical_pit_attested",
         "decision_eligible", "real_orders_enabled",
     }
     if not isinstance(receipt, dict) or required - set(receipt):
@@ -75,7 +76,9 @@ def validate_l2_style_binding_receipt(receipt: dict) -> dict:
         raise ValueError("L3_L2_STYLE_BINDING_COLUMNS_INVALID")
     if not _SHA.fullmatch(str(receipt["context_identity_sha256"])):
         raise ValueError("L3_L2_STYLE_BINDING_IDENTITY_INVALID")
-    for field in ("model_versions", "label_bundle_sha256s"):
+    for field in (
+        "model_versions", "label_bundle_sha256s", "source_snapshot_sha256s"
+    ):
         values = receipt[field]
         if not isinstance(values, list) or not values or values != sorted(set(values)):
             raise ValueError("L3_L2_STYLE_BINDING_PROVENANCE_INVALID")
@@ -83,6 +86,8 @@ def validate_l2_style_binding_receipt(receipt: dict) -> dict:
         raise ValueError("L3_L2_STYLE_BINDING_MODEL_VERSION_INVALID")
     if any(not _SHA.fullmatch(str(x)) for x in receipt["label_bundle_sha256s"]):
         raise ValueError("L3_L2_STYLE_BINDING_LABEL_SHA_INVALID")
+    if any(not _SHA.fullmatch(str(x)) for x in receipt["source_snapshot_sha256s"]):
+        raise ValueError("L3_L2_STYLE_BINDING_SOURCE_SHA_INVALID")
     if receipt["binding_verified"] is not True:
         raise ValueError("L3_L2_STYLE_BINDING_NOT_VERIFIED")
     for field in (
@@ -133,6 +138,7 @@ def build_l2_style_history_binding(
     identities = []
     model_versions = set()
     label_shas = set()
+    source_shas = set()
     all_pit = True
     expected_columns = None
     for index, day in enumerate(dates):
@@ -146,6 +152,11 @@ def build_l2_style_history_binding(
             raise ValueError("L3_L2_VALIDATION_IDENTITY_MISSING:" + session)
         if not _SHA.fullmatch(str(context.get("label_bundle_sha256") or "")):
             raise ValueError("L3_L2_LABEL_BUNDLE_SHA_MISSING:" + session)
+        if not _SHA.fullmatch(str(context.get("source_snapshot_sha256") or "")):
+            raise ValueError("L3_L2_SOURCE_SNAPSHOT_SHA_MISSING:" + session)
+        model_version = context.get("model_version")
+        if not isinstance(model_version, str) or not model_version:
+            raise ValueError("L3_L2_MODEL_VERSION_MISSING:" + session)
         admitted = [
             row for row in context.get("contexts", [])
             if row.get("downstream_context_eligible") is True
@@ -183,15 +194,17 @@ def build_l2_style_history_binding(
         if available.tz_convert("UTC") > signal:
             raise ValueError("L3_L2_STATE_AVAILABLE_AFTER_SIGNAL")
 
-        model_versions.add(str(context.get("model_version")))
+        model_versions.add(model_version)
         label_shas.add(str(context["label_bundle_sha256"]))
+        source_shas.add(str(context["source_snapshot_sha256"]))
         all_pit = all_pit and context.get("historical_decision_eligible") is True
         identities.append({
             "date": session,
             "forecast_identity": context["forecast_identity"],
             "validation_identity": context["validation_identity"],
-            "model_version": context.get("model_version"),
+            "model_version": model_version,
             "label_bundle_sha256": context["label_bundle_sha256"],
+            "source_snapshot_sha256": context["source_snapshot_sha256"],
             "style_values": {
                 column: column_values[column] for column in columns
             },
@@ -209,6 +222,7 @@ def build_l2_style_history_binding(
         ).hexdigest(),
         "model_versions": sorted(model_versions),
         "label_bundle_sha256s": sorted(label_shas),
+        "source_snapshot_sha256s": sorted(source_shas),
         "binding_verified": True,
         "historical_pit_attested": bool(all_pit),
         "decision_eligible": False,
