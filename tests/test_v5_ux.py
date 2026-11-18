@@ -38,6 +38,22 @@ def test_v5_visual_system_is_restrained():
     css=(APP/"assets"/"v5_system.css").read_text(encoding="utf-8")
     for marker in (".desk-tape",".desk-layout",".desk-table",".desk-context-list"):
         assert marker in css
-    assert ".card,.kpi,.mini-stat" in css
+    assert ".card{background:transparent" in css
+    assert ".kpis{display:grid;gap:0" in css
     assert "box-shadow:none" in css
     assert ".v5-top-hidden{display:none!important}" in css
+
+
+def test_v5_direct_workspaces_without_patch_layers():
+    shell=(APP/"v4_shell.html").read_text(encoding="utf-8")
+    alpha=(APP/"assets"/"v4_ui_pages_b.js").read_text(encoding="utf-8")
+    risk=(APP/"assets"/"v4_ui_pages_c.js").read_text(encoding="utf-8")
+    warehouse=(APP/"assets"/"v4_ui_warehouse.js").read_text(encoding="utf-8")
+    assert "v4_ui_fidelity.js" not in shell
+    assert "v5_research.js" not in shell
+    for marker in ("heading('因子实验'","heading('选股与回测'"):
+        assert marker in alpha
+    assert "heading('持仓与风控'" in risk
+    assert "heading('研究准入'" in risk
+    assert "heading('数据与保障'" in warehouse
+    assert "wh-source-details" in warehouse
