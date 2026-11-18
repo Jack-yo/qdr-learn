@@ -92,63 +92,105 @@ pages.risk=async()=>{
    '<div class="grid cols2" style="margin-top:15px">'+historyCard+evidence+'</div>'};
 };
 pages.data=async()=>{
- const all=await Promise.all([
-    settle('/api/status'),settle('/api/v1/research/readiness'),
-    settle('/api/v1/v4/daily'),settle('/api/v1/data/catalog'),
-    settle('/api/v1/v4/freshness')]);
- const [system,readiness,diary,catalog,freshness]=all.map(x=>x.ok?x.data:null);
- const latest=(diary?.runs||[])[0]||null;
- const checks=Object.entries(readiness?.stages||{}).map(([id,x])=>[
-  e(x.description||id),riskStatus(x.status),e(x.code||'—'),
-  e((x.missing_evidence||[]).slice(0,2).join(' · ')||'—')]);
- const stageRows=(latest?.stages||[]).map(x=>[
-   e(x.stage),riskStatus(x.status),e(x.code||'—')]);
- const prices=system?.prices||[];
- const status=system?.dataset||{};
- const limitations=(system?.limitations||[]).map(x=>'<div class="v4-stat-pair"><span class="muted">'+e(x)+'</span></div>').join('');
- const freshRows=Object.entries(freshness?.modules||{}).map(([name,x])=>[
-   e(name),date(x.asof_session),date(x.source_data_asof),
-   e(x.knowledge_cutoff_utc||'—'),riskStatus(x.freshness_status),
-   e(x.blocked_reason||'—')]);
- const html=heading('数据中心与研究资格',
-   '底层市场数据、历史证券身份、因子版本及模型运行证据集中管理，不让 API 错误占据用户主界面',
-   link('/data','打开完整数据管理工具'))+
-   grid(4,[
-     kpi('实际接入证券',prices.length?n(prices.length,0):'—','来自现存真实数据仓库','blue'),
-     kpi('最近数据观察日',status.asof_date_et?date(status.asof_date_et):'—','不是系统当前日期','purple'),
-     kpi('数据能力检查',readiness?n(Object.keys(readiness.stages||{}).length,0):'—','状态需逐项核对','green'),
-     kpi('四层日终归档',latest?date(latest.session_date_et):'—','不能倒填交易日','amber')
-   ].join(''))+
-   '<div class="grid cols2" style="margin-top:15px">'+
-      card('行情来源与使用边界',
-        row('市场数据来源',e(status.source||'—'))+
-        row('最近交易日',date(status.asof_date_et))+
-        row('数据快照 SHA256',short(status.snapshot_sha256,22))+
-        row('仓库研究用途',badge('真实观测 ≠ 历史可交易','amber'))+
-        note('公司行为、历史退市和 PIT 证券池需要独立证据；供应商当前可交易列表不能自动倒填历史。'),
-        'DATA INFRASTRUCTURE')+
-      card('自动研究任务 · 最近日终日志',
-        latest?table(['阶段','运行状态','原因'],stageRows):
-          empty('尚无可核验的日终任务','缺少完成的交易日数据或完整来源时，不自动制造运行成功。'),
-        '真实研究任务')+
+ const response=await settle('/api/v1/research/readiness');
+ if(response.pending){
+  return {title:'研究准入与资格',html:
+   heading('研究准入与资格','判断现有数据和研究证据能否进入历史模型、严格回测、前向研究与模拟组合',
+    link('/studio#warehouse','查看数据仓库')+link('/data','高级数据维护'))+
+   V.moduleLoading('研究资格矩阵')};
+ }
+ if(!response.ok){
+  return {title:'研究准入与资格',html:
+   heading('研究准入与资格','判断现有数据和研究证据能否进入历史模型、严格回测、前向研究与模拟组合',
+    link('/studio#warehouse','查看数据仓库'))+
+   V.moduleError('研究资格矩阵',response.error,'/api/v1/research/readiness')};
+ }
+ const readiness=response.data||{};
+ const stages=readiness.stages||{};
+ const nextSteps=readiness.next_steps||[];
+ const label=status=>({
+   PASS:'已通过',OBSERVATION_ONLY:'仅观察',BLOCKED:'受阻',
+   NOT_READY:'未就绪',EVIDENCE_INVENTORY_ONLY:'仅证据盘点'
+  })[status]||pretty(status);
+ const qualificationBadge=status=>badge(label(status),
+   status==='PASS'?'green':status==='OBSERVATION_ONLY'?'amber':/BLOCKED|NOT_READY|FAILED/i.test(status||'')?'red':'amber');
+ const stageRows=ids=>ids.filter(id=>stages[id]).map(id=>{
+   const item=stages[id]||{};
+   const missing=(item.missing_evidence||[]).slice(0,3).join(' · ')||'—';
+   return [
+    e(item.description||id),
+    qualificationBadge(item.status),
+    e(item.code||'—'),
+    e(missing),
+    item.view?link(item.view,'查看证据'):'—'
+   ];
+ });
+ const stageTable=(ids,emptyTitle)=> {
+   const rows=stageRows(ids);
+   return rows.length?table(['资格项目','状态','判定代码','缺失证据','入口'],rows):
+    empty(emptyTitle,'当前没有可核验的资格证据。');
+ };
+ const hist=stages.historical_model?.status;
+ const backtest=stages.historical_backtest?.status;
+ const forward=stages.forward_shadow?.status;
+ const html=
+  heading('研究准入与资格',
+   '只回答“这些数据与证据能不能用于研究”。数据资产、来源、字段、更新和预览统一去数据仓库查看。',
+   link('/studio#warehouse','查看数据仓库')+link('/data','高级数据维护'))+
+  '<div class="v4-muted-note" style="margin-bottom:15px">资格检查时间 '+e(readiness.checked_at_utc||'—')+
+   ' · 策略：'+e(readiness.policy||'REAL_ONLY')+
+   ' · 真实券商订单：'+(readiness.real_orders_enabled?badge('已开启','red'):badge('永久关闭','amber'))+
    '</div>'+
-   '<div style="margin-top:15px">'+card('模型、数据与回测资格矩阵',
-      checks.length?table(['项目','状态','代码','缺失证据'],checks):
-         empty('资格矩阵尚未就绪',readiness?'尚无资格项':'检查本地数据库和数据审计记录。'),
-      '模型训练 / 历史回测 / 前向模拟分别验收')+'</div>'+
-   '<div style="margin-top:15px">'+card('统一决策时点与模块新鲜度',
-      freshRows.length?table(['模块','研究交易日','实际数据日','决策截止 UTC','时效状态','阻断原因'],freshRows):
-        empty('新鲜度证据暂不可用','检查本地时钟、行情仓库和来源可用时间。'),
-      '行情观察 CURRENT 不代表预测或交易合格')+'</div>'+
-   '<div class="grid cols2" style="margin-top:15px">'+
-      card('数据使用限制',limitations||
-       empty('当前无附加说明','不等于已通过历史 PIT 或策略有效性认证。'),'来源与更新时间')+
-      card('研究和数据维护工具',
-        '<div class="v4-actions">'+link('/data','数据接入及质量核查')+
-         link('/styles','经典因子数据')+link('/backtests','回测资格审查')+'</div>'+
-        note('研究工具应保留真实数据原始回执、哈希、可用时间和实验版本，不修改历史已经冻结的记录。'),
-        '高级操作不改变一级导航')
-   '</div>';
- return {title:'数据中心',html};
+  grid(4,[
+   kpi('历史模型 PIT',hist?qualificationBadge(hist):'—','历史证券身份与时点证据必须独立通过','blue'),
+   kpi('严格历史回测',backtest?qualificationBadge(backtest):'—','原价、公司行为、历史证券池分别验收','purple'),
+   kpi('前向冻结研究',forward?qualificationBadge(forward):'—','冻结模型与决策时点必须可追溯','green'),
+   kpi('当前阻断项',n(nextSteps.length,0),'按真实业务依赖顺序列出，不按通过率包装','amber')
+  ].join(''))+
+  '<div class="grid cols2" style="margin-top:15px">'+
+   card('历史数据与 PIT 准入',
+    stageTable(['dataset','historical_model','asset_directory','pit_fundamentals','industry_factors'],
+      '历史数据资格尚未形成'),
+    '来源观察 ≠ 历史 PIT')+
+   card('严格回测准入',
+    stageTable(['historical_backtest','verified_backtest_runs'],
+      '严格回测资格尚未形成'),
+    '历史 replay 与已验收产物分别核验')+
+  '</div>'+
+  '<div class="grid cols2" style="margin-top:15px">'+
+   card('前向研究准入',
+    stageTable(['forward_data','forward_shadow','forward_observations','frozen_decision'],
+      '前向研究资格尚未形成'),
+    '数据 → 冻结模型 → 连续观察 → 冻结决策')+
+   card('模型版本与模拟组合证据',
+    stageTable(['strategy_versions','paper_account','paper_timeline'],
+      '策略与模拟组合证据尚未形成'),
+    '本地模拟对账不代表券商成交')+
+  '</div>'+
+  '<div style="margin-top:15px">'+card('当前阻断与下一步',
+   nextSteps.length?table(['受阻项目','阻断代码','下一步'],nextSteps.map(item=>[
+    e(item.description||item.module),
+    e(item.reason||'—'),
+    item.view?link(item.view,'去处理'):'—'
+   ])):
+   empty('当前没有已登记的阻断项','这只表示资格矩阵没有 BLOCKED 项，不代表预测有效性、交易收益或完整产品验收已经通过。'),
+   '按业务依赖顺序，不以通过率替代证据')+'</div>'+
+  '<div class="grid cols2" style="margin-top:15px">'+
+   card('资格边界',
+    row('完整产品验收',readiness.complete_product_acceptance?badge('已通过','green'):badge('未通过','amber'))+
+    row('历史回测数据资格',readiness.historical_backtest_data_eligible?badge('允许','green'):badge('未允许','red'))+
+    row('前向模拟数据资格',readiness.forward_shadow_data_eligible?badge('允许','green'):badge('未允许','red'))+
+    row('真实券商订单',readiness.real_orders_enabled?badge('开启','red'):badge('不支持','amber'))+
+    note('任何单一来源观测、文件哈希、策略版本或本地模拟余额，都不能单独证明预测能力、PIT 资格、真实成交或可交易性。'),
+    'REAL_ONLY · 资格不会自动升级')+
+   card('页面职责',
+    row('数据仓库',link('/studio#warehouse','资产 · 来源 · 质量 · 更新 · 预览'))+
+    row('研究准入',badge('当前页面','blue'))+
+    row('严格回测',link('/backtests','查看回测资格与结果'))+
+    row('模拟组合',link('/paper','查看本地模拟账本'))+
+    note('本页不再重复展示数据集数量、行情来源、新鲜度或数据预览，避免与数据仓库职责重叠。'),
+    '资格判定与数据管理分离')+
+  '</div>';
+ return {title:'研究准入与资格',html};
 };
 })();
