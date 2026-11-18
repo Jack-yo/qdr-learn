@@ -20,8 +20,11 @@ from quant_research.research.l2_forecast import HORIZONS, STYLE_IDS
 from quant_research.workflow.l2_downstream import build_downstream_context
 
 
-CONTRACT_VERSION = "qdr-l2-l3-style-binding-v1"
-_SCOPE = "HISTORICAL_AND_CURRENT"
+CONTRACT_VERSION = "qdr-l2-l3-style-binding-v2"
+_SCOPE = "PIT_REPLAY_HISTORY_PLUS_CURRENT_FORWARD"
+_LEGACY_CONTRACT_VERSION = "qdr-l2-l3-style-binding-v1"
+_LEGACY_SCOPE = "HISTORICAL_AND_CURRENT"
+_CONTEXT_MODES = {"HISTORICAL_PIT_REPLAY", "CURRENT_FROZEN_FORWARD"}
 _SHA = re.compile(r"[0-9a-f]{64}\Z")
 
 
@@ -39,18 +42,40 @@ def style_column(style_id: str, horizon: int) -> str:
 
 
 def validate_l2_style_binding_receipt(receipt: dict) -> dict:
-    """Structural validation used by bundle/archive contracts."""
-    required = {
+    """Structural validation used by bundle/archive contracts.
+
+    V1 remains readable. All newly generated receipts use V2 and explicitly
+    distinguish historical causal replay from the one current forward-frozen
+    context.
+    """
+    base_required = {
         "contract_version", "scope", "start_session", "end_session", "rows",
         "style_columns", "context_identity_sha256", "model_versions",
         "label_bundle_sha256s", "feature_bundle_sha256s",
         "source_snapshot_sha256s", "binding_verified", "historical_pit_attested",
         "decision_eligible", "real_orders_enabled",
     }
-    if not isinstance(receipt, dict) or required - set(receipt):
+    if not isinstance(receipt, dict) or base_required - set(receipt):
         raise ValueError("L3_L2_STYLE_BINDING_RECEIPT_INCOMPLETE")
-    if receipt["contract_version"] != CONTRACT_VERSION or receipt["scope"] != _SCOPE:
+    version=receipt["contract_version"]
+    scope=receipt["scope"]
+    if version==_LEGACY_CONTRACT_VERSION:
+        if scope!=_LEGACY_SCOPE:
+            raise ValueError("L3_L2_STYLE_BINDING_RECEIPT_VERSION_INVALID")
+        required=base_required
+    elif version==CONTRACT_VERSION:
+        if scope!=_SCOPE:
+            raise ValueError("L3_L2_STYLE_BINDING_RECEIPT_VERSION_INVALID")
+        required=base_required|{
+            "context_modes", "admission_asof_session",
+            "admission_validation_identity", "current_forward_session",
+            "historical_replay_rows", "current_forward_rows",
+        }
+        if required-set(receipt):
+            raise ValueError("L3_L2_STYLE_BINDING_RECEIPT_INCOMPLETE")
+    else:
         raise ValueError("L3_L2_STYLE_BINDING_RECEIPT_VERSION_INVALID")
+
     try:
         start = pd.Timestamp(receipt["start_session"])
         end = pd.Timestamp(receipt["end_session"])
@@ -100,10 +125,51 @@ def validate_l2_style_binding_receipt(receipt: dict) -> dict:
             raise ValueError("L3_L2_STYLE_BINDING_BOOLEAN_INVALID")
     if receipt["decision_eligible"] is not False or receipt["real_orders_enabled"] is not False:
         raise ValueError("L3_L2_STYLE_BINDING_CANNOT_ENABLE_EXECUTION")
-    return {
-        key: receipt[key]
-        for key in sorted(required)
-    }
+
+    if version==CONTRACT_VERSION:
+        modes=receipt["context_modes"]
+        if (
+            not isinstance(modes,list) or not modes
+            or modes!=sorted(set(modes))
+            or not set(modes).issubset(_CONTEXT_MODES)
+        ):
+            raise ValueError("L3_L2_CONTEXT_MODES_INVALID")
+        try:
+            admission=pd.Timestamp(receipt["admission_asof_session"])
+        except (TypeError,ValueError):
+            raise ValueError("L3_L2_ADMISSION_SESSION_INVALID") from None
+        if admission.tzinfo is not None or admission!=admission.normalize():
+            raise ValueError("L3_L2_ADMISSION_SESSION_INVALID")
+        if not _SHA.fullmatch(str(receipt["admission_validation_identity"])):
+            raise ValueError("L3_L2_ADMISSION_IDENTITY_INVALID")
+        current=receipt["current_forward_session"]
+        if current is not None:
+            try:
+                current_day=pd.Timestamp(current)
+            except (TypeError,ValueError):
+                raise ValueError("L3_L2_CURRENT_FORWARD_SESSION_INVALID") from None
+            if (
+                current_day.tzinfo is not None
+                or current_day!=current_day.normalize()
+                or current_day<start or current_day>end
+            ):
+                raise ValueError("L3_L2_CURRENT_FORWARD_SESSION_INVALID")
+        replay_rows=receipt["historical_replay_rows"]
+        forward_rows=receipt["current_forward_rows"]
+        if (
+            type(replay_rows) is not int or replay_rows<0
+            or type(forward_rows) is not int or forward_rows not in (0,1)
+            or replay_rows+forward_rows!=receipt["rows"]
+        ):
+            raise ValueError("L3_L2_CONTEXT_MODE_ROW_COUNT_INVALID")
+        if ("CURRENT_FROZEN_FORWARD" in modes)!=(forward_rows==1):
+            raise ValueError("L3_L2_CURRENT_FORWARD_MODE_MISMATCH")
+        if ("HISTORICAL_PIT_REPLAY" in modes)!=(replay_rows>0):
+            raise ValueError("L3_L2_HISTORICAL_REPLAY_MODE_MISMATCH")
+        if (forward_rows==1)!=(current is not None):
+            raise ValueError("L3_L2_CURRENT_FORWARD_SESSION_MISMATCH")
+
+    return {key: receipt[key] for key in sorted(required)}
 
 
 def materialize_l2_style_history(
