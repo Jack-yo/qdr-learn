@@ -14,10 +14,16 @@ ROOT=Path(__file__).resolve().parents[1]
 APP=ROOT/"src/quant_research"
 SHELL=APP/"v4_shell.html"
 CORE="v4_ui_core.js"
-PAGES=("v4_ui_pages_a.js","v4_ui_pages_b.js","v4_ui_pages_c.js")
+PAGES=("v4_ui_pages_b.js","v4_ui_pages_c.js")
 DEDICATED=("v4_ui_market_v4.js","v4_ui_l2.js","v5_decision.js")
 EXTRA=("v4_ui_warehouse.js","v4_ui_theme.js")
 JS_ASSETS=(CORE,*PAGES,*EXTRA,*DEDICATED)
+LEGACY_UI=(
+    "v4_ui_pages_a.js","v4_ui_fidelity.js",
+    "v4_ui_market_v2.js","v4_ui_market_v2.css",
+    "v4_ui_market_v3.js","v4_ui_market_v3.css",
+    "v4_ui_light.css","v5_research.js","v5_ux.css",
+)
 
 
 def test_v5_workspace_hierarchy_and_assets_are_present():
@@ -29,7 +35,8 @@ def test_v5_workspace_hierarchy_and_assets_are_present():
     assert '/assets/v5_system.css' in html
     for name in JS_ASSETS:
         assert '/assets/'+name in html
-    assert 'v4_ui_fidelity.js' not in html
+    for name in LEGACY_UI:
+        assert name not in html
     assert 'id="v4-trading-date"' in html
     assert 'id="v4-source-status"' in html
     assert 'id="content"' in html
@@ -83,7 +90,7 @@ def test_research_readiness_remains_separate_from_data_assurance():
     page=source[start:]
     assert "settle('/api/v1/research/readiness')" in page
     for heading in (
-        "研究准入与资格","历史数据与 PIT 准入",
+        "研究准入","历史数据与 PIT 准入",
         "严格回测准入","前向研究准入","当前阻断与下一步",
     ):
         assert heading in page
@@ -97,11 +104,13 @@ def test_server_default_entry_and_all_v5_assets_are_allowlisted():
     assert "'/assets/v5_system.css'" in script
     for name in JS_ASSETS:
         assert "'/assets/"+name+"'" in script
+    for name in LEGACY_UI:
+        assert "'/assets/"+name+"'" not in script
     assert "app_shell.html" in script
     assert 'src="http://' not in html
 
 
-def test_dedicated_v5_desks_override_legacy_page_definitions_last():
+def test_dedicated_v5_desks_load_after_shared_workspaces():
     html=SHELL.read_text(encoding="utf-8")
     market=(APP/"assets"/"v4_ui_market_v4.js").read_text(encoding="utf-8")
     style=(APP/"assets"/"v4_ui_l2.js").read_text(encoding="utf-8")
@@ -115,6 +124,7 @@ def test_dedicated_v5_desks_override_legacy_page_definitions_last():
     assert "pages.overview=async" in decision
     assert "/api/v1/l2/styles/validation" in style
     assert ".v4-subtab[aria-selected=\"true\"]" in system
+    assert "v4_ui_pages_a.js" not in html
     assert "v4_ui_fidelity.js" not in html
 
 
