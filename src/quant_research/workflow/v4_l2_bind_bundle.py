@@ -78,8 +78,6 @@ def create_l2_bound_v4_bundle(
     source_folder = root / "data/managed/v4_inputs" / source_bundle_id
     parent = root / "data/managed/v4_inputs"
     destination = parent / output_bundle_id
-    if destination.exists():
-        raise FileExistsError("L2_BOUND_V4_BUNDLE_ALREADY_EXISTS")
     if "market_style" not in frames:
         raise ValueError("L2_BOUND_MARKET_STYLE_INPUT_MISSING")
 
@@ -88,6 +86,42 @@ def create_l2_bound_v4_bundle(
     receipt = validate_l2_style_binding_receipt(
         build_l2_style_history_binding(root, bound_style)
     )
+    source_manifest_path = source_folder / "manifest.json"
+    source_manifest_sha = _digest(source_manifest_path)
+
+    if destination.exists():
+        try:
+            _existing_frames, existing_manifest = _checked_inputs(
+                root, output_bundle_id
+            )
+            existing_receipt = validate_l2_style_binding_receipt(
+                existing_manifest.get("l2_style_context_receipt")
+            )
+        except Exception as exc:
+            raise FileExistsError(
+                "L2_BOUND_V4_BUNDLE_EXISTS_BUT_IS_NOT_VERIFIABLE"
+            ) from exc
+        if (
+            existing_manifest.get("derived_from_bundle_id") == source_bundle_id
+            and existing_manifest.get("derived_from_manifest_sha256")
+                == source_manifest_sha
+            and existing_receipt.get("context_identity_sha256")
+                == receipt.get("context_identity_sha256")
+        ):
+            return {
+                "status": "L2_BOUND_V4_BUNDLE_ALREADY_EXISTS",
+                "source_bundle_id": source_bundle_id,
+                "output_bundle_id": output_bundle_id,
+                "market_style_rows": int(len(_existing_frames["market_style"])),
+                "l2_style_binding_context_sha256":
+                    existing_receipt["context_identity_sha256"],
+                "l2_style_historical_pit_attested":
+                    existing_receipt["historical_pit_attested"],
+                "artifacts_sha256": existing_manifest["artifacts_sha256"],
+                "decision_eligible": False,
+                "real_orders_enabled": False,
+            }
+        raise FileExistsError("L2_BOUND_V4_BUNDLE_IDENTITY_CONFLICT")
 
     parent.mkdir(parents=True, exist_ok=True)
     temp = Path(tempfile.mkdtemp(prefix=".l2-bound-", dir=parent))
@@ -106,13 +140,12 @@ def create_l2_bound_v4_bundle(
                 if _digest(temp / filename) != digests[filename]:
                     raise ValueError("L2_BOUND_SOURCE_ARTIFACT_CHANGED:" + filename)
 
-        source_manifest_path = source_folder / "manifest.json"
         output_manifest = {
             **manifest,
             "artifacts_sha256": digests,
             "l2_style_context_receipt": receipt,
             "derived_from_bundle_id": source_bundle_id,
-            "derived_from_manifest_sha256": _digest(source_manifest_path),
+            "derived_from_manifest_sha256": source_manifest_sha,
             "l2_binding_materialized_at_utc": datetime.now(timezone.utc).isoformat(),
             "decision_eligible": False,
             "real_orders_enabled": False,
