@@ -35,7 +35,7 @@ The ETF portfolios are investable style proxies, not pure academic factors and n
 | low_vol | Low volatility | USMV | SPY | Low-volatility ETF |
 | cyc_def | Cyclical vs defensive | Equal-weight XLI/XLY/XLB/XLF | Equal-weight XLP/XLU/XLV | Relative return of two fixed sector baskets |
 
-Cyclical and defensive basket membership is versioned and frozen. Initial weights are equal-weight within each basket, reset on a common, explicit schedule. The spread is cyclical basket return minus defensive basket return. If any required component is missing for a session, the composite for that session is null; no weight redistribution, forward-fill, or fabricated observation is allowed.
+Cyclical and defensive basket membership is versioned and frozen. Initial weights are equal-weight within each basket, rebalanced to equal weights every exchange session (daily constant-weight return series, not a buy-and-hold ETF basket). The spread is cyclical basket return minus defensive basket return. If any required component is missing for a session, the composite for that session is null; no weight redistribution, forward-fill, or fabricated observation is allowed.
 
 Value and Growth are intentionally retained as separate views for user interpretation, but they are a related pair and must not be counted as independent evidence in composite models without correlation/collinearity controls.
 
@@ -191,10 +191,13 @@ Implemented in the initial P1 increment:
 
 - `GET /api/v1/l2/styles/overview?asof=&cutoff=&start=` — read-only observation payload using the existing verified Yahoo split-adjusted bundle. It returns the registry, latest seven style rows, 126-session history per style, per-symbol coverage, source snapshot hash, and explicit observation-only limitations.
 
+Implemented in P2 (observation-only):
+
+- `GET /api/v1/l2/styles/rotation?asof=&cutoff=&start=` — latest states, recent state history, genuine transitions; historical replay is current-vintage, not PIT-certified.
+
 Still proposed, not implemented:
 
 - `GET /api/v1/l2/styles/history?style_id=&start=&end=`
-- `GET /api/v1/l2/styles/rotation?asof=`
 - `GET /api/v1/l2/styles/forecast?style_id=&horizon=&asof=`
 - `GET /api/v1/l2/styles/drivers?style_id=&asof=`
 - `GET /api/v1/l2/styles/validation?style_id=&horizon=&model_version=`
