@@ -258,5 +258,125 @@ def test_verified_l2_l3_identity_binding_is_separate_from_historical_pit(
     assert l3["style_input_binding_verified"] is True
     assert l3["style_historical_pit_attested"] is False
     assert l3["style_binding_context_sha256"] == "9" * 64
+    assert l3["downstream_context_eligible"] is False
     assert result["blockers"] == ["L3_L2_STYLE_HISTORY_NOT_PIT_ATTESTED"]
+    assert result["complete_four_layer_context"] is False
+
+
+def _wire_ready_four_layers(monkeypatch, *, l3_overrides=None):
+    monkeypatch.setattr(
+        v4_layer_status,
+        "market_overview_for_api",
+        lambda root, horizon, asof=None: {
+            "status": "MODEL_OOS_ADMITTED",
+            "asof_session": "2026-01-30",
+            "model_version": "l1-v1",
+            "model_admitted": True,
+            "current_prediction_eligible": True,
+            "forecast": {"expected_return": 0.001},
+            "source_snapshot_sha256": "1" * 64,
+        },
+    )
+    monkeypatch.setattr(
+        v4_layer_status,
+        "build_downstream_context",
+        lambda root, asof=None: {
+            "status": "MODEL_ADMITTED_CONTEXT",
+            "asof_session": "2026-01-30",
+            "model_version": "ridge-v1",
+            "admitted_units": 3,
+            "l3_style_context_available": True,
+            "source_snapshot_sha256": "4" * 64,
+            "label_bundle_id": "labels-v1",
+            "label_bundle_sha256": "2" * 64,
+            "feature_bundle_id": "features-v1",
+            "feature_bundle_sha256": "5" * 64,
+            "historical_feature_pit_attested": True,
+            "forecast_identity": "6" * 64,
+            "validation_identity": "7" * 64,
+        },
+    )
+    l3 = {
+        "session_date_et": "2026-01-30",
+        "identity": "l3-current",
+        "status": "VERIFIED_LOCAL_FORWARD_RESEARCH_ONLY",
+        "forecast_rows": 50,
+        "source_snapshot_sha256": "8" * 64,
+        "l2_style_binding_verified": True,
+        "l2_style_historical_pit_attested": True,
+        "l2_style_binding_context_sha256": "9" * 64,
+        "l2_style_binding_start_session": "2025-01-02",
+        "l2_style_binding_end_session": "2026-01-30",
+        "l2_style_model_versions": ["ridge-v1"],
+        "l2_style_label_bundle_sha256s": ["2" * 64],
+        "l2_style_feature_bundle_sha256s": ["5" * 64],
+        "l2_style_source_snapshot_sha256s": ["4" * 64],
+    }
+    if l3_overrides:
+        l3.update(l3_overrides)
+    monkeypatch.setattr(
+        v4_layer_status,
+        "latest_forward_research",
+        lambda root, limit=20: [l3],
+    )
+    monkeypatch.setattr(
+        v4_layer_status,
+        "latest_indicative_reviews",
+        lambda root, limit=30: {"records": [{
+            "session_date_et": "2026-01-30",
+            "identity": "l4-current",
+            "status": "RESEARCH_PLANS_ONLY",
+            "research_plan_count": 2,
+            "source_snapshot_sha256": "8" * 64,
+        }]},
+    )
+
+
+def test_four_layer_context_can_be_ready_only_with_matching_l2_l3_provenance(
+    tmp_path, monkeypatch
+):
+    _wire_ready_four_layers(monkeypatch)
+    result = v4_layer_status.four_layer_status(
+        tmp_path, asof="2026-01-30", horizon=3
+    )
+    assert result["status"] == "FOUR_LAYER_RESEARCH_CONTEXT_READY"
+    assert result["blockers"] == []
+    assert result["complete_four_layer_context"] is True
+    assert result["layers"]["l3_alpha"]["downstream_context_eligible"] is True
+    assert result["decision_eligible"] is False
+    assert result["execution_eligible"] is False
+    assert result["real_orders_enabled"] is False
+
+
+def test_stale_l3_receipt_cannot_bind_to_new_l2_model_or_bundles(
+    tmp_path, monkeypatch
+):
+    _wire_ready_four_layers(
+        monkeypatch,
+        l3_overrides={
+            "l2_style_model_versions": ["old-ridge"],
+            "l2_style_label_bundle_sha256s": ["a" * 64],
+            "l2_style_feature_bundle_sha256s": ["b" * 64],
+            "l2_style_source_snapshot_sha256s": ["c" * 64],
+        },
+    )
+    result = v4_layer_status.four_layer_status(
+        tmp_path, asof="2026-01-30", horizon=3
+    )
+    assert result["complete_four_layer_context"] is False
+    assert "L3_L2_MODEL_VERSION_BINDING_MISMATCH" in result["blockers"]
+    assert "L3_L2_LABEL_BUNDLE_BINDING_MISMATCH" in result["blockers"]
+    assert "L3_L2_FEATURE_BUNDLE_BINDING_MISMATCH" in result["blockers"]
+    assert "L3_L2_SOURCE_BINDING_MISMATCH" in result["blockers"]
+
+
+def test_l3_receipt_must_cover_current_signal_session(tmp_path, monkeypatch):
+    _wire_ready_four_layers(
+        monkeypatch,
+        l3_overrides={"l2_style_binding_end_session": "2026-01-29"},
+    )
+    result = v4_layer_status.four_layer_status(
+        tmp_path, asof="2026-01-30", horizon=3
+    )
+    assert "L3_L2_BINDING_SESSION_MISMATCH" in result["blockers"]
     assert result["complete_four_layer_context"] is False
