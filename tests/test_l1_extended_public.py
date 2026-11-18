@@ -251,6 +251,44 @@ def test_unknown_destination_is_refused(tmp_path):
         src.request("https://example.org/bad.json")
 
 
+def test_spy_level1_quote_spread_is_timestamped_and_persisted_as_microstructure():
+    class FakeLive:
+        env={}
+        def assets(self, refresh=False):
+            return ([{"symbol":"SPY"},{"symbol":"AAPL"}],
+                    {"sha256":"4"*64,"fetched_at":"2026-11-17T22:30:00+00:00"})
+        def snapshots_for_symbols(self, symbols, refresh=False, batch_size=200, max_workers=4):
+            return ({
+                "SPY":{
+                    "dailyBar":{"t":"2026-11-17T21:00:00Z","c":600,"v":1000},
+                    "prevDailyBar":{"t":"2026-11-16T21:00:00Z","c":599},
+                    "latestQuote":{"bp":599.9,"ap":600.1,"t":"2026-11-17T22:25:00Z"},
+                },
+                "AAPL":{
+                    "dailyBar":{"t":"2026-11-17T21:00:00Z","c":200,"v":1000},
+                    "prevDailyBar":{"t":"2026-11-16T21:00:00Z","c":199},
+                },
+            },[{"sha256":"5"*64,"fetched_at":"2026-11-17T22:30:00+00:00",
+                "source":"ALPACA_delayed_sip"}],[])
+        def request(self,*args,**kwargs):
+            raise SourceUnavailable("OFFLINE_FIXTURE")
+        def bars(self,*args,**kwargs):
+            raise SourceUnavailable("OFFLINE_FIXTURE")
+
+    result=scan_extended_public(
+        "/tmp/qdr-l1-quote-fixture",sources=FakeLive(),
+        now=datetime(2026,11,17,22,30,tzinfo=timezone.utc))
+    quote=next(x for x in result["features"] if x["id"]=="spy_level1_spread_bps")
+    assert quote["domain"]=="microstructure"
+    assert quote["value"]==pytest.approx((0.2/600.0)*10000,abs=0.001)
+    assert quote["unit"]=="bps"
+    assert quote["pit"]=="LEVEL1_QUOTE_NOT_FULL_DEPTH"
+    assert quote["observed_date"]=="2026-11-17"
+    assert quote["metadata"]["quote_timestamp"]=="2026-11-17T22:25:00+00:00"
+    assert quote["metadata"]["quote_age_seconds"]==300.0
+    assert result["source_health"]["market_breadth"]["status"]=="OBSERVED"
+
+
 def test_broad_market_breadth_uses_full_active_asset_snapshot_coverage():
     from quant_research.data.l1_public_extended import ExtendedPublicSources
 
@@ -302,6 +340,43 @@ def test_broad_market_breadth_does_not_call_a_partial_snapshot_full_coverage():
     assert row["coverage_n"]==60 and row["expected_n"]==100
     assert row["market_snapshot_coverage_pct"]==60
     assert row["batch_error_count"]==1
+
+
+def test_broad_market_breadth_never_uses_older_more_populated_session():
+    from quant_research.data.l1_public_extended import ExtendedPublicSources
+
+    class FakeLive:
+        def assets(self, refresh=False):
+            assets=[{"symbol":f"STK{i:03d}"} for i in range(100)]
+            return assets,{"sha256":"2"*64,"fetched_at":"2026-11-17T22:30:00+00:00"}
+
+        def snapshots_for_symbols(self, symbols, refresh=False, batch_size=200, max_workers=4):
+            snapshots={}
+            # Older session has 90% coverage, but the newest session has only 10%.
+            for symbol in symbols[:90]:
+                snapshots[symbol]={
+                    "dailyBar":{"t":"2026-11-16T21:00:00Z","c":101,"v":100},
+                    "prevDailyBar":{"t":"2026-11-13T21:00:00Z","c":100},
+                }
+            for symbol in symbols[90:100]:
+                snapshots[symbol]={
+                    "dailyBar":{"t":"2026-11-17T21:00:00Z","c":102,"v":100},
+                    "prevDailyBar":{"t":"2026-11-16T21:00:00Z","c":101},
+                }
+            return snapshots,[{"sha256":"3"*64,"fetched_at":"2026-11-17T22:30:00+00:00"}],[]
+
+    provider=ExtendedPublicSources(FakeLive())
+    values,receipt=provider.market_breadth(
+        "2026-11-17",
+        now=__import__("datetime").datetime.fromisoformat("2026-11-17T22:30:00+00:00"))
+    row=values["2026-11-17"]
+    assert row["observed_date"]=="2026-11-17"
+    assert row["coverage_n"]==10 and row["expected_n"]==100
+    assert row["market_snapshot_coverage_pct"]==10
+    assert row["observation_mode"]=="COMPLETED_DAILY_BAR"
+    assert row["session_observation_counts"]=={
+        "2026-11-16":90,"2026-11-17":10}
+    assert receipt["coverage"]==0.1
 
 
 def test_alpaca_asset_directory_and_batched_snapshots_are_bounded(tmp_path):
