@@ -76,6 +76,12 @@ def run_managed_alpha_study(root: Path, *, bundle_id: str, run_id: str,
     if (not isinstance(factor_names,list) or not factor_names
             or any(not isinstance(x,str) or not x for x in factor_names)):
         raise ValueError('Explicit factor names required in source bundle')
+    binding_receipt=manifest.get('l2_style_context_receipt')
+    if binding_receipt is not None:
+        from quant_research.workflow.l2_l3_binding import (
+            verify_l2_style_history_binding)
+        verify_l2_style_history_binding(
+            root,frames['market_style'],binding_receipt)
     protocol_path=root/'configs/experiments/v4_research.yaml'
     config=yaml.safe_load(protocol_path.read_text(encoding='utf-8'))
     protocol=OOSProtocol(**config['oos'])
