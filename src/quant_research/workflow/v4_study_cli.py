@@ -58,6 +58,12 @@ def _checked_inputs(root, bundle_id):
                 or sha256(file.read_bytes()).hexdigest()!=expected):
             raise ValueError(f'Research input file changed: {name}')
         frames[name.split('.')[0]]=pd.read_parquet(file)
+    manifest=dict(manifest)
+    if 'l2_style_context_receipt' in manifest:
+        from quant_research.workflow.l2_l3_binding import (
+            validate_l2_style_binding_receipt)
+        manifest['l2_style_context_receipt']=validate_l2_style_binding_receipt(
+            manifest['l2_style_context_receipt'])
     return frames,manifest
 
 
