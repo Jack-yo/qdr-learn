@@ -54,6 +54,7 @@ ABLATION_FEATURE_SETS = {
 
 @dataclass(frozen=True)
 class ValidationConfig:
+    oos_evaluation_sessions: int = 252
     min_oos_sessions: int = 126
     min_relative_mse_gain_vs_best_baseline: float = 0.02
     min_directional_accuracy: float = 0.52
@@ -70,6 +71,8 @@ class ValidationConfig:
     def validate(self) -> None:
         if self.min_oos_sessions < 30:
             raise ValueError("min_oos_sessions must be at least 30")
+        if self.oos_evaluation_sessions < self.min_oos_sessions:
+            raise ValueError("oos_evaluation_sessions must cover min_oos_sessions")
         if self.min_subperiods < 2 or self.min_subperiods > 12:
             raise ValueError("min_subperiods must be between 2 and 12")
         for name, value in (
