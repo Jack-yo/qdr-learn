@@ -120,6 +120,13 @@ def preflight_v4_day(root: Path, session_date: str, bundle_id: str,
     if (len(state_t)!=1
             or not pd.to_datetime(state_t.state_available_at,utc=True).le(signal).all()):
         raise ValueError("MARKET_STYLE_NOT_KNOWN_AS_OF_T")
+    l2_binding=None
+    if manifest.get("l2_style_context_receipt") is not None:
+        from quant_research.workflow.l2_l3_binding import (
+            verify_l2_style_history_binding)
+        l2_binding=verify_l2_style_history_binding(
+            Path(root).resolve(),states,manifest["l2_style_context_receipt"],
+            clock=clock)
     # Require exact T-day stock/factor/horizon coverage. A verified source
     # hash alone must not hide inner-join attrition or NaN candidate factors.
     from quant_research.workflow.v4_bundle_contract import audit_forward_candidate_cohort
@@ -131,5 +138,11 @@ def preflight_v4_day(root: Path, session_date: str, bundle_id: str,
             "source_symbols":source_symbols,
             "checked_candidate_rows":len(metadata),
             "checked_forward_label_rows":len(upcoming),
+            "l2_style_binding_verified":bool(
+                l2_binding and l2_binding.get("binding_verified") is True),
+            "l2_style_historical_pit_attested":bool(
+                l2_binding and l2_binding.get("historical_pit_attested") is True),
+            "l2_style_binding_context_sha256":(
+                l2_binding.get("context_identity_sha256") if l2_binding else None),
             "real_orders_enabled":False,
             "historical_pit_attested":False}
