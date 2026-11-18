@@ -89,3 +89,77 @@ def test_v2_source_input_contract_tampering_is_detected(tmp_path):
     path.write_text(json.dumps(manifest),encoding='utf-8')
     with pytest.raises(ValueError,match='input provenance'):
         read_research_forecast(tmp_path,'2025-01-02',identity)
+
+
+def _l2_binding_receipt(context_sha="1" * 64, historical_pit=False):
+    return {
+        "contract_version": "qdr-l2-l3-style-binding-v1",
+        "scope": "HISTORICAL_AND_CURRENT",
+        "start_session": "2025-01-02",
+        "end_session": "2025-01-02",
+        "rows": 1,
+        "style_columns": ["style_l2_size_h3"],
+        "context_identity_sha256": context_sha,
+        "model_versions": ["ridge-v1"],
+        "label_bundle_sha256s": ["2" * 64],
+        "binding_verified": True,
+        "historical_pit_attested": historical_pit,
+        "decision_eligible": False,
+        "real_orders_enabled": False,
+    }
+
+
+def test_l2_style_binding_receipt_changes_l3_forecast_identity(tmp_path):
+    base = {
+        "artifacts_sha256": {
+            "factors.parquet": "c" * 64,
+            "labels.parquet": "d" * 64,
+            "market_style.parquet": "e" * 64,
+        },
+        "factor_names": ["alpha"],
+        "source_symbols": ["AAA"],
+        "l2_style_context_receipt": _l2_binding_receipt(),
+    }
+    first = freeze_research_forecast(
+        tmp_path, _forecast(), protocol_sha256="b" * 64,
+        input_contract=base,
+    )
+    changed = {
+        **base,
+        "l2_style_context_receipt": _l2_binding_receipt("3" * 64),
+    }
+    second = freeze_research_forecast(
+        tmp_path, _forecast(), protocol_sha256="b" * 64,
+        input_contract=changed,
+    )
+    assert first["manifest"]["identity"] != second["manifest"]["identity"]
+    records = latest_forward_research(tmp_path, limit=5)
+    assert len(records) == 2
+    assert all(row["l2_style_binding_verified"] is True for row in records)
+    assert all(
+        row["l2_style_historical_pit_attested"] is False
+        for row in records
+    )
+    assert {row["l2_style_binding_context_sha256"] for row in records} == {
+        "1" * 64, "3" * 64,
+    }
+
+
+def test_l2_binding_receipt_cannot_claim_execution_in_l3_archive(tmp_path):
+    receipt = _l2_binding_receipt()
+    receipt["decision_eligible"] = True
+    contract = {
+        "artifacts_sha256": {
+            "factors.parquet": "c" * 64,
+            "labels.parquet": "d" * 64,
+            "market_style.parquet": "e" * 64,
+        },
+        "factor_names": ["alpha"],
+        "source_symbols": ["AAA"],
+        "l2_style_context_receipt": receipt,
+    }
+    with pytest.raises(ValueError, match="CANNOT_ENABLE_EXECUTION"):
+        freeze_research_forecast(
+            tmp_path, _forecast(), protocol_sha256="b" * 64,
+            input_contract=contract,
+        )
