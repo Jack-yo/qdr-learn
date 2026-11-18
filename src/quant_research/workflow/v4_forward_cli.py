@@ -90,7 +90,7 @@ def run_managed_forward(root: Path, *, bundle_id: str, asof_session: str) -> dic
     # represented as the earlier fingerprint or admitted retrospectively.
     _,current_manifest=_checked_inputs(root,bundle_id)
     for field in ('source_snapshot_sha256','artifacts_sha256',
-                  'factor_names','source_symbols'):
+                  'factor_names','source_symbols','l2_style_context_receipt'):
         if current_manifest.get(field)!=manifest.get(field):
             raise ValueError('MODEL_INPUT_CHANGED_DURING_FIT_NO_ARCHIVE_WRITE')
     if sha256(config_path.read_bytes()).hexdigest()!=config_sha:
