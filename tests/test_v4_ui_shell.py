@@ -58,6 +58,23 @@ def test_javascript_syntax(name):
     assert result.returncode==0,result.stderr
 
 
+
+def test_research_readiness_workspace_is_separate_from_data_warehouse():
+    shell=SHELL.read_text(encoding='utf-8')
+    source=(APP/'assets'/'v4_ui_pages_c.js').read_text(encoding='utf-8')
+    assert '>研究准入<' in shell
+    assert 'PIT · 回测 · 前向研究' in shell
+    start=source.index('pages.data=async()=>{')
+    page=source[start:]
+    assert "settle('/api/v1/research/readiness')" in page
+    for forbidden in ('实际接入证券','行情来源与使用边界',
+                      '统一决策时点与模块新鲜度','数据快照 SHA256'):
+        assert forbidden not in page
+    for heading in ('研究准入与资格','历史数据与 PIT 准入',
+                    '严格回测准入','前向研究准入','当前阻断与下一步'):
+        assert heading in page
+
+
 def test_server_default_entry_and_legacy_tools():
     script=(APP/'web.py').read_text(encoding='utf-8')
     assert 'if path in {"/","/studio"}' in script

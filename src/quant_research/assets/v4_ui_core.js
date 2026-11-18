@@ -24,15 +24,73 @@ const note=(text)=>'<div class="v4-muted-note">'+e(text)+'</div>';
 const row=(label,value)=>'<div class="v4-stat-pair"><span class="muted">'+e(label)+'</span><b>'+value+'</b></div>';
 const table=(cols,data)=> data&&data.length?'<div class="v4-table-scroll"><table class="table"><thead><tr>'+cols.map(x=>'<th>'+e(x)+'</th>').join('')+'</tr></thead><tbody>'+data.map((r,i)=>'<tr'+(i===0?' class="selected"':'')+'>'+r.map(c=>'<td>'+c+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>':empty('暂无符合条件的数据','当前没有已验证的研究记录，不显示示意数据。');
 const fail=(error)=>empty('无法读取真实研究结果',String(error?.message||error?.code||'数据或来源资格尚未满足，请前往数据中心检查。'));
+const moduleLoading=(name)=>'<section class="v4-module-state is-loading" role="status" aria-live="polite"><span class="v4-module-spinner"></span><div><b>'+e(name)+'正在加载</b><small>其他模块可以继续使用；数据返回后会自动更新。</small></div></section>';
+const moduleError=(name,error,retryUrl='')=>'<section class="v4-module-state is-error" role="alert" data-v4-module-error><div><b>'+e(name)+'加载失败</b><small>'+e(error?.message||error?.code||'暂时无法读取，请稍后重试。')+'</small></div><button type="button" class="btn smallbtn" data-v4-retry="'+e(retryUrl)+'">重新加载</button></section>';
 const value=(d,k)=>Object.prototype.hasOwnProperty.call(d||{},k)?d[k]:null;
-const api=async (path,body)=>{
+const api=async (path,body,signal)=>{
  const opts=body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':window.CONSOLE_TOKEN},body:JSON.stringify(body)};
- let r;try{r=await fetch(path,opts)}catch(_){throw Error('无法连接本地研究服务')}
+ if(signal)opts.signal=signal;
+ let r;try{r=await fetch(path,opts)}catch(error){throw Error(error?.name==='AbortError'?'数据请求超时，请稍后重试':'无法连接本地研究服务')}
  let j;try{j=await r.json()}catch(_){throw Error('服务未返回有效 JSON')}
  if(!r.ok)throw Error(j.code||j.message||'HTTP '+r.status);
  return j;
 };
-const settle=async(url)=>{try{return {ok:true,data:await api(url)}}catch(error){return {ok:false,error}}};
+/* Progressive, bounded in-memory GET cache. Only page renders use optimistic reads;
+   actions and top-bar checks retain their normal awaited semantics. */
+const settledGet=async(url,signal)=>{
+ try{return {ok:true,data:await api(url,undefined,signal)}}
+ catch(error){return {ok:false,error}}
+};
+const viewResults=new Map();
+let buildingPage=0, visibleRequests=new Set(), redrawTimer=null;
+const pendingResult=()=>({ok:false,pending:true,error:{message:'数据正在独立加载'}});
+function redrawSoon(){
+ if(redrawTimer)return;
+ redrawTimer=setTimeout(()=>{
+   redrawTimer=null;
+   if(state.page && pages[state.page])show(state.page,true);
+ },120);
+}
+function readProgressively(url){
+ visibleRequests.add(url);
+ const now=Date.now();
+ let entry=viewResults.get(url);
+ if(entry){
+   viewResults.delete(url);viewResults.set(url,entry);
+   if(entry.value && entry.expires>now)return Promise.resolve(entry.value);
+ }else{
+   entry={value:null,expires:0,pending:false};
+   viewResults.set(url,entry);
+ }
+ if(!entry.pending){
+   entry.value=null;entry.pending=true;
+   const selected=entry;
+   const controller=new AbortController();
+   entry.controller=controller;
+   const timeout=setTimeout(()=>controller.abort(),30000);
+   settledGet(url,controller.signal).then(value=>{
+     clearTimeout(timeout);
+     if(viewResults.get(url)!==selected)return;
+     selected.value=value;
+     selected.expires=Date.now()+(value.ok?60000:12000);
+     selected.pending=false;
+     redrawSoon();
+   });
+   // Bounded memory regardless of navigation churn.
+   while(viewResults.size>80){
+     const oldest=viewResults.keys().next().value;
+     const removed=viewResults.get(oldest);
+     if(removed?.pending)removed.controller?.abort();
+     viewResults.delete(oldest);
+   }
+ }
+ return Promise.resolve(pendingResult());
+}
+const settle=async(url)=>{
+ if(buildingPage>0 && typeof url==='string' && url.startsWith('/api/'))
+   return readProgressively(url);
+ return settledGet(url);
+};
 const grid=(cols,body)=>'<div class="grid cols'+cols+'">'+body+'</div>';
 const toolbar=(body)=>'<div class="v4-toolbar">'+body+'</div>';
 const field=(label,id,type='text',value='',extra='')=>'<div class="v4-field"><label for="'+e(id)+'">'+e(label)+'</label><input type="'+e(type)+'" id="'+e(id)+'" value="'+e(value)+'" '+extra+' /></div>';
@@ -54,32 +112,74 @@ const toast=(txt)=>{
  el.style.pointerEvents='none';el.innerHTML='<div class="v4-message">'+e(txt)+'</div>';clearTimeout(toast.id);toast.id=setTimeout(()=>el.innerHTML='',5500);
 };
 async function updateStatus(){
- const [daily,fresh]=await Promise.all([settle('/api/v1/v4/daily'),settle('/api/v1/v4/freshness')]);
+ const [daily,fresh]=await Promise.all([settledGet('/api/v1/v4/daily'),settledGet('/api/v1/v4/freshness')]);
  const latest=(daily.ok?daily.data.runs||[]:[])[0]||null;
  const clock=fresh.ok?fresh.data:null;
  $('#v4-trading-date').textContent=clock?.asof_session||latest?.session_date_et||'—';
  $('#v4-source-status').textContent=clock?.modules?.market_observation?.freshness_status||'待验证';
  $('#v4-model-status').textContent=latest?.session_date_et===clock?.asof_session?latest.status:'当前批次未完成';
 }
-async function show(page){
- const key=pages[page]?page:'overview';state.page=key;const epoch=++state.epoch;
+function loadingSkeleton(key){
+ const names={overview:'总览',market:'市场未来展望',style:'经典因子',lab:'因子实验室',screen:'选股研究',risk:'持仓与风控',data:'研究准入',warehouse:'数据仓库'};
+ return '<div class="v4-page-skeleton" role="status" aria-live="polite"><h1>'+e(names[key]||'研究工作区')+'</h1><p>页面已就绪，各模块正在独立读取真实数据…</p><div class="v4-skeleton-grid">'+
+   Array.from({length:4},()=>'<div class="v4-skeleton-block v4-skeleton-kpi"><i></i><b></b></div>').join('')+
+   '</div><div class="v4-skeleton-grid two">'+
+   Array.from({length:2},()=>'<div class="v4-skeleton-block v4-skeleton-panel"><i></i><b></b><b></b></div>').join('')+'</div></div>';
+}
+async function show(page,progressive=false){
+ const key=pages[page]?page:'overview';
+ const changePage=state.page!==key;
+ state.page=key;const epoch=++state.epoch;
  document.querySelectorAll('[data-page]').forEach(x=>{
    x.classList.toggle('active',x.dataset.page===key||(x.id==='nav-alpha'&&['lab','screen'].includes(key)));
    x.setAttribute('aria-current',x.dataset.page===key?'page':'false');
  });
- root.innerHTML='<div style="padding:20px;color:#94a9c4">正在读取真实研究数据…</div>';
- const slow=setTimeout(()=>{if(epoch===state.epoch)root.innerHTML='<div class="v4-empty"><b>研究数据读取时间较长</b>仍在等待本地数据服务响应。页面会在读取完成后自动显示；请检查数据中心及服务状态。</div>';},8000);
- try{const result=await pages[key]();if(epoch!==state.epoch)return;
-  setContent(result.html);
-  if(typeof result.mount==='function')result.mount();
-  document.title='QDR Quant Studio · '+e(result.title||key);
- }catch(error){if(epoch===state.epoch)setContent(heading('研究数据暂不可用','该模块未获得合格数据')+fail(error));}
- finally{clearTimeout(slow);}
+ const previousScroll=root.scrollTop;
+ const existingDetails=[...root.querySelectorAll('details')].map(node=>node.open);
+ const focused=(root.contains(document.activeElement)&&document.activeElement.id)?document.activeElement.id:null;
+ const selection=focused&&Number.isInteger(document.activeElement.selectionStart)?
+   [document.activeElement.selectionStart,document.activeElement.selectionEnd]:null;
+ if(changePage||!root.children.length)root.innerHTML=loadingSkeleton(key);
+ const requested=new Set();visibleRequests=requested;
+ buildingPage++;
+ try{
+   const result=await pages[key]();
+   if(epoch!==state.epoch)return;
+   const count=[...requested].filter(url=>viewResults.get(url)?.pending).length;
+   const banner=count?'<div class="v4-pending-banner" role="status" aria-live="polite"><span class="v4-pending-dot"></span>正在加载 '+count+' 项数据模块；尚未返回的内容不代表数据缺失。</div>':'';
+   setContent(banner+result.html);
+   if((progressive||!changePage)&&previousScroll>0)root.scrollTop=previousScroll;
+   existingDetails.forEach((isOpen,i)=>{
+     if(isOpen){const detail=root.querySelectorAll('details')[i];if(detail)detail.open=true;}
+   });
+   if(typeof result.mount==='function'){
+     try{result.mount();}
+     catch(error){root.insertAdjacentHTML('afterbegin',moduleError('页面交互模块',error));}
+   }
+   if(focused){
+     const node=document.getElementById(focused);
+     if(node){node.focus({preventScroll:true});if(selection&&node.setSelectionRange){try{node.setSelectionRange(...selection)}catch(_){/* non-text input */}}}
+   }
+   document.title='QDR Quant Studio · '+e(result.title||key);
+ }catch(error){
+   if(epoch===state.epoch){
+     const oldError=root.querySelector('[data-v4-render-error]');
+     const failure=moduleError('当前模块',error);
+     if(oldError)oldError.outerHTML=failure.replace('data-v4-module-error','data-v4-render-error');
+     else if(changePage||!root.children.length)setContent(failure.replace('data-v4-module-error','data-v4-render-error'));
+     else root.insertAdjacentHTML('afterbegin',failure.replace('data-v4-module-error','data-v4-render-error'));
+   }
+ }finally{buildingPage--;}
 }
 function go(page){
  const key=pages[page]?page:'overview';
  if(location.hash.slice(1)!==key)location.hash=key;
  else show(key);
+}
+function refresh(prefix=''){
+ if(!prefix)viewResults.clear();
+ else for(const key of [...viewResults.keys()])if(key.startsWith(prefix))viewResults.delete(key);
+ show(state.page,true);
 }
 function boot(){
  document.querySelectorAll('[data-page]').forEach(x=>{
@@ -88,9 +188,16 @@ function boot(){
   x.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();go(x.dataset.page)}});
  });
  window.addEventListener('hashchange',()=>show(location.hash.slice(1)));
- $('#v4-refresh')?.addEventListener('click',()=>{updateStatus();show(state.page)});
+ root.addEventListener('click',event=>{
+   const retry=event.target?.closest?.('[data-v4-retry]');
+   if(!retry)return;
+   const url=retry.getAttribute('data-v4-retry')||'';
+   if(url)viewResults.delete(url);else viewResults.clear();
+   show(state.page,true);
+ });
+ $('#v4-refresh')?.addEventListener('click',()=>{viewResults.clear();updateStatus();show(state.page)});
  updateStatus();show(location.hash.slice(1)||'overview');
 }
-window.V4={pages,state,$,e,n,pct,signed,date,short,badge,button,link,heading,card,kpi,empty,note,row,table,fail,value,api,settle,grid,toolbar,field,select,svgLine,progress,setContent,toast,show,go};
+window.V4={pages,state,$,e,n,pct,signed,date,short,badge,button,link,heading,card,kpi,empty,note,row,table,fail,value,api,settle,grid,toolbar,field,select,svgLine,progress,setContent,toast,moduleLoading,moduleError,show,go,refresh};
 document.addEventListener('DOMContentLoaded',boot);
 })();
