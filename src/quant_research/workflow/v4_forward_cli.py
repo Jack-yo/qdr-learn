@@ -91,11 +91,8 @@ def run_managed_forward(root: Path, *, bundle_id: str, asof_session: str) -> dic
         existing=pd.to_datetime(
             features.loc[current_mask,"signal_time"],utc=True
         )
-        effective=pd.concat([
-            existing.reset_index(drop=True),
-            pd.Series([pd.Timestamp(layer_signal)]*len(existing)),
-        ],axis=1).max(axis=1)
-        features.loc[current_mask,"signal_time"]=effective.to_numpy()
+        effective=max(existing.max(),pd.Timestamp(layer_signal))
+        features.loc[current_mask,"signal_time"]=effective
         if pd.to_datetime(
             features.loc[current_mask,"signal_time"],utc=True
         ).ge(pd.Timestamp(window.entry_time)).any():
