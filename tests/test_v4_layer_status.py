@@ -375,6 +375,7 @@ def test_stale_l3_receipt_cannot_bind_to_new_l2_model_or_bundles(
     assert "L3_L2_LABEL_BUNDLE_BINDING_MISMATCH" in result["blockers"]
     assert "L3_L2_FEATURE_BUNDLE_BINDING_MISMATCH" in result["blockers"]
     assert "L3_L2_SOURCE_BINDING_MISMATCH" in result["blockers"]
+    assert result["layers"]["l3_alpha"]["downstream_context_eligible"] is False
 
 
 def test_l3_receipt_must_cover_current_signal_session(tmp_path, monkeypatch):
