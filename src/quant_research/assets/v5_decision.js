@@ -6,11 +6,17 @@ const {pages,e,n,pct,signed,date,settle}=V;
 const STYLE_LABELS={size:'规模',value:'价值',growth:'成长',momentum:'动量',quality:'质量',low_vol:'低波动',cyc_def:'周期 / 防御'};
 const finite=v=>v!==null&&v!==undefined&&v!==''&&Number.isFinite(Number(v));
 const bad=v=>/BLOCKED|FAILED|INVALID|NOT_READY|ERROR/i.test(String(v||''));
+const DIGEST=/^[a-f0-9]{64}$/;
 const styleName=id=>STYLE_LABELS[id]||id||'—';
 const okForecast=(data,fresh)=>{
  if(!data||data.schema!=='qdr.l1.market.v1'||data.asof_session!==fresh?.asof_session)return null;
- if(!['FROZEN_FORWARD_RESEARCH_ONLY','MODEL_OOS_ADMITTED'].includes(data.status))return null;
- const f=data.forecast;if(!f||Number(f.horizon)!==3||!finite(f.p_up)||!finite(f.expected_return))return null;
+ const statusOk=data.status==='FROZEN_FORWARD_RESEARCH_ONLY'?
+  data.research_only===true&&data.model_admitted===false&&data.real_orders_enabled===false:
+  data.status==='MODEL_OOS_ADMITTED'&&data.model_admitted===true&&data.historical_pit_verified===true&&data.source_independently_attested===true&&data.real_orders_enabled===false;
+ const cutoff=Date.parse(data.knowledge_cutoff_utc||''),frozen=Date.parse(data.frozen_at_utc||''),entry=Date.parse(data.entry_at_utc||'');
+ if(!statusOk||!DIGEST.test(data.source_snapshot_sha256||'')||!data.model_version||!Number.isFinite(cutoff)||!Number.isFinite(frozen)||!Number.isFinite(entry)||frozen<cutoff||cutoff>=entry)return null;
+ const f=data.forecast;
+ if(!f||Number(f.horizon)!==3||!finite(f.p_up)||Number(f.p_up)<0||Number(f.p_up)>1||!finite(f.expected_return)||!Array.isArray(f.quantiles)||f.quantiles.length!==5||f.quantiles.some(x=>!finite(x))||f.quantiles.some((x,i)=>i>0&&Number(x)<Number(f.quantiles[i-1])))return null;
  return f;
 };
 function summary(label,value,hint,cls=''){return '<div class="v5-summary-item"><span>'+e(label)+'</span><b class="'+e(cls)+'">'+value+'</b><small>'+e(hint)+'</small></div>';}
@@ -47,7 +53,7 @@ pages.overview=async()=>{
  const riskHtml=hasRisk?'<div class="v5-risk-line"><span>组合权益仓位</span><b>'+pct(risk.gross_weight)+'</b></div><div class="v5-risk-line"><span>规则预警</span><b class="'+(alerts.length?'v5-alert':'v5-quiet')+'">'+n(alerts.length,0)+'</b></div>'+(alerts.length?alerts.slice(0,3).map(x=>'<div class="v5-risk-line"><span>'+e(x.subject||x.code||'风险项')+'</span><b class="v5-alert">'+e(x.code||'已触发')+'</b></div>').join(''):'<div class="v5-risk-line"><span>当前状态</span><b class="v5-quiet">未触发规则超限</b></div>'):emptyState('风险账本待核对','没有已内部对账的组合风险结果。');
  const healthRows=[['市场数据',freshness],['L1 预测',f?'可用':l1?'待验证':'待检查'],['L2 风格',l2?.status==='OBSERVATION_ONLY'?'观察可用':l2?'已返回':'待检查'],['日终流程',issues.length?issues.length+' 项异常':'无阻断']];
  const health='<div class="v5-health">'+healthRows.map(x=>'<div class="v5-health-row"><span>'+e(x[0])+'</span><b class="'+(String(x[1]).includes('异常')?'v5-alert':'')+'">'+e(x[1])+'</b></div>').join('')+'</div>'+(issues.length?'<div class="v5-footnote">'+e(issues.slice(0,3).map(x=>(x.stage||'任务')+' · '+(x.code||x.status)).join('；'))+'</div>':'');
- const html='<div class="v5-page"><div class="v5-decision-head"><div><h1>每日决策</h1><p>'+e(day)+' · 收盘后研究快照</p></div><div class="v5-head-actions"><a href="/studio#warehouse">数据与保障</a><a href="/studio#data">研究准入</a></div></div>'+
+ const html='<div class="v5-page"><div class="heading v5-decision-head"><div><h1>每日决策</h1><p>'+e(day)+' · 收盘后研究快照</p></div><div class="v5-head-actions"><a href="/studio#warehouse">数据与保障</a><a href="/studio#data">研究准入</a></div></div>'+
  '<div class="v5-summary-strip">'+summary('市场',marketValue,marketHint)+summary('相对强势风格',e(styleValue),styleHint)+summary('候选',candidateValue,candidateHint)+summary('组合风险',riskValue,riskHint,alerts.length?'v5-alert':'')+'</div>'+
  '<div class="v5-main-grid">'+panel('今日候选',candidateTable(candidates),'<a href="/studio#screen">查看选股 →</a>',planInfo?'研究日 '+date(planInfo.session_date_et):'')+panel('持仓与风险',riskHtml,'<a href="/studio#risk">查看风控 →</a>')+'</div>'+
  '<div class="v5-main-grid">'+panel('今日变化',changesHtml,'<a href="/studio#market">市场详情 →</a>')+panel('数据与模型状态',health,'<a href="/studio#warehouse">诊断 →</a>')+'</div>'+

@@ -86,11 +86,11 @@
       ${small('IWM · 现价观察', quote(iwm), '仅实际日线收盘价')}
       ${small('源数据覆盖', isNum(count)&&isNum(total)?`${n(count,0)} / ${n(total,0)}`:'—', '已核验 ETF 观察集合，不代表全市场广度')}
     </div><div class="l1-data-note"><span class="l1-dot ${status==='CURRENT'?'ok':'warn'}"></span>
-      <span>${same ? '已匹配最新完成交易日' : '最新观察日期未匹配'} · 数据状态 ${e(status||'待检查')} · 观察价不构成未来预测</span>
-      <a href="/data">检查数据中心 ↗</a></div>`;
+      <span>${same ? '数据已更新' : '日期待核对'} · ${e(status||'待检查')}</span>
+      <a href="/studio#warehouse">查看数据 ↗</a></div>`;
   }
   function distribution(f) {
-    if (!f) return `<div class="l1-chart-placeholder"><div class="l1-chart-grid" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>${empty('预测分布尚未建立', '完成 Codex 数据接入、模型验证及当日预测冻结后，此处展示 H1 / H3 / H5 收益分位分布。')}</div>`;
+    if (!f) return `<div class="l1-chart-placeholder"><div class="l1-chart-grid" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>${empty('预测分布尚未建立', '当前仅展示市场观察；前向预测通过验证后会自动出现在这里。')}</div>`;
     const quant = f.quantiles.map(Number);
     const max = Math.max(Math.abs(quant[0]),Math.abs(quant[4]),Math.abs(Number(f.expected_return)),0.001)*1.18;
     const x = v => 25+650*(Number(v)+max)/(2*max);
@@ -110,7 +110,7 @@
   function currentForecast(rec, horizon) {
     const f=rec?.f || null;
     const status = rec?.data?.status==='MODEL_OOS_ADMITTED'?'样本外模型已验收':'前向研究 · 非交易';
-    return panel('l1-primary', `${header('01 / MARKET OUTLOOK', '未来市场展望', f?`<span class="l1-valid">${e(status)}</span>`:'<span class="l1-caution">暂无合格预测</span>')}
+    return panel('l1-primary', `${header('未来 1 / 3 / 5 日', '市场结论', f?`<span class="l1-valid">${e(status)}</span>`:'<span class="l1-caution">暂无合格预测</span>')}
       <div class="l1-period">${[1,3,5].map(h=>`<button data-l1-horizon="${h}" type="button" aria-pressed="${h===horizon}" class="${h===horizon?'active':''}">H${h}<small>${h} 个交易日</small></button>`).join('')}</div>
       <div class="l1-prediction-metrics">
         ${small('条件预期收益',f?signed(Number(f.expected_return)*100)+'%':'—','T+1 开盘至 T+H 收盘')}
@@ -118,7 +118,7 @@
         ${small('下行尾部概率',f&&validProbability(f.p_downside)?pct(f.p_downside):'—',f?.downside_threshold!==undefined?'阈值 '+signed(Number(f.downside_threshold)*100,2)+'%':'未提供事件阈值')}
       </div>
       ${distribution(f)}
-      <div class="l1-subline">${f?`模型 ${asText(rec.data.model_version)} · 数据 ${asText(rec.data.asof_session)} · 冻结 ${stamp(rec.data.frozen_at_utc)}`:'只接受包含时点、来源哈希、模型版本及一致收益分位的 L1 冻结预测；不将旧历史回放拼接为当前预测。'}</div>`);
+      <div class="l1-subline">${f?`模型 ${asText(rec.data.model_version)} · 数据 ${asText(rec.data.asof_session)} · 冻结 ${stamp(rec.data.frozen_at_utc)}`:'前向预测待验证 · 当前仅展示市场观察'}</div>`);
   }
   function firstPassage(rec) {
     const p=rec?.f?.first_passage;
@@ -128,19 +128,19 @@
       isNum(p.up_threshold) && Number(p.up_threshold)>0 &&
       isNum(p.down_threshold) && Number(p.down_threshold)<0;
     const rows=[['先向上触及','up_first','gain'],['先向下触及','down_first','loss'],['期限内均未触及','neither','neutral']];
-    return panel('l1-event', `${header('02 / PRICE PATH', '风险与路径事件', '<span class="l1-kicker">FIRST PASSAGE</span>')}
+    return panel('l1-event', `${header('价格路径', '路径风险', '<span class="l1-kicker">FIRST PASSAGE</span>')}
      <div class="l1-event-caption">对比未来价格先触及上涨或下跌边界的事件，而不是事后定义“底部”。</div>
      ${eligible ? `<div class="l1-event-bars">${rows.map(([label,key,cls])=>`<div class="l1-event-item"><div><span>${label}</span><strong>${pct(p[key])}</strong></div><div class="l1-track"><i class="${cls}" style="width:${Number(p[key])*100}%"></i></div></div>`).join('')}</div><div class="l1-tiny">边界：+${n(Number(p.up_threshold)*100,2)}% / ${n(Number(p.down_threshold)*100,2)}% · 独立时间序列校准</div>`
-      :empty('路径事件尚无合格预测','等数据与首次触及标签接入后，展示先反弹 / 先下跌 / 均未触及三类互斥结果。')}
-      <div class="l1-caveat"><strong>需要验证的风险：</strong>压力衰减并不等于市场见底；模型必须同时报告误报、提前量和尾部风险。</div>`);
+      :empty('路径事件尚无合格预测','暂无可用的首次触及概率。')}
+      <div class="l1-caveat">路径概率只用于比较上下边界的先后风险，不等同于“见底”判断。</div>`);
   }
   function driversAndSignals(data) {
     const records=Array.isArray(data?.drivers)?data.drivers.filter(x=>x&&x.label&&isNum(x.value)&&['OBSERVED','PARTIAL'].includes(x.status||'OBSERVED')).slice(0,7):[];
-    return panel('l1-driver', `${header('03 / CONDITION CHANGE', '哪些市场特征正在变化？', '<span class="l1-kicker">FEATURE EVIDENCE</span>')}
-      <div class="l1-subtitle">观察到的变化 ≠ 已验证的预测驱动。贡献必须来自实际模型与样本外增量。</div>
+    return panel('l1-driver', `${header('今日变化', '关键变化', '<span class="l1-kicker">FEATURE EVIDENCE</span>')}
+      <div class="l1-subtitle">优先显示发生变化的市场特征；预测贡献仅在有样本外证据时出现。</div>
       ${records.length ? `<div class="l1-driver-rows">${records.map((x)=>`<div class="l1-driver-row"><div class="l1-driver-head"><span>${e(x.label)}</span><strong>${num(x.value,x.unit||'',2)}</strong></div><div class="l1-driver-meta"><span>${asText(x.status||'OBSERVED')}</span><span>${x.delta!==null&&isNum(x.delta)?'日变化 '+signed(x.delta):'变化待核验'}</span><span>${x.oos_increment===null||!isNum(x.oos_increment)?'增量未验证':'样本外增量 '+signed(x.oos_increment,4)}</span></div></div>`).join('')}</div>`
-        :empty('尚无经过审计的特征变化', '后续接入 12 维日频观测。若因子未经过增量验证，只展示变化，不标记为有效领先信号。')}
-      <div class="l1-driver-footer">支持未来展开历史条件检索、相似环境、模型贡献与条件情景；本阶段不伪造解释性数值。</div>`);
+        :empty('尚无经过审计的特征变化','当前没有可展示的已核验变化。')}
+      `);
   }
   function domainsGrid(data) {
     const raw=Array.isArray(data?.domains)?data.domains:[];
@@ -148,8 +148,8 @@
     const displayed=DOMAINS.filter(([id,, ,group])=>S.dimension==='all'||S.dimension===group);
     const observed=DOMAINS.filter(([id])=>lookup.get(id)?.status==='OBSERVED').length;
     const partial=DOMAINS.filter(([id])=>lookup.get(id)?.status==='PARTIAL').length;
-    return panel('l1-monitor', `${header('04 / MARKET OBSERVATORY', '12 维市场自动观测', `<span class="l1-kicker">已观测 ${observed} / 12 · 部分覆盖 ${partial}</span>`)}
-      <div class="l1-subtitle">每个维度独立校验数据来源、发布时间及股票池覆盖率；未接入维度不计算为零。</div>
+    return panel('l1-monitor', `${header('市场证据', '12 维市场自动观测', `<span class="l1-kicker">已观测 ${observed} / 12 · 部分覆盖 ${partial}</span>`)}
+      <div class="l1-subtitle">完整原始证据按维度展开；缺失值保持为空。</div>
       <div class="l1-filters" role="group" aria-label="观测维度筛选">${FILTERS.map(([id,name])=>`<button type="button" data-l1-domain="${e(id)}" class="${S.dimension===id?'active':''}" aria-pressed="${S.dimension===id}">${e(name)}</button>`).join('')}</div>
       <div class="l1-domain-grid">${displayed.map(([id,name,desc,group],i)=>{
         const item=lookup.get(id), status=item?.status||'MISSING';
@@ -199,13 +199,12 @@
     const old=oldRaw.ok?oldRaw.data:null;
     const observationStatus=fresh?.modules?.market_observation?.freshness_status || 'BLOCKED';
     const html=`<div class="l1-cockpit">
-      <div class="l1-head"><div><div class="l1-breadcrumb">L1 / MARKET FORECAST <span>· 01</span></div><h1>市场未来展望 <span class="l1-beta">RESEARCH</span></h1><p>从市场内部变化推断未来收益与风险分布；对每个预测提供真实证据，不把过去行情包装成未来信号。</p></div>
-      <div class="l1-head-actions"><span class="l1-access ${rec?'good':''}"><i></i>${rec?'已读取冻结预测':typed?'已读取市场观察':'等待研究归档'}</span><button class="l1-refresh" type="button" data-l1-refresh>↻ 重新核查</button></div></div>
+      <div class="l1-head"><div><div class="l1-breadcrumb">MARKET <span>· L1</span></div><h1>市场展望</h1><p>未来 1 / 3 / 5 个交易日的收益、尾部风险与关键变化。</p></div>
+      <div class="l1-head-actions"><span class="l1-access ${rec?'good':''}"><i></i>${rec?'已读取冻结预测':typed?'已读取市场观察':'数据待检查'}</span><button class="l1-refresh" type="button" data-l1-refresh>刷新</button></div></div>
       ${indicatorCards(fresh,system,observationStatus)}
       <div class="l1-top-grid">${currentForecast(rec,S.horizon)}${firstPassage(rec)}</div>
-      ${driversAndSignals(typed)}${domainsGrid(typed)}${validation(old,rec)}${researchTools(anomalyRaw?.ok?anomalyRaw.data:null, validationRaw?.ok?validationRaw.data:null, replayRaw?.ok?replayRaw.data:null)}
-      <div class="l1-bottom-note"><span>QDR · MARKET RESEARCH · L1</span><span>观察 / 回溯 / 前向预测分级 · 真实订单关闭</span></div></div>`;
-    return {title:'L1 市场未来展望',html,mount(){
+      ${driversAndSignals(typed)}<details class="l1-evidence-details"><summary>查看 12 维市场证据</summary>${domainsGrid(typed)}</details><details class="l1-audit-details"><summary>模型验证与研究记录</summary><div class="l1-audit-body">${validation(old,rec)}${researchTools(anomalyRaw?.ok?anomalyRaw.data:null, validationRaw?.ok?validationRaw.data:null, replayRaw?.ok?replayRaw.data:null)}</div></details></div>`;
+    return {title:'市场展望',html,mount(){
       document.querySelectorAll('[data-l1-horizon]').forEach(btn=>btn.addEventListener('click',()=>{
         const h=Number(btn.dataset.l1Horizon);
         if (![1,3,5].includes(h)) return;
