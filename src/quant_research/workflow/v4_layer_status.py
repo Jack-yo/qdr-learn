@@ -91,6 +91,14 @@ def four_layer_status(root: Path, *, asof: str | None = None,
             ),
             "source_snapshot_sha256": l2_raw.get("source_snapshot_sha256"),
             "label_bundle_id": l2_raw.get("label_bundle_id"),
+            "label_bundle_sha256": l2_raw.get("label_bundle_sha256"),
+            "feature_bundle_id": l2_raw.get("feature_bundle_id"),
+            "feature_bundle_sha256": l2_raw.get("feature_bundle_sha256"),
+            "historical_feature_pit_attested": (
+                l2_raw.get("historical_feature_pit_attested") is True
+            ),
+            "forecast_identity": l2_raw.get("forecast_identity"),
+            "validation_identity": l2_raw.get("validation_identity"),
         }
     except (OSError, ValueError, KeyError, TypeError) as exc:
         l2 = {
@@ -147,6 +155,30 @@ def four_layer_status(root: Path, *, asof: str | None = None,
             l3_record.get("l2_style_binding_context_sha256")
             if l3_record else None
         ),
+        "style_binding_start_session": (
+            l3_record.get("l2_style_binding_start_session")
+            if l3_record else None
+        ),
+        "style_binding_end_session": (
+            l3_record.get("l2_style_binding_end_session")
+            if l3_record else None
+        ),
+        "style_binding_model_versions": (
+            l3_record.get("l2_style_model_versions") or []
+            if l3_record else []
+        ),
+        "style_binding_label_bundle_sha256s": (
+            l3_record.get("l2_style_label_bundle_sha256s") or []
+            if l3_record else []
+        ),
+        "style_binding_feature_bundle_sha256s": (
+            l3_record.get("l2_style_feature_bundle_sha256s") or []
+            if l3_record else []
+        ),
+        "style_binding_source_snapshot_sha256s": (
+            l3_record.get("l2_style_source_snapshot_sha256s") or []
+            if l3_record else []
+        ),
         "style_input_binding_code": (
             None
             if l3_record and l3_record.get("l2_style_binding_verified") is True
@@ -195,6 +227,35 @@ def four_layer_status(root: Path, *, asof: str | None = None,
         blockers.append("L3_L2_STYLE_BINDING_NOT_VERIFIED")
     elif not l3["style_historical_pit_attested"]:
         blockers.append("L3_L2_STYLE_HISTORY_NOT_PIT_ATTESTED")
+    else:
+        if (
+            l3.get("style_binding_end_session") != target_asof
+            or not _iso(l3.get("style_binding_start_session"))
+        ):
+            blockers.append("L3_L2_BINDING_SESSION_MISMATCH")
+        if (
+            not l2.get("model_version")
+            or l2.get("model_version") not in l3.get("style_binding_model_versions", [])
+        ):
+            blockers.append("L3_L2_MODEL_VERSION_BINDING_MISMATCH")
+        if (
+            not l2.get("label_bundle_sha256")
+            or l2.get("label_bundle_sha256")
+            not in l3.get("style_binding_label_bundle_sha256s", [])
+        ):
+            blockers.append("L3_L2_LABEL_BUNDLE_BINDING_MISMATCH")
+        if (
+            not l2.get("feature_bundle_sha256")
+            or l2.get("feature_bundle_sha256")
+            not in l3.get("style_binding_feature_bundle_sha256s", [])
+        ):
+            blockers.append("L3_L2_FEATURE_BUNDLE_BINDING_MISMATCH")
+        if (
+            not l2.get("source_snapshot_sha256")
+            or l2.get("source_snapshot_sha256")
+            not in l3.get("style_binding_source_snapshot_sha256s", [])
+        ):
+            blockers.append("L3_L2_SOURCE_BINDING_MISMATCH")
     if l3_record and l3_record.get("session_date_et") != target_asof:
         blockers.append("L3_SESSION_NOT_CURRENT")
     if not l4_record:
