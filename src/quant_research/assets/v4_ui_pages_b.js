@@ -17,9 +17,7 @@ pages.lab=async()=>{
  const rows=experiments.slice(0,12).map(x=>[
    short(x.id,12),e(x.config?.source||x.source||'—'),
    e(x.status||'未知'),button('lab-exp-'+x.id,'查看记录')]);
- const html=heading('因子实验',
-   '定义因子 → 计算样本 → 验证有效性 → 保存版本。',
-   link('/factors','高级因子工具'))+
+ const html=heading('因子实验','定义因子 → 计算样本 → 验证有效性 → 保存版本。')+
    stepper(['定义','计算','验证','保存'])+
    grid(4,[
      kpi('因子版本',n(factors.length,0),'注册表中的不可变定义','blue'),
@@ -103,7 +101,7 @@ pages.lab=async()=>{
         row('实际状态',e(d.status||'—'))+
         row('数据快照',short(d.data_sha256||d.source_snapshot_sha256,20))+
         (d.metrics?table(['指标','结果'],Object.entries(d.metrics).slice(0,15).map(([k,v])=>[e(k),e(JSON.stringify(v))])):'')+
-        link('/factors','查看完整统计报告');
+        note('完整统计保留在当前实验记录中。');
     }));
    });
  }};
@@ -129,9 +127,7 @@ pages.screen=async()=>{
  const reportrows=studies.slice(0,10).map(x=>[
     short(x.run_id,20),e(x.status),button('v4-view-study-'+x.run_id,'查看统计')]);
  const selected=state.screenHorizon;
- const html=heading('选股与回测',
-    '组合因子 → 查看候选 → 验证样本外表现 → 形成研究计划。',
-    link('/strategies','高级策略工具')+link('/backtests','回测记录'))+
+ const html=heading('选股与回测','组合因子 → 查看候选 → 验证样本外表现 → 形成研究计划。')+
    stepper(['选因子','配权重','看候选','验证'])+
    grid(4,[
     kpi('可用因子',n(experiments.length,0),'只有完成的实验才能加入选股','purple'),
@@ -177,7 +173,7 @@ pages.screen=async()=>{
         (verified.length?table(['运行版本','来源资格'],verified.slice(0,8).map(x=>[
            short(x.run_id||x.id),e(x.status||'已登记')])):empty('暂无严格回测业绩',
            '缺少历史 PIT/公司行为/原价成交资格时，不显示净值、收益和回撤曲线。'))+
-        '<div class="v4-actions" style="margin-top:15px">'+link('/backtests','查看资格检查与回测结果')+'</div>',
+        '<div class="v4-actions" style="margin-top:15px">'+link('/studio#data','查看研究准入')+'</div>',
         '收益、成本与模拟交易')
    '</div>'+
    '<div style="margin-top:15px">'+card('冻结预测的后续结果复盘',
