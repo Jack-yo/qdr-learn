@@ -133,6 +133,10 @@ def four_layer_status(root: Path, *, asof: str | None = None,
         "source_snapshot_sha256": (
             l3_record.get("source_snapshot_sha256") if l3_record else None
         ),
+        "prospective_forward_research": bool(
+            l3_record
+            and l3_record.get("status") == "VERIFIED_LOCAL_FORWARD_RESEARCH_ONLY"
+        ),
         "style_input_binding_verified": bool(
             l3_record and l3_record.get("l2_style_binding_verified") is True
         ),
@@ -150,6 +154,7 @@ def four_layer_status(root: Path, *, asof: str | None = None,
         ),
         "downstream_context_eligible": bool(
             l3_record
+            and l3_record.get("status") == "VERIFIED_LOCAL_FORWARD_RESEARCH_ONLY"
             and l3_record.get("l2_style_binding_verified") is True
         ),
     }
@@ -184,6 +189,8 @@ def four_layer_status(root: Path, *, asof: str | None = None,
         blockers.append("L2_NO_MODEL_ADMITTED_STYLE_CONTEXT")
     if not l3_record:
         blockers.append("L3_FORWARD_RESEARCH_MISSING")
+    elif not l3["prospective_forward_research"]:
+        blockers.append("L3_NOT_PROSPECTIVE_FORWARD_RESEARCH")
     if not l3["style_input_binding_verified"]:
         blockers.append("L3_L2_STYLE_BINDING_NOT_VERIFIED")
     elif not l3["style_historical_pit_attested"]:
