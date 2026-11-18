@@ -125,6 +125,16 @@ def test_bound_bundle_is_new_immutable_identity_and_preserves_source_bytes(
     assert {
         name: _sha(source / name) for name in manifest["artifacts_sha256"]
     } == original_hashes
+    again = v4_l2_bind_bundle.create_l2_bound_v4_bundle(
+        tmp_path,
+        source_bundle_id="source-v1",
+        output_bundle_id="source-v1-l2",
+    )
+    assert again["status"] == "L2_BOUND_V4_BUNDLE_ALREADY_EXISTS"
+    assert (
+        again["l2_style_binding_context_sha256"]
+        == result["l2_style_binding_context_sha256"]
+    )
 
 
 def test_bound_bundle_never_overwrites_existing_output(tmp_path, monkeypatch):
