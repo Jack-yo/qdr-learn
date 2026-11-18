@@ -42,6 +42,7 @@ def _context(day):
         "validation_identity": "c" * 64,
         "model_version": "ridge-v1",
         "label_bundle_sha256": "d" * 64,
+        "source_snapshot_sha256": ("e" if date.endswith("29") else "f") * 64,
         "historical_decision_eligible": False,
         "contexts": admitted,
     }
