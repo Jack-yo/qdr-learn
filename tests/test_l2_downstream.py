@@ -46,7 +46,7 @@ def _validation(status="OOS_VALIDATED", admitted=False):
 def test_oos_validated_is_not_downstream_eligible(monkeypatch, tmp_path):
     monkeypatch.setattr(l2_downstream, "calculate_forecast", lambda *a, **k: _forecast())
     monkeypatch.setattr(
-        l2_downstream, "read_latest_validation",
+        l2_downstream, "read_validation_on_or_before",
         lambda *a, **k: _validation(),
     )
     result = l2_downstream.build_downstream_context(tmp_path)
