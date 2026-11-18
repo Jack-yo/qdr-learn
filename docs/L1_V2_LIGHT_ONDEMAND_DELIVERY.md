@@ -11,7 +11,10 @@
 
 ## 1. 本地配置与运行
 
-复用原项目 `ALPACA_API_KEY` 和 `ALPACA_SECRET_KEY` 环境变量（永远不要提交凭证）。
+复用原项目 `ALPACA_API_KEY` 和 `ALPACA_SECRET_KEY`（永远不要提交凭证）。
+`scripts/start_console.ps1` 与 `start_console.cmd` 在项目根目录存在 `.env` 时，
+会通过 `--env-file .env` 将已有 Alpaca 凭证加载到服务进程；直接运行模块时可显式指定
+`python -m quant_research.web --env-file .env --port 8766`。不会输出凭证。
 
 可选项：
 
@@ -21,6 +24,7 @@
 | `FRED_API_KEY` | 美国国债利率、SOFR、高收益信用利差 | 未配置则标记缺失 |
 
 不推荐无条件回退至 IEX：IEX 只是单交易所数据，不能冒充全美汇总行情。`sip` 实时权限若不足，供应商会返回 `HTTP_403`，而不是“假装实时”。`delayed_sip` 也受实际授权限制。
+默认 `delayed_sip` 用于最新快照；已完成日线使用 `sip` 历史接口，结束时间限制在最近已完成交易所日的收盘后一分，且只在收盘 20 分钟后选用该交易日。该设置不代表拥有实时 SIP 权限。
 
 启动原项目后访问 `/studio#market`。请求新接口：
 
