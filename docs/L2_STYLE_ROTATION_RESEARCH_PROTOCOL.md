@@ -1,8 +1,9 @@
 # QDR L2 — Style Rotation & Factor Research
 ## P0 implementation baseline and research protocol
 
-**Status:** P0 audit complete; protocol baseline proposed for implementation.  
-**Scope:** L2 only. No data ingestion, warehouse, provider setup, local cache maintenance, model execution, or UI implementation in P0.  
+**Protocol baseline:** P0 audit completed and frozen for implementation.  
+**Current engineering status (2026-11-18):** P0–P6 code paths are implemented on `main`; real label/feature bundles, full pytest, genuine-forward evidence and local browser/data acceptance remain required before any model-validity claim.  
+**Scope:** L2 research and read-only cross-layer contracts only. No broker-order enablement.  
 **Repository baseline audited:** `main` at `4db4c4ce7df0e5f45196879d846880ad8d7da167` (2026-11-18).
 
 ---
@@ -187,23 +188,18 @@ Do not create a separate PR for each small phase. Work on one L2 branch and open
 
 ## 9. API contracts
 
-Implemented in the initial P1 increment:
+Implemented read-only contracts:
 
-- `GET /api/v1/l2/styles/overview?asof=&cutoff=&start=` — read-only observation payload using the existing verified Yahoo split-adjusted bundle. It returns the registry, latest seven style rows, 126-session history per style, per-symbol coverage, source snapshot hash, and explicit observation-only limitations.
+- `GET /api/v1/l2/styles/overview?asof=&cutoff=&start=&rotation=1` — P1 observations, optional P2 rotation from one source snapshot.
+- `GET /api/v1/l2/styles/rotation?asof=&cutoff=&start=` — P2 states, history and genuine transitions.
+- `GET /api/v1/l2/styles/forecast?asof=&horizon=&start=` — P4 H1/H3/H5 continuous relative-return research; fails closed without verified label and feature bundles.
+- `GET /api/v1/l2/styles/validation?asof=` — reads only an immutable P5 validation report; never runs Walk-forward in the GET request.
+- `GET /api/v1/l2/styles/downstream-context?asof=` — P6 L2→L3 contract; only exact MODEL_ADMITTED frozen units can expose numeric downstream context.
+- `GET /api/v1/v4/layers?asof=&horizon=` — P6 four-layer evidence snapshot across L1/L2/L3/L4; never grants execution eligibility.
 
-Implemented in P2 (observation-only):
+Separate existing French observation API remains `GET /api/v1/styles?mode=observation`.
 
-- `GET /api/v1/l2/styles/rotation?asof=&cutoff=&start=` — latest states, recent state history, genuine transitions; historical replay is current-vintage, not PIT-certified.
-
-Still proposed, not implemented:
-
-- `GET /api/v1/l2/styles/history?style_id=&start=&end=`
-- `GET /api/v1/l2/styles/forecast?style_id=&horizon=&asof=`
-- `GET /api/v1/l2/styles/drivers?style_id=&asof=`
-- `GET /api/v1/l2/styles/validation?style_id=&horizon=&model_version=`
-- `GET /api/v1/l2/styles/replay?asof=`
-- `GET /api/v1/l2/french/monitor?asof=&cutoff=`
-- `GET /api/v1/l2/research/ablation?experiment_id=`
+Optional future convenience endpoints such as style-specific history/drivers or standalone ablation browsing are not required for the P0–P6 evidence chain and should not duplicate existing payloads without a concrete product need.
 
 Every payload must expose schema/version, as-of session, signal cutoff, per-source availability, source snapshot hash, calculation protocol version, missingness/coverage, research status, and eligibility. A missing value is null with a reason, never zero.
 
