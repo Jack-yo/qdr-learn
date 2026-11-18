@@ -1,6 +1,6 @@
 /* QDR V5 — single shared visual system. */
 :root{
- --bg:#f5f7fb;--surface:#fff;--surface-2:#f8fafc;--line:#e0e7ef;--line-strong:#cfd9e3;
+ --bg:#f5f7fb;--surface:#fff;--surface-2:#f8fafc;--panel:#fff;--panel2:#f8fafc;--panel3:#f2f5f8;--line:#e0e7ef;--line-strong:#cfd9e3;
  --txt:#24364a;--muted:#6d7d8f;--faint:#8b98a6;--blue:#315d88;--teal:#177b6a;
  --amber:#9a6b24;--red:#ca3d50;--green:#087e5c;--rise:#087e5c;--fall:#ca3d50;
  --radius:8px;--sidebar:236px
