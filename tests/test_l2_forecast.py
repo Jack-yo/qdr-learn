@@ -5,7 +5,7 @@ import pytest
 
 from quant_research.clock import TradingClock
 from quant_research.research.l2_forecast import (
-    FEATURES, HORIZONS, STYLE_IDS, ForecastConfig,
+    FEATURES, INPUT_FEATURES, HORIZONS, STYLE_IDS, ForecastConfig,
     forecast_asof_v1, score_oos_v1, validate_forward_labels_v1,
     walk_forward_oos_v1,
 )
@@ -155,7 +155,7 @@ def test_future_observations_do_not_change_earlier_forecast():
     config = ForecastConfig(min_training_sessions=60)
     baseline = forecast_asof_v1(observations, labels, sessions, day, clock, config=config)
     changed = observations.copy()
-    changed.loc[changed.date.gt(day), list(FEATURES)] = 123.0
+    changed.loc[changed.date.gt(day), list(INPUT_FEATURES)] = 123.0
     recomputed = forecast_asof_v1(changed, labels, sessions, day, clock, config=config)
     pd.testing.assert_series_equal(
         baseline.predicted_relative_return,
@@ -190,7 +190,7 @@ def test_insufficient_verified_history_is_explicitly_blocked_not_omitted():
     clock, sessions, observations, labels = _fixture()
     result = forecast_asof_v1(
         observations, labels, sessions, sessions[-1], clock,
-        config=ForecastConfig(min_training_sessions=160),
+        config=ForecastConfig(min_training_sessions=169),
     )
     assert len(result) == 21
     assert set(result.forecast_status) == {"BLOCKED"}
