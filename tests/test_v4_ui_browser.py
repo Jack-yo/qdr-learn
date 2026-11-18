@@ -212,7 +212,10 @@ def local_app():
 def _open(browser,base,route):
     page=browser.new_page(viewport={"width":1536,"height":900})
     page.goto(base+"/studio#"+route,wait_until="domcontentloaded")
-    page.locator("#content .heading").wait_for(timeout=10000)
+    if route=="overview":
+        page.locator("#content .desk-head").wait_for(timeout=10000)
+    else:
+        page.locator("#content .heading").wait_for(timeout=10000)
     if route=="style":
         page.locator(".v4-subtab").first.wait_for(timeout=10000)
     page.wait_for_load_state('networkidle',timeout=10000)
