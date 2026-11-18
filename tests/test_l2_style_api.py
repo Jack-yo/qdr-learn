@@ -121,3 +121,44 @@ def test_l2_overview_combines_rotation_without_second_data_read(tmp_path, monkey
         server.shutdown()
         server.server_close()
         thread.join()
+
+
+def test_l2_forecast_api_is_read_only_and_strictly_validates_query(tmp_path, monkeypatch):
+    from quant_research.workflow import l2_forecast
+
+    calls = []
+    monkeypatch.setattr(
+        l2_forecast, "calculate_forecast",
+        lambda root, **kwargs: calls.append(kwargs) or {
+            "schema": "qdr.l2.forecast.v1",
+            "status": "BLOCKED",
+            "code": "L2_VERIFIED_LABEL_BUNDLE_REQUIRED",
+            "forecasts": [],
+            "real_orders_enabled": False,
+        },
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler(Console(tmp_path)))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        with urlopen(base + "/api/v1/l2/styles/forecast?asof=2025-04-09&horizon=3") as response:
+            payload = json.load(response)
+            assert response.status == 200
+        assert payload["code"] == "L2_VERIFIED_LABEL_BUNDLE_REQUIRED"
+        assert calls == [{"asof": "2025-04-09", "horizon": 3, "start": "2017-01-03"}]
+        for query in (
+            "?horizon=2",
+            "?horizon=abc",
+            "?unknown=1",
+            "?asof=2025-02-30",
+            "?horizon=3&horizon=5",
+        ):
+            with pytest.raises(HTTPError) as error:
+                urlopen(base + "/api/v1/l2/styles/forecast" + query)
+            assert error.value.code == 400
+        assert len(calls) == 1
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
