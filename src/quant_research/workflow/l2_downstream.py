@@ -22,9 +22,10 @@ CONTRACT_VERSION = "qdr-l2-downstream-context-v1"
 def build_downstream_context(root: Path, *, asof: str | None = None) -> dict:
     root = Path(root).resolve()
     forecast = calculate_forecast(root, asof=asof)
+    forecast_asof = forecast.get("asof_session") or asof
     validation = (
-        read_validation_on_or_before(root, asof=asof)
-        if asof is not None
+        read_validation_on_or_before(root, asof=forecast_asof)
+        if forecast_asof is not None
         else read_latest_validation(root)
     )
 
