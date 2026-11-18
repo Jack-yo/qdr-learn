@@ -253,3 +253,50 @@ def test_l2_downstream_context_api_is_read_only_and_validates_asof(tmp_path, mon
         server.shutdown()
         server.server_close()
         thread.join()
+
+
+def test_v4_layers_api_is_read_only_and_strictly_validates_query(tmp_path, monkeypatch):
+    from quant_research.workflow import v4_layer_status
+
+    calls = []
+    monkeypatch.setattr(
+        v4_layer_status, "four_layer_status",
+        lambda root, asof=None, horizon=3: calls.append((asof, horizon)) or {
+            "schema": "qdr.v4.layer-status.v1",
+            "status": "RESEARCH_ONLY",
+            "asof_session": asof,
+            "horizon": horizon,
+            "blockers": ["L3_L2_STYLE_BINDING_NOT_VERIFIED"],
+            "complete_four_layer_context": False,
+            "execution_eligible": False,
+            "real_orders_enabled": False,
+        },
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler(Console(tmp_path)))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        with urlopen(
+            base + "/api/v1/v4/layers?asof=2026-01-30&horizon=3"
+        ) as response:
+            payload = json.load(response)
+            assert response.status == 200
+        assert payload["complete_four_layer_context"] is False
+        assert payload["blockers"] == ["L3_L2_STYLE_BINDING_NOT_VERIFIED"]
+        assert calls == [("2026-01-30", 3)]
+        for query in (
+            "?unknown=1",
+            "?horizon=2",
+            "?horizon=abc",
+            "?asof=2026-02-30",
+            "?horizon=3&horizon=5",
+        ):
+            with pytest.raises(HTTPError) as error:
+                urlopen(base + "/api/v1/v4/layers" + query)
+            assert error.value.code == 400
+        assert calls == [("2026-01-30", 3)]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
