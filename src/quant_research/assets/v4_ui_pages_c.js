@@ -30,9 +30,7 @@ pages.risk=async()=>{
     x.actual==null?'—':pct(x.actual),
     x.limit==null?'—':pct(x.limit),
     x.affected_securities?e(x.affected_securities.join(', ')):'—']);
- const nav=heading('持仓与风控',
-   '当前持仓、组合敞口、预警与退出规则。',
-   link('/paper','组合账本'));
+ const nav=heading('持仓与风控','当前持仓、组合敞口、预警与退出规则。');
  const cards=grid(4,[
    kpi('组合权益',verified?'$'+n(account.equity,2):'—',
        verified?'根据已核对的真实价格估值':'缺少合格模拟账本','blue'),
@@ -95,7 +93,7 @@ pages.data=async()=>{
  if(response.pending){
   return {title:'研究准入',html:
    heading('研究准入','判断当前数据、模型和回测证据能否进入正式研究流程。',
-    link('/studio#warehouse','查看数据仓库')+link('/data','高级数据维护'))+
+    link('/studio#warehouse','查看数据与保障'))+
    V.moduleLoading('研究资格矩阵')};
  }
  if(!response.ok){
@@ -185,8 +183,8 @@ pages.data=async()=>{
    card('页面职责',
     row('数据仓库',link('/studio#warehouse','资产 · 来源 · 质量 · 更新 · 预览'))+
     row('研究准入',badge('当前页面','blue'))+
-    row('严格回测',link('/backtests','查看回测资格与结果'))+
-    row('模拟组合',link('/paper','查看本地模拟账本'))+
+    row('严格回测',badge('当前页','blue'))+
+    row('持仓与风控',link('/studio#risk','查看风险页'))+
     note('本页不再重复展示数据集数量、行情来源、新鲜度或数据预览，避免与数据仓库职责重叠。'),
     '资格判定与数据管理分离')+
   '</div>';
