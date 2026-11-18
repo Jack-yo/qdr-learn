@@ -17,6 +17,11 @@ uv run --locked pytest -q \
   tests/test_l2_p6_v4_style_stage.py \
   tests/test_v4_study_l2_binding_contract.py \
   tests/test_v4_pipeline_preflight.py \
+  tests/test_v4_panel_layered_signal.py \
+  tests/test_v4_forward_cli_layered_signal.py \
+  tests/test_v4_study_l2_admission_gate.py \
+  tests/test_v4_l2_bind_bundle.py \
+  tests/test_four_layer_day.py \
   tests/test_v4_forecast_archive.py \
   tests/test_v4_layer_status.py \
   tests/test_l2_style_api.py
@@ -66,7 +71,8 @@ For L3:
 base_signal_time = XNYS close + 15 minutes
 l3_signal_time   = max(base_signal_time,
                        latest required stock-factor availability,
-                       market_style.state_available_at)
+                       market_style.state_available_at,
+                       candidate_metadata.available_at)
 ```
 
 The derived L3 signal must already exist at the actual preflight time and must
@@ -74,14 +80,18 @@ remain strictly earlier than T+1 entry.
 
 When `market_style` contains admitted L2 values:
 
-- `state_available_at` must be no earlier than the actual
-  `forecast_frozen_at_utc` of the L2 forecast;
-- it may therefore be later than the base signal;
-- it must still be earlier than T+1 open;
-- historical panel assembly uses the same max-availability rule as current
-  preflight.
+- the final current row uses genuine `CURRENT_FROZEN_FORWARD` L2 evidence;
+- historical rows may use `HISTORICAL_PIT_REPLAY` produced from the verified
+  feature/label bundles under one fixed P5 admission report;
+- `state_available_at` must be no earlier than the actual context availability
+  (historical replay signal time or current forecast freeze time);
+- factor, style and candidate availability may move L3 later than the base
+  signal;
+- the resulting L3 signal must still be earlier than T+1 open;
+- historical panel assembly and current preflight use the same staged-time
+  semantics.
 
-Never backdate an L2 value to 21:15 merely to make L3 accept it.
+Never backdate an L2 or candidate value to 21:15 merely to make L3 accept it.
 
 ## 3. L2 -> L3 history binding
 
@@ -116,8 +126,16 @@ This copies unchanged factors/labels/candidate bytes, writes a new
 `market_style.parquet`, updates artifact SHA256 values, embeds the validated
 L2 receipt, and never mutates the source bundle.
 
-The audit requires every dated row to map exactly to frozen,
-`MODEL_ADMITTED` L2 context. Canonical style columns are:
+The v2 audit uses one fixed admitted L2 governance identity:
+
+- historical rows are causal `HISTORICAL_PIT_REPLAY` values generated from
+  PIT-attested feature/label evidence;
+- the final current row is `CURRENT_FROZEN_FORWARD` and must point to the
+  genuine P4 snapshot for that session;
+- the same admission validation identity and admission freeze timestamp govern
+  the complete receipt.
+
+Canonical style columns are:
 
 ```text
 style_l2_<style_id>_h<horizon>
@@ -133,15 +151,18 @@ style_l2_quality_h3
 All numeric `style_*` columns must equal the admitted set. An additional
 exploratory style column causes the binding audit to fail.
 
-The receipt binds:
+The v2 receipt binds:
 
-- each P4 frozen forecast identity;
-- each P5 validation identity;
+- the fixed P5 admission validation identity, its as-of session and actual
+  `frozen_at_utc`;
+- historical deterministic replay identities plus the current genuine P4
+  forward identity;
+- context mode per row (replay vs current forward);
 - model version;
 - label-bundle SHA;
 - verified historical feature-bundle SHA;
-- daily source-snapshot SHA;
-- exact style values;
+- source-evidence/current source snapshot hashes;
+- exact style values and context availability;
 - start/end sessions and row count;
 - complete style-column set.
 
@@ -262,6 +283,8 @@ The current implementation checks:
 - L2 style historical PIT attestation;
 - receipt coverage through the current signal session;
 - receipt model version matches current admitted L2;
+- receipt P5 admission validation identity matches current admitted L2;
+- receipt contains a CURRENT_FROZEN_FORWARD row for the target session;
 - receipt label-bundle SHA matches current admitted L2;
 - receipt feature-bundle SHA matches current admitted L2;
 - receipt L2 source-snapshot set contains the current L2 source snapshot;
@@ -285,6 +308,8 @@ L3_L2_STYLE_BINDING_NOT_VERIFIED
 L3_L2_STYLE_HISTORY_NOT_PIT_ATTESTED
 L3_L2_BINDING_SESSION_MISMATCH
 L3_L2_MODEL_VERSION_BINDING_MISMATCH
+L3_L2_VALIDATION_IDENTITY_BINDING_MISMATCH
+L3_L2_CURRENT_FORWARD_BINDING_MISMATCH
 L3_L2_LABEL_BUNDLE_BINDING_MISMATCH
 L3_L2_FEATURE_BUNDLE_BINDING_MISMATCH
 L3_L2_SOURCE_BINDING_MISMATCH
@@ -357,11 +382,14 @@ P6 engineering is accepted only after:
 2. P4 label bundle is locally accepted;
 3. P5 OOS/forward validation is frozen;
 4. admitted P4 forecasts are genuinely frozen before next-session entry;
-5. an L2->L3 binding receipt passes across the actual L3 style-history rows;
-6. V4 preflight re-verifies that receipt;
-7. L3 forecast archive preserves it in identity;
-8. L4 review uses the matching L3 source snapshot and exact L3 forecast identity;
-9. four-layer API/browser review shows only evidence-supported statuses.
+5. an L2->L3 v2 binding receipt passes across replay history plus the current
+   forward row under one fixed admission identity;
+6. any L3 independent OOS window starts strictly after the L2 admission freeze;
+7. V4 preflight and forward inference use the same staged L3 signal and
+   re-verify the receipt;
+8. L3 forecast archive preserves the receipt in identity;
+9. L4 review uses the matching L3 source snapshot and exact L3 forecast identity;
+10. four-layer API/browser review shows only evidence-supported statuses.
 
 Even when these pass, `complete_four_layer_context=true` is still a research
 context state. It does not itself enable paper execution or broker orders.
