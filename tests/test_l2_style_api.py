@@ -208,3 +208,48 @@ def test_l2_validation_api_reads_frozen_report_only(tmp_path, monkeypatch):
         server.shutdown()
         server.server_close()
         thread.join()
+
+
+def test_l2_downstream_context_api_is_read_only_and_validates_asof(tmp_path, monkeypatch):
+    from quant_research.workflow import l2_downstream
+
+    calls = []
+    monkeypatch.setattr(
+        l2_downstream, "build_downstream_context",
+        lambda root, asof=None: calls.append(asof) or {
+            "schema": "qdr.l2.downstream-context.v1",
+            "status": "RESEARCH_ONLY",
+            "code": "NO_MODEL_ADMITTED_L2_STYLE_UNITS",
+            "asof_session": asof,
+            "contexts": [],
+            "admitted_units": 0,
+            "l3_style_context_available": False,
+            "real_orders_enabled": False,
+        },
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler(Console(tmp_path)))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        with urlopen(
+            base + "/api/v1/l2/styles/downstream-context?asof=2026-01-30"
+        ) as response:
+            payload = json.load(response)
+            assert response.status == 200
+        assert payload["code"] == "NO_MODEL_ADMITTED_L2_STYLE_UNITS"
+        assert payload["l3_style_context_available"] is False
+        assert calls == ["2026-01-30"]
+        for query in (
+            "?unknown=1",
+            "?asof=2026-02-30",
+            "?asof=2026-01-30&asof=2026-01-31",
+        ):
+            with pytest.raises(HTTPError) as error:
+                urlopen(base + "/api/v1/l2/styles/downstream-context" + query)
+            assert error.value.code == 400
+        assert calls == ["2026-01-30"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
