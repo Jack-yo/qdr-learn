@@ -104,22 +104,52 @@ def preflight_v4_day(root: Path, session_date: str, bundle_id: str,
     if not set(metadata.security_id).issubset(horizon_sets[0]):
         raise ValueError("CANDIDATE_MISSING_FROM_CURRENT_HORIZON_LABELS")
     if (not pd.to_datetime(metadata.date).eq(day).all()
-            or not metadata.source_snapshot_sha256.eq(snapshot).all()
-            or not pd.to_datetime(metadata.available_at,utc=True).le(signal).all()):
+            or not metadata.source_snapshot_sha256.eq(snapshot).all()):
         raise ValueError("CANDIDATE_METADATA_NOT_KNOWN_AS_OF_T")
+
     factors=frames["factors"]
     if "date" not in factors or "available_at" not in factors:
         raise ValueError("FACTOR_SOURCE_TIMESTAMPS_MISSING")
     at_t=factors.loc[pd.to_datetime(factors.date).eq(day)]
-    if at_t.empty or not pd.to_datetime(at_t.available_at,utc=True).le(signal).all():
+    if at_t.empty:
         raise ValueError("FACTOR_SOURCE_NOT_KNOWN_AS_OF_T")
+    factor_times=pd.to_datetime(at_t.available_at,utc=True,errors="coerce")
+    if factor_times.isna().any():
+        raise ValueError("FACTOR_SOURCE_TIMESTAMPS_MISSING")
+
     states=frames["market_style"]
     if "date" not in states or "state_available_at" not in states:
         raise ValueError("MARKET_STYLE_SOURCE_TIMESTAMPS_MISSING")
     state_t=states.loc[pd.to_datetime(states.date).eq(day)]
-    if (len(state_t)!=1
-            or not pd.to_datetime(state_t.state_available_at,utc=True).le(signal).all()):
+    if len(state_t)!=1:
         raise ValueError("MARKET_STYLE_NOT_KNOWN_AS_OF_T")
+    state_times=pd.to_datetime(
+        state_t.state_available_at,utc=True,errors="coerce"
+    )
+    if state_times.isna().any():
+        raise ValueError("MARKET_STYLE_SOURCE_TIMESTAMPS_MISSING")
+
+    # L3 is downstream from L1/L2: its causal decision timestamp is the later
+    # of the base close+delay signal and the last required factor/state input.
+    # It may move later inside the close-to-next-open window, never earlier.
+    layer_signal=max(
+        signal,
+        factor_times.max(),
+        state_times.max(),
+    )
+    if layer_signal>moment:
+        raise ValueError("L3_LAYER_INPUT_NOT_YET_AVAILABLE")
+    if layer_signal>=pd.Timestamp(window.entry_time):
+        raise ValueError("L3_LAYER_SIGNAL_REACHES_NEXT_SESSION_ENTRY")
+
+    metadata_times=pd.to_datetime(
+        metadata.available_at,utc=True,errors="coerce"
+    )
+    if (
+        metadata_times.isna().any()
+        or not metadata_times.le(layer_signal).all()
+    ):
+        raise ValueError("CANDIDATE_METADATA_NOT_KNOWN_BY_L3_SIGNAL")
     l2_binding=None
     if manifest.get("l2_style_context_receipt") is not None:
         from quant_research.workflow.l2_l3_binding import (
@@ -130,7 +160,7 @@ def preflight_v4_day(root: Path, session_date: str, bundle_id: str,
     # Require exact T-day stock/factor/horizon coverage. A verified source
     # hash alone must not hide inner-join attrition or NaN candidate factors.
     from quant_research.workflow.v4_bundle_contract import audit_forward_candidate_cohort
-    cohort=audit_forward_candidate_cohort(frames,manifest,day,signal)
+    cohort=audit_forward_candidate_cohort(frames,manifest,day,layer_signal)
     return {"status":"PREFLIGHT_SOURCE_AND_TIME_MATCH_RESEARCH_ONLY",
             "cohort_contract":cohort,
             "session_date_et":str(day.date()),
@@ -138,6 +168,8 @@ def preflight_v4_day(root: Path, session_date: str, bundle_id: str,
             "source_symbols":source_symbols,
             "checked_candidate_rows":len(metadata),
             "checked_forward_label_rows":len(upcoming),
+            "base_signal_time":signal.isoformat(),
+            "layer_signal_time":layer_signal.isoformat(),
             "l2_style_binding_verified":bool(
                 l2_binding and l2_binding.get("binding_verified") is True),
             "l2_style_historical_pit_attested":bool(
