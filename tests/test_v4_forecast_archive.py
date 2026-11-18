@@ -225,6 +225,7 @@ def test_v2_l2_admission_identity_is_persisted_and_changes_l3_archive_identity(
     row = by_identity[first["manifest"]["identity"]]
     assert row["l2_style_admission_validation_identity"] == "6" * 64
     assert row["l2_style_admission_asof_session"] == "2025-01-02"
+    assert row["l2_style_admission_frozen_at_utc"] == "2025-01-03T01:00:00Z"
     assert row["l2_style_context_modes"] == ["CURRENT_FROZEN_FORWARD"]
     assert row["l2_style_current_forward_session"] == "2025-01-02"
     assert row["l2_style_historical_pit_attested"] is True
