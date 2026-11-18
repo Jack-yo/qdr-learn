@@ -131,9 +131,14 @@ def create_l2_bound_v4_bundle(
 
     # Re-open through the normal V4 contract. This verifies every output byte
     # and structurally validates the embedded L2 receipt before returning.
-    checked_frames, checked_manifest = _checked_inputs(root, output_bundle_id)
-    if len(checked_frames["market_style"]) != len(bound_style):
-        raise ValueError("L2_BOUND_V4_BUNDLE_POSTWRITE_MISMATCH")
+    # A failed self-check removes only the bundle created by this invocation.
+    try:
+        checked_frames, checked_manifest = _checked_inputs(root, output_bundle_id)
+        if len(checked_frames["market_style"]) != len(bound_style):
+            raise ValueError("L2_BOUND_V4_BUNDLE_POSTWRITE_MISMATCH")
+    except Exception:
+        shutil.rmtree(destination, ignore_errors=True)
+        raise
     return {
         "status": "L2_BOUND_V4_BUNDLE_CREATED_RESEARCH_ONLY",
         "source_bundle_id": source_bundle_id,
