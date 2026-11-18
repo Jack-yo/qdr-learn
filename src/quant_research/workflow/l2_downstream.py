@@ -316,10 +316,9 @@ def build_historical_replay_context(
     if (
         not admission_validation.get("identity")
         or not admission_validation.get("asof_session")
-        or str(asof)>=str(admission_validation.get("asof_session"))
     ):
         return {**base,"status":"BLOCKED",
-                "code":"L2_REPLAY_MUST_PREDATE_ADMISSION_REPORT"}
+                "code":"L2_REPLAY_ADMISSION_IDENTITY_MISSING"}
 
     qualification={
         (row.get("style_id"),int(row.get("horizon"))):row
