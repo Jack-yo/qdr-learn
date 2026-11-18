@@ -5,6 +5,7 @@ import pytest
 from quant_research.research.l2_forecast import HORIZONS, STYLE_IDS
 from quant_research.workflow.l2_l3_binding import (
     build_l2_style_history_binding,
+    materialize_l2_style_history,
     style_column,
     validate_l2_style_binding_receipt,
     verify_l2_style_history_binding,
@@ -169,6 +170,49 @@ def test_market_style_cannot_claim_l2_value_before_forecast_was_frozen():
     with pytest.raises(ValueError, match="AVAILABLE_BEFORE_L2_FREEZE"):
         build_l2_style_history_binding(
             ".", frame,
+            downstream_builder=lambda root, asof=None: _context(asof),
+            clock=Clock(),
+        )
+
+
+def test_materializer_adds_only_admitted_l2_columns_and_delays_state_availability():
+    base = _market_style().drop(
+        columns=[style_column("size", 3), style_column("quality", 3)]
+    )
+    base.loc[0, "state_available_at"] = "2026-01-29T21:10:00Z"
+    base.loc[1, "state_available_at"] = "2026-01-30T21:10:00Z"
+    result = materialize_l2_style_history(
+        ".",
+        base,
+        downstream_builder=lambda root, asof=None: _context(asof),
+        clock=Clock(),
+    )
+    assert style_column("size", 3) in result
+    assert style_column("quality", 3) in result
+    assert result.loc[0, style_column("size", 3)] == pytest.approx(0.003)
+    assert result.loc[1, style_column("quality", 3)] == pytest.approx(0.0025)
+    assert pd.Timestamp(result.loc[0, "state_available_at"]) == pd.Timestamp(
+        "2026-01-29T21:16:00Z"
+    )
+    receipt = build_l2_style_history_binding(
+        ".",
+        result,
+        downstream_builder=lambda root, asof=None: _context(asof),
+        clock=Clock(),
+    )
+    assert receipt["binding_verified"] is True
+    assert receipt["historical_pit_attested"] is True
+
+
+def test_materializer_never_silently_replaces_legacy_style_columns():
+    base = _market_style().drop(
+        columns=[style_column("size", 3), style_column("quality", 3)]
+    )
+    base["style_momentum_5"] = [0.1, 0.2]
+    with pytest.raises(ValueError, match="EXISTING_STYLE_COLUMNS_CONFLICT"):
+        materialize_l2_style_history(
+            ".",
+            base,
             downstream_builder=lambda root, asof=None: _context(asof),
             clock=Clock(),
         )
