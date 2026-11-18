@@ -19,6 +19,7 @@ def _receipt():
         "context_identity_sha256": "1" * 64,
         "model_versions": ["ridge-v1"],
         "label_bundle_sha256s": ["2" * 64],
+        "feature_bundle_sha256s": ["4" * 64],
         "source_snapshot_sha256s": ["3" * 64],
         "binding_verified": True,
         "historical_pit_attested": False,
