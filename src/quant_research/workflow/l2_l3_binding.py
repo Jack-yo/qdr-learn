@@ -106,6 +106,103 @@ def validate_l2_style_binding_receipt(receipt: dict) -> dict:
     }
 
 
+def materialize_l2_style_history(
+    root: Path,
+    market_style: pd.DataFrame,
+    *,
+    downstream_builder=build_downstream_context,
+    clock: TradingClock | None = None,
+) -> pd.DataFrame:
+    """Create a new market_style frame with exact admitted L2 columns.
+
+    Existing market_* evidence is preserved. Existing style_* columns are
+    accepted only when they already exactly equal the admitted L2 grid; legacy
+    or exploratory style columns are never silently overwritten/dropped.
+    """
+    if not isinstance(market_style, pd.DataFrame) or market_style.empty:
+        raise ValueError("L3_L2_MARKET_STYLE_FRAME_REQUIRED")
+    if {"date", "state_available_at"} - set(market_style):
+        raise ValueError("L3_L2_MARKET_STYLE_TIMESTAMPS_REQUIRED")
+    result = market_style.copy()
+    dates = pd.to_datetime(result["date"], errors="raise")
+    if (
+        dates.dt.tz is not None or dates.isna().any()
+        or not dates.eq(dates.dt.normalize()).all()
+        or dates.duplicated().any() or not dates.is_monotonic_increasing
+    ):
+        raise ValueError("L3_L2_MARKET_STYLE_SESSION_INVALID")
+    existing_style_columns = sorted(
+        column for column in result.columns if column.startswith("style_")
+    )
+    clock = clock or TradingClock()
+    expected_columns = None
+    rows = []
+    for index, day in enumerate(dates):
+        session = day.date().isoformat()
+        context = downstream_builder(Path(root).resolve(), asof=session)
+        if context.get("status") != "MODEL_ADMITTED_CONTEXT":
+            raise ValueError("L3_L2_CONTEXT_NOT_MODEL_ADMITTED:" + session)
+        frozen_at = pd.Timestamp(context.get("forecast_frozen_at_utc"))
+        if frozen_at.tzinfo is None:
+            raise ValueError("L3_L2_FORECAST_FREEZE_TIME_MISSING:" + session)
+        admitted = [
+            row for row in context.get("contexts", [])
+            if row.get("downstream_context_eligible") is True
+        ]
+        if not admitted:
+            raise ValueError("L3_L2_NO_ADMITTED_CONTEXT:" + session)
+        values = {
+            style_column(row["style_id"], int(row["horizon"])):
+                float(row["admitted_relative_return"])
+            for row in admitted
+        }
+        columns = sorted(values)
+        if expected_columns is None:
+            expected_columns = columns
+        elif columns != expected_columns:
+            raise ValueError("L3_L2_ADMITTED_GRID_CHANGED_ACROSS_HISTORY")
+
+        current_available = pd.Timestamp(result.iloc[index]["state_available_at"])
+        if current_available.tzinfo is None:
+            raise ValueError("L3_L2_STATE_AVAILABILITY_UNZONED")
+        effective = max(
+            current_available.tz_convert("UTC"),
+            frozen_at.tz_convert("UTC"),
+        )
+        entry = pd.Timestamp(clock.window(session, 1).entry_time)
+        if effective >= entry:
+            raise ValueError("L3_L2_STATE_NOT_AVAILABLE_BEFORE_NEXT_ENTRY")
+        rows.append((index, effective, values))
+
+    if existing_style_columns:
+        if existing_style_columns != expected_columns:
+            raise ValueError("L3_L2_EXISTING_STYLE_COLUMNS_CONFLICT")
+        for index, _available, values in rows:
+            row = result.iloc[index]
+            for column, expected in values.items():
+                actual = row[column]
+                if (
+                    pd.isna(actual)
+                    or not math.isfinite(float(actual))
+                    or not math.isclose(
+                        float(actual), expected, rel_tol=0.0, abs_tol=1e-15
+                    )
+                ):
+                    raise ValueError("L3_L2_EXISTING_STYLE_VALUE_MISMATCH:" + column)
+    else:
+        for column in expected_columns or []:
+            result[column] = pd.NA
+        for index, _available, values in rows:
+            for column, value in values.items():
+                result.at[result.index[index], column] = value
+        for column in expected_columns or []:
+            result[column] = pd.to_numeric(result[column], errors="raise")
+
+    for index, available, _values in rows:
+        result.at[result.index[index], "state_available_at"] = available.isoformat()
+    return result
+
+
 def build_l2_style_history_binding(
     root: Path,
     market_style: pd.DataFrame,
