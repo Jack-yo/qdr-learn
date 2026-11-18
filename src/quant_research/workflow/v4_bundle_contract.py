@@ -33,6 +33,74 @@ def _known_by(series, cutoff, field):
         raise ValueError(f"V4_{field}_ARRIVED_AFTER_SIGNAL")
 
 
+def layered_current_signal(
+    frames: dict, manifest: dict, session, base_signal, entry_time, *,
+    now_utc=None
+):
+    """Return the causal current L3 cutoff after every required input exists."""
+    session=pd.Timestamp(session)
+    base=pd.Timestamp(base_signal)
+    entry=pd.Timestamp(entry_time)
+    if (
+        session.tzinfo is not None or session!=session.normalize()
+        or base.tzinfo is None or entry.tzinfo is None
+    ):
+        raise ValueError("V4_LAYER_SIGNAL_CLOCK_INVALID")
+    names=manifest.get("factor_names")
+    if (
+        not isinstance(names,list) or not names
+        or len(names)!=len(set(names))
+    ):
+        raise ValueError("V4_FACTOR_REGISTRY_INVALID")
+
+    required=[]
+    metadata=frames.get("candidate_meta")
+    if not isinstance(metadata,pd.DataFrame) or metadata.empty:
+        raise ValueError("V4_CANDIDATE_META_INPUT_CONTRACT_MISSING")
+    meta_dates=_session_dates(metadata["date"],"candidate_meta")
+    current_meta=metadata.loc[meta_dates.eq(session)]
+    if current_meta.empty or "available_at" not in current_meta:
+        raise ValueError("V4_CURRENT_CANDIDATE_AVAILABILITY_MISSING")
+    required.extend(current_meta.available_at.tolist())
+
+    factors=frames.get("factors")
+    if not isinstance(factors,pd.DataFrame) or factors.empty:
+        raise ValueError("V4_FACTORS_INPUT_CONTRACT_MISSING")
+    factor_dates=_session_dates(factors["date"],"factors")
+    current_factors=factors.loc[
+        factor_dates.eq(session)&factors.feature_name.isin(names)
+    ]
+    if current_factors.empty or "available_at" not in current_factors:
+        raise ValueError("V4_CURRENT_FACTOR_AVAILABILITY_MISSING")
+    required.extend(current_factors.available_at.tolist())
+
+    states=frames.get("market_style")
+    if not isinstance(states,pd.DataFrame) or states.empty:
+        raise ValueError("V4_MARKET_STYLE_INPUT_CONTRACT_MISSING")
+    state_dates=_session_dates(states["date"],"market_style")
+    current_state=states.loc[state_dates.eq(session)]
+    if len(current_state)!=1 or "state_available_at" not in current_state:
+        raise ValueError("V4_CURRENT_MARKET_STYLE_STATE_INVALID")
+    required.extend(current_state.state_available_at.tolist())
+
+    times=[]
+    for value in required:
+        stamp=pd.Timestamp(value)
+        if stamp.tzinfo is None:
+            raise ValueError("V4_LAYER_INPUT_AVAILABILITY_UNZONED")
+        times.append(stamp.tz_convert("UTC"))
+    signal=max([base.tz_convert("UTC"),*times])
+    if signal>=entry.tz_convert("UTC"):
+        raise ValueError("V4_LAYER_SIGNAL_REACHES_NEXT_SESSION_ENTRY")
+    if now_utc is not None:
+        moment=pd.Timestamp(now_utc)
+        if moment.tzinfo is None:
+            raise ValueError("V4_LAYER_SIGNAL_NOW_UNZONED")
+        if signal>moment.tz_convert("UTC"):
+            raise ValueError("V4_LAYER_INPUT_NOT_YET_AVAILABLE")
+    return signal
+
+
 def audit_forward_candidate_cohort(frames: dict, manifest: dict,
                                    session, signal_time) -> dict:
     """Reject silent cohort attrition and labels/inputs that could see T+1."""
