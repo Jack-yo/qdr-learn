@@ -208,6 +208,9 @@ def four_layer_status(root: Path, *, asof: str | None = None,
         "source_snapshot_sha256": (
             l4_record.get("source_snapshot_sha256") if l4_record else None
         ),
+        "source_forecast_identity": (
+            l4_record.get("source_forecast_identity") if l4_record else None
+        ),
         "risk_review_only": True,
         "execution_eligible": False,
         "real_orders_enabled": False,
@@ -275,6 +278,12 @@ def four_layer_status(root: Path, *, asof: str | None = None,
         != l4_record.get("source_snapshot_sha256")
     ):
         blockers.append("L3_L4_SOURCE_SNAPSHOT_MISMATCH")
+    if (
+        l3_record and l4_record
+        and l4_record.get("source_forecast_identity")
+        != l3_record.get("identity")
+    ):
+        blockers.append("L4_L3_FORECAST_IDENTITY_MISMATCH")
 
     return {
         "schema": SCHEMA,
