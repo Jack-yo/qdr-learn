@@ -401,3 +401,88 @@ complete pytest, actual OOS/ablation run, forward archive evidence and browser
 acceptance are executed locally.
 
 Local acceptance: [L2 P5 checklist](L2_P5_LOCAL_ACCEPTANCE.md).
+
+
+## 17. P6 implementation update (2026-11-18)
+
+P6 engineering now defines explicit read-only contracts from L2 into L3/L4
+instead of allowing downstream modules to infer style qualification from
+displayed observations.
+
+### L2 downstream context
+
+- `workflow/l2_downstream.py` aligns current P4 forecast with the newest
+  nonfuture P5 validation report.
+- A style×horizon value is exposed as `admitted_relative_return` only when its
+  exact P5 qualification is `MODEL_ADMITTED`, OOS and genuine-forward gates
+  passed, and model/label-bundle identities match.
+- Formal downstream consumption additionally requires the current P4 forecast
+  itself to exist as an immutable snapshot frozen after T signal and before
+  T+1 entry. Live recomputation alone is never sufficient.
+- The frozen snapshot must match the current model output and source/label
+  provenance. Mismatch blocks the bridge.
+- Read-only API:
+  `GET /api/v1/l2/styles/downstream-context?asof=YYYY-MM-DD`.
+
+### L2 -> L3 style binding
+
+- `workflow/l2_l3_binding.py` audits L3 `market_style` rows against exact
+  frozen/admitted L2 context.
+- Canonical L2 columns use
+  `style_l2_<style_id>_h<horizon>`.
+- Every numeric `style_*` column must equal the admitted L2 set. Extra
+  exploratory style columns, missing admitted units, changed values, late
+  availability, non-admitted history or a changing admitted grid fail closed.
+- The compact receipt binds P4 forecast identities, P5 validation identities,
+  model versions, label-bundle SHA256 values, daily source-snapshot SHA256
+  values and exact style values.
+- `binding_verified` and `historical_pit_attested` are independent. Current
+  evidence may prove identity binding while historical PIT remains false.
+- Explicit receipt command:
+  `python -m quant_research.workflow.l2_l3_binding --market-style <file> --output <receipt.json>`.
+
+### V4 bundle, preflight and L3 archive
+
+- Managed V4 bundles may include `l2_style_context_receipt`; old bundles
+  remain readable but unbound.
+- Bundle load performs structural receipt validation.
+- V4 preflight re-runs the L2/L3 history binding before model fit and reports
+  binding/PIT status.
+- Both the L3 OOS study and forward runner independently re-run the binding
+  audit.
+- L3 forward fitting rechecks the receipt after model work and refuses archive
+  writes if it changed during fit.
+- The receipt becomes part of the L3 forward `input_contract`, so changing
+  L2 qualification/style evidence changes the L3 forecast archive identity.
+- L3 archive index exposes `l2_style_binding_verified`,
+  `l2_style_historical_pit_attested` and the context-binding digest.
+
+### Daily four-layer integration
+
+- V4 daily `styles` stage now uses the formal L2 downstream context.
+  `OOS_VALIDATED` is still RESEARCH_ONLY; only MODEL_ADMITTED context may
+  cause the style stage to PASS.
+- French factors remain separate descriptive observations and do not alter L2
+  qualification.
+- `workflow/v4_layer_status.py` provides a unified read-only evidence
+  snapshot for L1/L2/L3/L4.
+- Read-only API:
+  `GET /api/v1/v4/layers?asof=YYYY-MM-DD&horizon=1|3|5`.
+- The four-layer snapshot never trains, writes decisions or enables execution.
+  It checks no-lookahead artifact selection, L1/L2 qualification, L3 binding,
+  L2 historical PIT attestation, L3/L4 freshness and L3/L4 source identity.
+
+### Current evidence boundary
+
+P6 engineering can prove that downstream artifacts are linked to the exact
+upstream evidence they claim to use. It cannot create missing historical PIT
+proof. In particular, a valid L2→L3 receipt may still carry
+`historical_pit_attested=false`, which must remain visible as
+`L3_L2_STYLE_HISTORY_NOT_PIT_ATTESTED`.
+
+**P6 status: engineering implemented, not locally accepted.** Full pytest,
+actual accepted P4/P5 evidence, genuine forward archives, L2→L3 receipt over
+real style history, L3/L4 source alignment and browser/API acceptance remain
+local gates.
+
+Local acceptance: [L2 P6 checklist](L2_P6_LOCAL_ACCEPTANCE.md).
