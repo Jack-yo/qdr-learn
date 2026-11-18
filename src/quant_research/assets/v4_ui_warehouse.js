@@ -97,7 +97,7 @@
   ).join('')+'</div>'+
   (item.missing_reason?'<div class="wh-reason"><b>当前原因</b><span>'+e(item.missing_reason)+'</span></div>':'')+
   ((item.limitations||[]).length?'<div class="wh-reason"><b>使用限制</b><span>'+e(item.limitations.join('；'))+'</span></div>':'')+
-  '<div class="wh-policy-note">数据已采集不等于历史 PIT 已验证，也不代表已获得模型预测或交易资格。</div>';
+  '<div class="wh-policy-note">数据健康与研究资格分开管理；PIT / 回测准入请到「研究准入」。</div>';
  };
  const renderFields=(detail)=>{
   const fields=detail?.fields||[];
@@ -167,17 +167,17 @@
  };
  pages.warehouse=async()=>{
   const response=await settle('/api/v1/warehouse/overview');
-  if(!response.ok)return {title:'数据仓库',html:heading('数据仓库','数据资产、来源、质量与更新状态')+
+  if(!response.ok)return {title:'数据与保障',html:heading('数据与保障','数据资产、来源、质量、更新与异常。')+
     empty('暂时无法读取数据仓库',response.error?.message||'请检查本地服务和数据目录。')};
   const data=response.data||{};
   if(data.status==='MAINTENANCE_RUNNING'){
-   return {title:'数据仓库',html:heading('数据仓库','数据资产、来源、质量与更新状态',
+   return {title:'数据与保障',html:heading('数据与保障','数据资产、来源、质量、更新与异常。',
      '<a class="btn" href="/data">打开数据维护</a>')+
      '<div class="wh-maintenance-banner"><b>数据维护正在运行</b><span>'+e(data.message||'数据库由维护任务持有。')+'</span></div>'+
      renderHistory(data.maintenance?.recent_runs||[])};
   }
   const assets=data.datasets||[];
-  if(!assets.length)return {title:'数据仓库',html:heading('数据仓库','数据资产、来源、质量与更新状态')+
+  if(!assets.length)return {title:'数据与保障',html:heading('数据与保障','数据资产、来源、质量、更新与异常。')+
     empty('数据资产目录暂不可用','请检查数据仓库服务返回。')};
   const registry=data.registry||{};
   systemNames=Object.fromEntries((registry.systems||[]).map(item=>[item.key,item.name]));
@@ -216,7 +216,7 @@
   const exportLinks=data.catalog_generated_at_utc?
     '<a class="btn smallbtn" href="/api/v1/data/catalog/datasets.csv">导出资产 CSV</a>'+
     '<a class="btn smallbtn" href="/api/v1/data/catalog/cache_index.csv">导出缓存索引</a>':'';
-  const top=heading('数据仓库','统一查看真实数据资产、来源运行状态、质量证据和维护历史',
+  const top=heading('数据与保障','数据资产、来源、质量、更新与异常。',
     '<button type="button" class="btn smallbtn" id="wh-refresh">刷新状态</button>'+exportLinks+
     '<a class="btn primary" href="/data">打开数据维护</a>');
   const registryLine='<div class="wh-registry-line"><b>L1 数据体系登记</b><span>'+
@@ -245,11 +245,11 @@
    '<td>'+e(x.latest_observation?.error_code||x.limitation||'—')+'</td></tr>').join('');
   const attentionBlock='<section class="card pad wh-attention-card"><div class="wh-section-title"><b>需要关注</b><span>阻断、过期、缺失与质量问题 · 按严重程度排序</span></div>'+
    renderAttention(data.attention||[])+'</section>';
-  const sourceMonitor='<section class="card pad wh-source-monitor"><div class="wh-section-title"><b>数据源监控</b><span>'+n(sources.length,0)+' 个注册来源</span></div>'+
-   (sourceRows?'<div class="v4-table-scroll"><table class="table wh-table"><thead><tr><th>数据源</th><th>代码登记</th><th>运行状态</th><th>新鲜度</th><th>观测日</th><th>最近抓取</th><th>说明 / 错误</th></tr></thead><tbody>'+sourceRows+'</tbody></table></div>':empty('暂无来源登记','L1 来源注册表尚不可用。'))+
-   '<div class="wh-source-foot">注册状态不等于真实运行状态；没有运行记录时显示「尚无运行观测」。</div></section>';
+  const sourceMonitor='<details class="wh-source-details"><summary><span>数据源诊断</span><small>'+n(sources.length,0)+' 个来源</small></summary><section class="wh-source-monitor">'+
+   (sourceRows?'<div class="v4-table-scroll"><table class="table wh-table"><thead><tr><th>数据源</th><th>登记</th><th>运行</th><th>新鲜度</th><th>观测日</th><th>最近抓取</th><th>说明</th></tr></thead><tbody>'+sourceRows+'</tbody></table></div>':empty('暂无来源登记','来源注册表尚不可用。'))+
+   '</section></details>';
   const html=top+kpis+registryLine+attentionBlock+main+sourceMonitor;
-  return {title:'数据仓库',html,mount:()=>{
+  return {title:'数据与保障',html,mount:()=>{
    document.getElementById('wh-refresh')?.addEventListener('click',()=>window.location.reload());
    document.getElementById('wh-search')?.addEventListener('input',ev=>{
     state.search=ev.target.value;V.show('warehouse');
