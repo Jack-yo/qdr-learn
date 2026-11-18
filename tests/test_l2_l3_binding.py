@@ -246,3 +246,15 @@ def test_materializer_never_silently_replaces_legacy_style_columns():
             downstream_builder=lambda root, asof=None: _context(asof),
             clock=Clock(),
         )
+
+
+def test_v2_receipt_rejects_timezone_naive_admission_freeze():
+    receipt = build_l2_style_history_binding(
+        ".",
+        _market_style(),
+        downstream_builder=lambda root, asof=None: _context(asof),
+        clock=Clock(),
+    )
+    receipt["admission_frozen_at_utc"] = "2026-01-31T01:00:00"
+    with pytest.raises(ValueError, match="ADMISSION_FREEZE_TIME_INVALID"):
+        validate_l2_style_binding_receipt(receipt)
