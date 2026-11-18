@@ -1,135 +1,341 @@
-/* QDR V5 L2 style rotation desk. */
+/* QDR L2 P3: read-only seven-style observation cockpit.
+   One snapshot request for P1 observations and P2 rotation, no model claims. */
 (() => {
 'use strict';
-const V=window.V4;if(!V)throw Error('QDR L2 requires V4 core');
-const {pages,state,e,n,signed,date,settle,show}=V;
-const STYLE_LABELS={size:'规模',value:'价值',growth:'成长',momentum:'动量',quality:'质量',low_vol:'低波动',cyc_def:'周期 / 防御'};
-const STATES={STRONG_ACCELERATING:['强势加速','is-up'],STRONG_DECELERATING:['强势减速','is-down'],WEAK_IMPROVING:['弱势改善','is-up'],WEAK_DETERIORATING:['弱势恶化','is-down'],UNKNOWN:['待判定','']};
+const V=window.V4;
+if(!V)throw Error('QDR L2 requires V4 core');
+const {pages,state,e,n,pct,signed,date,short,badge,heading,card,empty,note,table,settle,show}=V;
+const STYLE_LABELS={
+ size:'规模',value:'价值',growth:'成长',momentum:'动量',
+ quality:'质量',low_vol:'低波动',cyc_def:'周期 / 防御'
+};
+const STATES={
+ STRONG_ACCELERATING:['强势加速','strong'],
+ STRONG_DECELERATING:['强势减速','cooling'],
+ WEAK_IMPROVING:['弱势改善','improving'],
+ WEAK_DETERIORATING:['弱势恶化','weak'],
+ UNKNOWN:['暂不可判定','unknown']
+};
+const STYLE_KEYS=Object.keys(STYLE_LABELS);
+state.l2Tab=state.l2Tab||'overview';
+state.l2Style=state.l2Style||'size';
+state.l2AsOf=state.l2AsOf||'';
 const finite=v=>v!==null&&v!==undefined&&v!==''&&Number.isFinite(Number(v));
-const styleName=id=>STYLE_LABELS[id]||id||'—';
-const stateMeta=s=>STATES[String(s)||'UNKNOWN']||STATES.UNKNOWN;
-state.l2Tab=state.l2Tab||'overview';state.l2Style=state.l2Style||'size';state.l2AsOf=state.l2AsOf||'';
-const tab=(id,label)=>'<button type="button" role="tab" aria-selected="'+(state.l2Tab===id)+'" class="v4-subtab '+(state.l2Tab===id?'active':'')+'" data-l2-tab="'+e(id)+'">'+e(label)+'</button>';
-const empty=(title,detail)=>'<div class="l2-empty"><b>'+e(title)+'</b><span>'+e(detail)+'</span></div>';
+const number=v=>finite(v)?Number(v):null;
+const percent=v=>finite(v)?signed(v):'—';
+const htmlStatus=(s)=>{const a=STATES[String(s)||'UNKNOWN']||STATES.UNKNOWN;return '<span class="l2-state l2-'+a[1]+'">'+e(a[0])+'</span>';};
+const availability=(v)=>v?e(String(v).replace('T',' ').slice(0,16)):'—';
+const linkTab=(id,name)=>'<button type="button" class="l2-tab'+(state.l2Tab===id?' selected':'')+'" data-l2-tab="'+e(id)+'" aria-pressed="'+(state.l2Tab===id?'true':'false')+'">'+e(name)+'</button>';
+const shownData=(data,style)=>Array.isArray(data)?data.find(x=>x.style_id===style):null;
+const problem=(result,title)=>result?.pending?
+  empty(title+'正在加载','各模块独立获取真实研究数据，尚未返回不是数据缺失。'):
+  empty(title+'暂不可用',result?.error?.message||'没有可用的真实观测或来源校验未通过。');
+const strip=(items)=>'<div class="l2-stat-strip">'+items.map(x=>'<div class="l2-stat"><div>'+e(x[0])+'</div><b>'+x[1]+'</b><small>'+e(x[2])+'</small></div>').join('')+'</div>';
+const itemName=id=>STYLE_LABELS[id]||id||'—';
+const tone=v=>!finite(v)?'na':Number(v)>0?'up':Number(v)<0?'down':'flat';
+const figure=(value,kind='return')=>'<span class="l2-number '+tone(value)+'">'+(kind==='return'?percent(value):finite(value)?n(value,kind==='integer'?0:4):'—')+'</span>';
+const point=(row,rangeX,rangeY)=>{
+ const x=number(row.acceleration_relative_return_5d);
+ const y=number(row.strength_relative_return_20d);
+ if(x===null||y===null)return '';
+ const cx=Math.max(30,Math.min(530,280+(x/rangeX)*245)).toFixed(1);
+ const cy=Math.max(28,Math.min(282,155-(y/rangeY)*120)).toFixed(1);
+ const selected=row.style_id===state.l2Style;
+ return '<g class="'+(selected?'l2-selected-point':'')+'"><circle cx="'+cx+'" cy="'+cy+'" r="'+(selected?'10':'7')+'" class="l2-plot-point"/><text x="'+(Number(cx)+12)+'" y="'+(Number(cy)-8)+'" class="l2-point-label">'+e(itemName(row.style_id))+'</text><title>'+e(itemName(row.style_id)+' · 20D '+percent(y)+' · 加速度 '+percent(x))+'</title></g>';
+};
 function quadrant(rows){
- const valid=(rows||[]).filter(x=>x.rotation_state!=='UNKNOWN'&&finite(x.strength_relative_return_20d)&&finite(x.acceleration_relative_return_5d));
- if(!valid.length)return empty('轮动位置不可用','需要 20D 相对收益和 5D 加速度。');
- const mx=Math.max(.0001,...valid.map(x=>Math.abs(Number(x.acceleration_relative_return_5d))));
- const my=Math.max(.0001,...valid.map(x=>Math.abs(Number(x.strength_relative_return_20d))));
- const point=x=>{
-  const cx=Math.max(28,Math.min(532,280+Number(x.acceleration_relative_return_5d)/mx*235));
-  const cy=Math.max(26,Math.min(284,155-Number(x.strength_relative_return_20d)/my*115));
-  return '<g><circle cx="'+cx.toFixed(1)+'" cy="'+cy.toFixed(1)+'" r="'+(x.style_id===state.l2Style?'8':'6')+'" class="'+(x.style_id===state.l2Style?'selected':'')+'"/><text x="'+(cx+10).toFixed(1)+'" y="'+(cy-7).toFixed(1)+'">'+e(styleName(x.style_id))+'</text></g>';
- };
- return '<svg class="l2-rotation-map" viewBox="0 0 560 310" role="img" aria-label="风格轮动四象限">'+
- '<line x1="280" y1="14" x2="280" y2="292"/><line x1="14" y1="155" x2="546" y2="155"/>'+
- '<text x="18" y="28" class="quad">强势减速</text><text x="455" y="28" class="quad">强势加速</text>'+
- '<text x="18" y="286" class="quad">弱势恶化</text><text x="455" y="286" class="quad">弱势改善</text>'+valid.map(point).join('')+'</svg>';
+ const valid=rows.filter(x=>x.rotation_state!=='UNKNOWN'&&finite(x.strength_relative_return_20d)&&finite(x.acceleration_relative_return_5d));
+ if(!valid.length)return empty('轮动位置无法绘制','需要 20 日相对收益、5 日相对加速度及来源时间证明。');
+ const maxX=Math.max(0.0001,...valid.map(x=>Math.abs(Number(x.acceleration_relative_return_5d))));
+ const maxY=Math.max(0.0001,...valid.map(x=>Math.abs(Number(x.strength_relative_return_20d))));
+ return '<div class="l2-plot-scroll"><svg viewBox="0 0 560 320" class="l2-plot" role="img" aria-label="七类ETF风格：横轴五日相对加速度，纵轴二十日相对收益，零点为四象限原点">'+
+ '<rect x="0" y="0" width="280" height="155" class="l2-q-neutral"/><rect x="280" y="0" width="280" height="155" class="l2-q-good"/>'+
+ '<rect x="0" y="155" width="280" height="155" class="l2-q-low"/><rect x="280" y="155" width="280" height="155" class="l2-q-warn"/>'+
+ '<line x1="280" y1="0" x2="280" y2="310" class="l2-axis"/>'+
+ '<line x1="0" y1="155" x2="560" y2="155" class="l2-axis"/>'+
+ '<text x="14" y="18" class="l2-quadrant-label">强势减速</text><text x="454" y="18" class="l2-quadrant-label">强势加速</text>'+
+ '<text x="14" y="292" class="l2-quadrant-label">弱势恶化</text><text x="454" y="292" class="l2-quadrant-label">弱势改善</text>'+
+ '<text x="4" y="150" class="l2-axis-label">0</text><text x="284" y="310" class="l2-axis-label">0</text>'+
+ valid.map(x=>point(x,maxX,maxY)).join('')+'</svg></div>'+
+ '<div class="l2-chart-foot"><span>↑ 20 日相对收益</span><span>→ 5 日相对加速度</span><span>归一化比例坐标 · 两轴独立缩放 · 非交易信号</span></div>';
 }
-function ranked(items,rotation){
- const rmap=new Map((rotation||[]).map(x=>[x.style_id,x]));
- const rows=(items||[]).filter(x=>finite(x.relative_return_20d)).sort((a,b)=>Number(b.relative_return_20d)-Number(a.relative_return_20d));
- if(!rows.length)return empty('暂无可比较风格','当前没有完整的 20D 相对收益。');
- return '<table class="l2-table"><thead><tr><th>风格</th><th>5D</th><th>20D</th><th>60D</th><th>状态</th></tr></thead><tbody>'+
- rows.map(x=>{const s=rmap.get(x.style_id),m=stateMeta(s?.rotation_state);return '<tr data-l2-style="'+e(x.style_id)+'" class="'+(state.l2Style===x.style_id?'selected':'')+'"><td><b>'+e(styleName(x.style_id))+'</b></td><td>'+signed(x.relative_return_5d)+'</td><td>'+signed(x.relative_return_20d)+'</td><td>'+signed(x.relative_return_60d)+'</td><td class="'+m[1]+'">'+e(m[0])+'</td></tr>';}).join('')+'</tbody></table>';
+function historyGraph(series,style){
+ const rows=(Array.isArray(series)?series:[]).filter(x=>x.style_id===style&&x.date)
+   .sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+ const values=rows.map(x=>number(x.relative_return_20d)),good=values.filter(x=>x!==null);
+ if(good.length<2)return empty('历史曲线缺少足够观测','不会插值、补零或跨缺口连接。');
+ const lo=Math.min(0,...good),hi=Math.max(0,...good),span=Math.max(1e-8,hi-lo);
+ let path='',drawing=false;
+ rows.forEach((row,i)=>{
+  const val=values[i];
+  if(val===null){drawing=false;return;}
+  const px=14+532*i/Math.max(1,rows.length-1);
+  const py=170-145*(val-lo)/span;
+  path+=(drawing?'L':'M')+px.toFixed(1)+' '+py.toFixed(1)+' ';
+  drawing=true;
+ });
+ const zeroY=(170-145*(0-lo)/span).toFixed(1);
+ return '<svg viewBox="0 0 560 185" class="l2-trend" role="img" aria-label="真实20交易日ETF相对收益历史，缺失时断线">'+
+ '<line x1="14" y1="'+zeroY+'" x2="546" y2="'+zeroY+'" class="l2-zero"/>'+
+ '<path d="'+path+'" fill="none" class="l2-trend-line" stroke-width="2.5" stroke-linejoin="round" />'+
+ '</svg><div class="l2-chart-foot"><span>'+date(rows[0].date)+'—'+date(rows[rows.length-1].date)+'</span><span>20D 相对收益 · 无补值</span></div>';
 }
-function trend(series,id){
- const rows=(series||[]).filter(x=>x.style_id===id&&x.date&&finite(x.relative_return_20d)).sort((a,b)=>String(a.date).localeCompare(String(b.date))).slice(-80);
- if(rows.length<2)return empty('历史趋势不足','需要至少两个真实观测点。');
- const vals=rows.map(x=>Number(x.relative_return_20d)),lo=Math.min(0,...vals),hi=Math.max(0,...vals),span=Math.max(1e-8,hi-lo);
- const pts=rows.map((x,i)=>[(18+514*i/(rows.length-1)).toFixed(1),(150-122*(Number(x.relative_return_20d)-lo)/span).toFixed(1)]);
- return '<svg class="l2-trend" viewBox="0 0 550 170"><line x1="18" x2="532" y1="'+(150-122*(0-lo)/span).toFixed(1)+'" y2="'+(150-122*(0-lo)/span).toFixed(1)+'"/><path d="'+pts.map((p,i)=>(i?'L':'M')+p.join(' ')).join(' ')+'"/></svg><div class="l2-trend-foot"><span>'+date(rows[0].date)+'—'+date(rows[rows.length-1].date)+'</span><span>20D 相对收益</span></div>';
+function tableStyles(items,rotation){
+ const s=new Map(rotation.map(x=>[x.style_id,x]));
+ const rows=items.filter(x=>STYLE_KEYS.includes(x.style_id))
+  .slice().sort((a,b)=>{
+   const av=number(a.relative_return_20d),bv=number(b.relative_return_20d);
+   return av===null&&bv===null?0:av===null?1:bv===null?-1:bv-av;
+  }).map(x=>{
+   const r=s.get(x.style_id)||{};
+   return ['<button type="button" class="l2-style-select'+(state.l2Style===x.style_id?' current':'')+'" data-l2-style="'+e(x.style_id)+'">'+e(itemName(x.style_id))+'</button>',
+     figure(x.relative_return_5d),figure(x.relative_return_20d),figure(x.relative_return_60d),
+     figure(x.relative_acceleration_5d),htmlStatus(r.rotation_state),e(x.missing_reason||r.block_reason||'—')];
+  });
+ return table(['ETF 风格','5D 相对收益','20D 相对收益','60D 相对收益','5D 加速度','轮动状态','缺失原因'],rows);
 }
-function turns(rotation){
- const xs=(rotation||[]).filter(x=>x.rotation_state&&x.rotation_state!=='UNKNOWN').sort((a,b)=>String(b.last_transition_session||'').localeCompare(String(a.last_transition_session||''))).slice(0,6);
- if(!xs.length)return empty('暂无已确认转折','当前没有可显示的风格状态变化。');
- return '<div class="l2-turns">'+xs.map(x=>{const m=stateMeta(x.rotation_state);return '<div><span>'+e(styleName(x.style_id))+'</span><b class="'+m[1]+'">'+e(m[0])+'</b><small>'+e(x.last_transition_session||x.rotation_state_start_session||'—')+'</small></div>';}).join('')+'</div>';
+function details(data,rotation){
+ const x=shownData(data?.latest,state.l2Style),r=shownData(rotation?.latest,state.l2Style);
+ const registry=data?.styles?.find?.(v=>v.style_id===state.l2Style);
+ if(!x)return card(itemName(state.l2Style)+' · 研究详情',empty('该风格当前没有可用数据','请检查样本覆盖或切换研究日期。'));
+ const vals=[['5D 相对收益',figure(x.relative_return_5d)],['20D 相对收益',figure(x.relative_return_20d)],
+ ['60D 相对收益',figure(x.relative_return_60d)],['5D 加速度',figure(x.relative_acceleration_5d)],
+ ['20D 相对波动率',figure(x.relative_volatility_20d)],['60D 相对回撤',figure(x.relative_drawdown_60d)],
+ ['10 日相对占优天数',figure(x.relative_up_days_10,'integer')],['状态持续日',figure(r?.consecutive_sessions,'integer')]];
+ const labels=vals.map(([k,v])=>'<div class="l2-mini"><span>'+e(k)+'</span><b>'+v+'</b></div>').join('');
+ const info=registry?'<div class="l2-pair"><span>风格代理：'+e((registry.numerator||[]).join(' / '))+'</span><span>比较基准：'+e((registry.denominator||[]).join(' / '))+'</span></div>':'';
+ return card(itemName(state.l2Style)+' · 状态与计算',
+   '<div class="l2-detail-status">'+htmlStatus(r?.rotation_state)+'<span>状态开始：'+date(r?.rotation_state_start_session)+'</span><span>上次有效转折：'+date(r?.last_transition_session)+'</span></div>'+
+   '<div class="l2-mini-grid">'+labels+'</div>'+info+
+   '<div class="l2-source-line">数据可用时间：'+availability(x.available_at)+' · 来源版本：'+e(x.registry_version||'—')+'</div>'+
+   (x.missing_reason||r?.block_reason?note('数据限制：'+(x.missing_reason||r?.block_reason)):'')+
+   note('四象限是描述性分类；不代表未来上涨概率、入场位置或已通过样本外验证的信号。'),
+   '单一风格 · 实际计算');
 }
-function forecastView(result,validation){
- const d=result?.ok?result.data:null,v=validation?.ok?validation.data:null;
- if(!d||d.status==='BLOCKED'){
-  return '<div class="l2-forecast-empty"><b>领先预测待验证</b><span>当前不展示缺少合格标签或训练证据的 H1 / H3 / H5 结果。</span><details><summary>查看阻断原因</summary><code>'+e(d?.code||result?.error?.message||'EVIDENCE_REQUIRED')+'</code></details></div>';
+function transitions(rotation){
+ const events=(rotation?.transitions||[]).slice().reverse();
+ const selected=events.filter(x=>x.style_id===state.l2Style);
+ return card('状态转折 · '+itemName(state.l2Style),
+   selected.length?table(['转折日','前一状态','当前状态','20D 相对收益','5D 加速度'],
+   selected.slice(0,15).map(x=>[date(x.date),htmlStatus(x.previous_state),htmlStatus(x.rotation_state),
+     figure(x.strength_relative_return_20d),figure(x.acceleration_relative_return_5d)])):
+   empty('暂无已确认转折','只统计相邻、有效状态之间的变化；无法确认的时点不会伪造转折。'),
+   '历史状态仅以现存当前版本数据回放，非历史 PIT 证明');
+}
+function quality(data){
+ const coverage=data?.coverage||{};
+ const symbols=Array.isArray(coverage.symbols)?coverage.symbols:[];
+ return card('14 个源符号 · 观测质量',
+   '<div class="l2-quality"><b>'+n(coverage.symbols_with_asof_price,0)+' / '+n(coverage.required_symbols,0)+'</b><span>研究截止前拥有观测的 ETF 数量</span></div>'+
+   (symbols.length?table(['符号','首个交易日','最近交易日','当日可用','截止前可用'],
+    symbols.map(x=>[e(x.symbol),date(x.first_session),date(x.last_session),
+    x.asof_present?'是':'否',x.asof_available_by_cutoff?'是':'否'])):
+    empty('尚无符号级覆盖记录','无法判断缺失是数据源、交易日还是时间资格导致。'))+
+   '<div class="l2-source-line">数据指纹：'+short(data?.source_snapshot_sha256,24)+' · 分割调整价格（不含完整分红总收益）</div>',
+   '缺失不补值 · 失败关闭');
+}
+function validationResearch(result){
+ const d=result?.ok?result.data:null;
+ if(!d){
+  return problem(result,'P5 样本外验证');
  }
- const rows=Array.isArray(d.forecasts)?d.forecasts:[];
- const qualification=Array.isArray(v?.qualification)?v.qualification:[];
- const oos=Array.isArray(v?.oos_validation)?v.oos_validation:[];
- const forward=Array.isArray(v?.forward_validation)?v.forward_validation:[];
+ if(d.status==='BLOCKED'){
+  return card('P5 · 样本外验证与模型资格',
+    empty('尚无冻结验证报告',String(d.code||'L2_P5_VALIDATION_REPORT_NOT_FOUND'))+
+    note('P5 不会在页面打开时重跑 Walk-forward；需要先显式运行并冻结验证任务。'),
+    'BLOCKED · 只读验证报告');
+ }
+ const qualification=Array.isArray(d.qualification)?d.qualification:[];
+ const oos=Array.isArray(d.oos_validation)?d.oos_validation:[];
+ const forward=Array.isArray(d.forward_validation)?d.forward_validation:[];
  const key=(style,h)=>style+'::'+Number(h);
  const qmap=new Map(qualification.map(x=>[key(x.style_id,x.horizon),x]));
  const omap=new Map(oos.map(x=>[key(x.style_id,x.horizon),x]));
  const fmap=new Map(forward.map(x=>[key(x.style_id,x.horizon),x]));
- const grouped=new Map();
- rows.forEach(x=>{if(!grouped.has(x.style_id))grouped.set(x.style_id,{});grouped.get(x.style_id)[Number(x.horizon)]=x;});
- const qualText=q=>{
-  const status=q?.qualification_status;
-  return status==='MODEL_ADMITTED'?'ADMITTED':status==='OOS_VALIDATED'?'OOS':'研究';
- };
- const cell=(id,h)=>{
-  const x=grouped.get(id)?.[h],q=qmap.get(key(id,h));
-  if(!x)return '<td>—</td>';
-  if(x.forecast_status!=='RESEARCH_ONLY'||!finite(x.predicted_relative_return)){
-   return '<td><span class="l2-cell-blocked" title="'+e(x.block_reason||'BLOCKED')+'">BLOCKED</span></td>';
-  }
-  const cls=Number(x.predicted_relative_return)>0?'is-up':Number(x.predicted_relative_return)<0?'is-down':'';
-  const qclass=q?.qualification_status==='MODEL_ADMITTED'?'admitted':q?.qualification_status==='OOS_VALIDATED'?'oos':'research';
-  return '<td class="l2-forecast-cell '+cls+'"><b>'+signed(x.predicted_relative_return)+'</b><small class="'+qclass+'">'+e(qualText(q))+'</small></td>';
- };
- const body=[...grouped.keys()].map(id=>'<tr data-l2-style="'+e(id)+'" class="'+(state.l2Style===id?'selected':'')+'"><td><b>'+e(styleName(id))+'</b></td>'+[1,3,5].map(h=>cell(id,h)).join('')+'</tr>').join('');
- let evidence='';
- if(v?.status==='P5_RESEARCH_VALIDATION'){
-  const selected=[1,3,5].map(h=>{
-   const q=qmap.get(key(state.l2Style,h))||{},o=omap.get(key(state.l2Style,h))||{},fw=fmap.get(key(state.l2Style,h))||{};
-   const gain=finite(o.relative_mse_gain_vs_best_baseline)?signed(o.relative_mse_gain_vs_best_baseline):'—';
-   const direction=finite(o.directional_accuracy)?(Number(o.directional_accuracy)*100).toFixed(1)+'%':'—';
-   const rank=finite(o.rank_ic)?n(o.rank_ic,3):'—';
-   const fwd=finite(fw.genuine_forward_sessions)?n(fw.genuine_forward_sessions,0):'0';
-   const reasons=Array.isArray(q.reasons)?q.reasons:[];
-   return '<tr><td>H'+h+'</td><td>'+e(q.qualification_status||'RESEARCH_ONLY')+'</td><td>'+gain+'</td><td>'+direction+'</td><td>'+rank+'</td><td>'+fwd+'</td><td class="l2-reason">'+e(reasons.join(' · ')||'—')+'</td></tr>';
-  }).join('');
-  evidence='<details class="l2-method"><summary>样本外验证 · '+e(styleName(state.l2Style))+'</summary>'+
-   '<div class="l2-validation"><span>OOS '+n(v?.summary?.oos_validated_units||0,0)+' / '+n(v?.summary?.total_units||21,0)+'</span><span>真实前向 '+n(v?.summary?.genuine_forward_units||0,0)+'</span><span>ADMITTED '+n(v?.summary?.model_admitted_units||0,0)+'</span><span>'+e(v?.probability_calibration_status||'CONTINUOUS_RETURN_ONLY')+'</span></div>'+
-   '<div class="l2-validation-scroll"><table class="l2-table l2-validation-table"><thead><tr><th>期限</th><th>资格</th><th>MSE 改善</th><th>方向</th><th>Rank IC</th><th>前向日</th><th>阻断</th></tr></thead><tbody>'+selected+'</tbody></table></div>'+
-   '<p>预测值是相对基准的连续收益研究估计，不是概率或交易目标。</p></details>';
- }else{
-  evidence='<details class="l2-method"><summary>样本外验证</summary><div class="l2-validation"><span>暂无冻结 P5 验证报告</span><span>'+e(v?.code||validation?.error?.message||'L2_P5_VALIDATION_REPORT_NOT_FOUND')+'</span></div></details>';
- }
- return '<table class="l2-table l2-forecast-table"><thead><tr><th>风格</th><th>H1</th><th>H3</th><th>H5</th></tr></thead><tbody>'+body+'</tbody></table>'+evidence;
+ const selected=[1,3,5].map(h=>{
+  const q=qmap.get(key(state.l2Style,h))||{};
+  const o=omap.get(key(state.l2Style,h))||{};
+  const fw=fmap.get(key(state.l2Style,h))||{};
+  const status=q.qualification_status||'RESEARCH_ONLY';
+  const tone=status==='MODEL_ADMITTED'?'green':status==='OOS_VALIDATED'?'blue':'amber';
+  const gain=finite(o.relative_mse_gain_vs_best_baseline)?signed(o.relative_mse_gain_vs_best_baseline):'—';
+  const direction=finite(o.directional_accuracy)?pct(o.directional_accuracy):'—';
+  const rank=finite(o.rank_ic)?n(o.rank_ic,3):'—';
+  const fwd=finite(fw.genuine_forward_sessions)?n(fw.genuine_forward_sessions,0):'0';
+  return '<div class="l2-validation-unit"><div class="l2-validation-head"><b>H'+h+'</b>'+badge(status,tone)+'</div>'+
+    '<div class="l2-mini-grid">'+
+    '<div class="l2-mini"><span>相对最佳基准 MSE 改善</span><b>'+gain+'</b></div>'+
+    '<div class="l2-mini"><span>方向准确率</span><b>'+direction+'</b></div>'+
+    '<div class="l2-mini"><span>跨风格 Rank IC</span><b>'+rank+'</b></div>'+
+    '<div class="l2-mini"><span>真实前向冻结交易日</span><b>'+fwd+'</b></div>'+
+    '</div>'+
+    ((q.reasons||[]).length?'<div class="l2-source-line">当前阻断：'+e((q.reasons||[]).join(' · '))+'</div>':'')+
+    '</div>';
+ }).join('');
+ const summary=d.summary||{};
+ return '<div class="l2-main-grid">'+
+  card('P5 · '+itemName(state.l2Style)+' 验证证据',selected,
+    '连续收益模型 · '+e(d.probability_calibration_status||'NOT_APPLICABLE'))+
+  card('P5 · 全局资格概览',
+    '<div class="l2-mini-grid">'+
+    '<div class="l2-mini"><span>OOS 通过单元</span><b>'+n(summary.oos_validated_units,0)+' / '+n(summary.total_units||21,0)+'</b></div>'+
+    '<div class="l2-mini"><span>拥有真实前向证据</span><b>'+n(summary.genuine_forward_units,0)+' / '+n(summary.total_units||21,0)+'</b></div>'+
+    '<div class="l2-mini"><span>MODEL_ADMITTED</span><b>'+n(summary.model_admitted_units,0)+' / '+n(summary.total_units||21,0)+'</b></div>'+
+    '<div class="l2-mini"><span>自动准入开关</span><b>'+(summary.model_admission_enabled?'已开启':'关闭')+'</b></div>'+
+    '</div>'+
+    note('OOS_VALIDATED 仅表示预先冻结的样本外门槛通过；MODEL_ADMITTED 还需要真实前向冻结证据，并且准入开关必须显式开启。'),
+    '冻结验证报告 · '+date(d.asof_session))+
+  '</div>';
 }
-function evidenceView(data,french){
- const coverage=data?.coverage||{},latest=Array.isArray(french?.latest)?french.latest:[];
- return '<div class="l2-evidence-grid"><div><span>研究交易日</span><b>'+date(data?.asof_session)+'</b></div><div><span>ETF 覆盖</span><b>'+n(coverage.symbols_with_asof_price||0,0)+' / '+n(coverage.required_symbols||0,0)+'</b></div><div><span>观察层状态</span><b>'+e(data?.status||'OBSERVATION_ONLY')+'</b></div><div><span>数据指纹</span><b>'+e(String(data?.source_snapshot_sha256||'—').slice(0,12))+'</b></div></div>'+
- '<details class="l2-method" open><summary>计算口径</summary><p>相对收益：风格组合相对于对应基准 ETF 的复合收益；5 / 20 / 60 均为交易日。</p><p>加速度：最近 5 日相对收益减去前 5 日相对收益。</p><p>四象限：20D 相对收益正负 × 5D 加速度正负；缺失或边界时不强行分类。</p></details>'+
- '<details class="l2-method"><summary>French 因子独立对照</summary>'+(latest.length?'<table class="l2-table"><tbody>'+latest.map(x=>'<tr><td>'+e(x.factor_name)+'</td><td>'+signed(x.sum_5d)+'</td><td>'+signed(x.sum_20d)+'</td></tr>').join('')+'</tbody></table>':empty('暂无 French 因子','独立因子数据当前不可用。'))+'</details>';
+
+function forecastResearch(result){
+ const d=result?.ok?result.data:null;
+ if(!d){
+  return problem(result,'H1 / H3 / H5 风格领先预测');
+ }
+ const rows=Array.isArray(d.forecasts)?d.forecasts:[];
+ const missing=Array.isArray(d.missing_evidence)?d.missing_evidence:[];
+ if(d.status==='BLOCKED'&&!rows.length){
+  return card('P4 · H1 / H3 / H5 领先预测',
+    empty('预测研究被数据资格阻断',
+      String(d.code||'缺少合格预测输入')+(missing.length?' · '+missing.join('；'):''))
+    +note('不会从当前版本 Yahoo 历史临时生成未来标签，也不会把轮动四象限转换成预测概率。'),
+    'BLOCKED · '+String(d.code||'EVIDENCE_REQUIRED'));
+ }
+ const byStyle=new Map();
+ rows.forEach(x=>{
+  if(!byStyle.has(x.style_id))byStyle.set(x.style_id,new Map());
+  byStyle.get(x.style_id).set(Number(x.horizon),x);
+ });
+ const cells=(style,horizon)=>{
+  const x=byStyle.get(style)?.get(horizon);
+  if(!x)return '—';
+  if(x.forecast_status!=='RESEARCH_ONLY')return '<span class="l2-forecast-blocked" title="'+e(x.block_reason||'BLOCKED')+'">BLOCKED</span>';
+  return figure(x.predicted_relative_return);
+ };
+ const tableRows=STYLE_KEYS.map(style=>[
+   '<button type="button" class="l2-style-select'+(state.l2Style===style?' current':'')+'" data-l2-style="'+e(style)+'">'+e(itemName(style))+'</button>',
+   cells(style,1),cells(style,3),cells(style,5),
+   e([1,3,5].map(h=>byStyle.get(style)?.get(h)?.forecast_status||'MISSING').join(' / '))
+ ]);
+ const selectedRows=[1,3,5].map(h=>byStyle.get(state.l2Style)?.get(h)).filter(Boolean);
+ const detail=selectedRows.length?selectedRows.map(x=>
+   '<div class="l2-forecast-h"><div><b>H'+e(x.horizon)+'</b>'+(
+    x.forecast_status==='RESEARCH_ONLY'?badge('RESEARCH_ONLY','blue'):badge('BLOCKED','amber'))+'</div>'+
+   '<div class="l2-mini-grid">'+
+   '<div class="l2-mini"><span>Ridge 相对收益</span><b>'+figure(x.predicted_relative_return)+'</b></div>'+
+   '<div class="l2-mini"><span>历史均值基准</span><b>'+figure(x.mean_baseline)+'</b></div>'+
+   '<div class="l2-mini"><span>动量基准</span><b>'+figure(x.momentum_baseline)+'</b></div>'+
+   '<div class="l2-mini"><span>训练交易日</span><b>'+figure(x.train_sessions,'integer')+'</b></div>'+
+   '</div>'+(x.block_reason?note('阻断原因：'+x.block_reason):'')+'</div>'
+ ).join(''):empty('当前风格没有预测记录','该风格/期限可能因历史时点、标签或训练样本不足被阻断。');
+ return '<div class="l2-main-grid">'+
+  card('七风格 · 未来相对收益研究',
+   table(['风格','H1','H3','H5','资格'],tableRows)+
+   note('数值是相对基准的研究预测收益，不是绝对收益、概率或交易目标。'),
+   '模型 '+String(d.model_version||'—')+' · '+String(d.status||'—'))+
+  card(itemName(state.l2Style)+' · P4 预测依据',detail,
+   '标签包 '+String(d.label_bundle_id||'—')+' · 合格单元 '+String(d.eligible_units??0)+' / '+String((d.eligible_units??0)+(d.blocked_units??0)))+
+  '</div>'+
+  card('P4 研究边界',
+    '<div class="l2-protocol"><p><b>标签：</b>T+1 开盘 → T+H 收盘的风格相对收益，必须来自公司行为一致、来源可验证的标签包。</p>'+
+    '<p><b>训练：</b>每个 style × horizon 独立 StandardScaler + Ridge；训练标签必须在信号前已知，并执行至少 5 个交易日 embargo。</p>'+
+    '<p><b>基准：</b>Zero、历史扩展均值、当前 5D 动量外推。P5 必须证明 OOS 增量，P4 本身不授予模型准入。</p>'+
+    '<p><b>当前资格：</b>'+e(d.status||'BLOCKED')+'；historical_decision_eligible=false，real_orders_enabled=false。</p></div>',
+    '没有概率校准 · 没有模型准入 · 没有订单');
+}
+
+function french(result){
+ const d=result?.ok?result.data:null,items=Array.isArray(d?.latest)?d.latest:[];
+ return card('Fama–French 因子 · 独立观测',
+   items.length?'<div class="l2-fr-note">法玛—弗伦奇因子与 ETF 风格不是同一条收益序列；当前下载版本不能直接用作历史 PIT 训练。</div>'+
+   table(['因子','含义','5D','20D','状态'],items.map(x=>[e(x.factor_name),e(x.factor_label||'—'),
+   figure(x.sum_5d),figure(x.sum_20d),e(x.state||'—')])):
+   problem(result,'French 因子'),
+   '研究日期：'+date(d?.asof_date_et)+' · 不合并为 ETF 评分');
 }
 pages.style=async()=>{
  const args=state.l2AsOf?'&asof='+encodeURIComponent(state.l2AsOf):'';
- const request=await settle('/api/v1/l2/styles/overview?rotation=1'+args),data=request?.ok?request.data:null;
- const items=Array.isArray(data?.latest)?data.latest:[],rotation=Array.isArray(data?.rotation?.latest)?data.rotation.latest:[];
+ const request=await settle('/api/v1/l2/styles/overview?rotation=1'+args);
+ const data=request?.ok?request.data:null;
+ const rot=data?.rotation||null;
+ const items=Array.isArray(data?.latest)?data.latest:[];
+ const rotationRows=Array.isArray(rot?.latest)?rot.latest:[];
+ const selected=shownData(items,state.l2Style);
+ if(!selected&&items.length)state.l2Style=items[0].style_id;
+ const known=rotationRows.filter(x=>x.rotation_state&&x.rotation_state!=='UNKNOWN');
  const leaders=items.filter(x=>finite(x.relative_return_20d)).sort((a,b)=>Number(b.relative_return_20d)-Number(a.relative_return_20d));
- if(!items.find(x=>x.style_id===state.l2Style)&&leaders.length)state.l2Style=leaders[0].style_id;
- const improving=rotation.filter(x=>x.rotation_state==='WEAK_IMPROVING'||x.rotation_state==='STRONG_ACCELERATING');
- const weakening=rotation.filter(x=>x.rotation_state==='STRONG_DECELERATING'||x.rotation_state==='WEAK_DETERIORATING');
- const known=rotation.filter(x=>x.rotation_state&&x.rotation_state!=='UNKNOWN');
- const header='<div class="heading l2-head"><div><div class="l2-kicker">STYLE · L2</div><h1 class="title">风格轮动</h1><div class="subtitle">当前强弱、转折与未来领先性研究。</div></div><div class="l2-date"><input type="date" id="l2-asof" value="'+e(state.l2AsOf)+'"><button type="button" id="l2-current">最新</button></div></div>';
- const tabs='<div class="v4-subtabs l2-tabs" role="tablist">'+tab('overview','轮动总览')+tab('forecast','领先预测')+tab('evidence','方法与证据')+'</div>';
- const tape='<div class="l2-tape"><div><span>20D 相对领先</span><b>'+e(leaders.length?styleName(leaders[0].style_id):'—')+'</b><small>'+(leaders.length?signed(leaders[0].relative_return_20d):'—')+'</small></div><div><span>正在转强</span><b class="is-up">'+n(improving.length,0)+'</b><small>'+e(improving.slice(0,2).map(x=>styleName(x.style_id)).join(' / ')||'—')+'</small></div><div><span>正在转弱</span><b class="is-down">'+n(weakening.length,0)+'</b><small>'+e(weakening.slice(0,2).map(x=>styleName(x.style_id)).join(' / ')||'—')+'</small></div><div><span>可判定状态</span><b>'+n(known.length,0)+' / 7</b><small>'+date(data?.asof_session)+'</small></div></div>';
+ const improving=known.filter(x=>x.rotation_state==='WEAK_IMPROVING').length;
+ const resolvedDay=date(data?.asof_session);
+ const header=heading('经典因子与风格轮动','L2 · 七类 ETF 风格相对收益、转折与历史证据。French 因子独立对照，不把表现描述为预测。');
+ const controls='<div class="l2-controls"><label for="l2-asof">研究日期</label><input type="date" id="l2-asof" value="'+e(state.l2AsOf)+'" aria-label="L2 研究日期，留空表示最新完整交易日"/>'+
+ '<button type="button" id="l2-current" class="btn smallbtn">返回最新</button>'+
+ '<span>当前观察：'+resolvedDay+'</span><span>'+badge(data?.status|| (request?.pending?'加载中':'BLOCKED'),
+ data?.status==='OBSERVATION_ONLY'?'blue':'amber')+'</span></div>';
+ const tabs='<div class="l2-tabs" role="group" aria-label="L2 研究视图">'+[
+ linkTab('overview','风格总览'),linkTab('rotation','轮动与转折'),
+ linkTab('forecast','领先预测'),linkTab('evidence','计算证据'),
+ linkTab('french','French 因子')].join('')+'</div>';
+ const summary=strip([
+ ['20D 相对强势',leaders.length?e(itemName(leaders[0].style_id)):'—',leaders.length?'已发生的相对收益领先':'数据不可用'],
+ ['弱势改善',rot?n(improving,0):'—','七类风格中的有效状态'],
+ ['可判定状态',rot?n(known.length,0)+' / 7':'—','缺口或中性边界不推断'],
+ ['未来 H1 / H3 / H5','尚未验证','不得展示虚构模型概率']
+ ]);
+ const disclaimer='<div class="l2-disclaimer">当前产品资格：<b>OBSERVATION_ONLY</b> · ETF 当前版本历史观察不等于独立 PIT 研究；不生成交易建议或概率。</div>';
  let body='';
- if(!data)body=empty('风格数据暂不可用',request?.error?.message||'数据源尚未返回。');
- else if(state.l2Tab==='forecast'){
-  const q=state.l2AsOf?'?asof='+encodeURIComponent(state.l2AsOf):'';
-  const [forecast,validation]=await Promise.all([settle('/api/v1/l2/styles/forecast'+q),settle('/api/v1/l2/styles/validation'+q)]);
-  body='<section class="l2-section"><div class="l2-section-head"><h2>H1 / H3 / H5 领先预测</h2><span>研究预测 · 资格独立显示</span></div>'+forecastView(forecast,validation)+'</section>';
+ if(!data){
+  body=problem(request,'L2 七风格观测')+
+   card('领先性研究资格',empty('没有已核验的预测','请先完成真实历史标签、时间分割和样本外模型验证。'));
+ }else if(state.l2Tab==='rotation'){
+  body='<div class="l2-main-grid">'+card('轮动四象限 · 七类风格',quadrant(rotationRows),'X：5D 加速度 · Y：20D 相对收益')+
+    card('各风格状态',rotationRows.length?table(['风格','状态','持续交易日','前一状态'],rotationRows.map(x=>[
+    '<button class="l2-style-select" data-l2-style="'+e(x.style_id)+'">'+e(itemName(x.style_id))+'</button>',
+    htmlStatus(x.rotation_state),figure(x.consecutive_sessions,'integer'),htmlStatus(x.previous_state)])):
+    empty('轮动状态不可用','请检查源数据窗口和截止时间。'))+'</div>'+
+    '<div class="l2-main-grid">'+details(data,rot)+transitions(rot)+'</div>';
+ }else if(state.l2Tab==='forecast'){
+  const forecastArgs=state.l2AsOf?'?asof='+encodeURIComponent(state.l2AsOf):'';
+  const validationArgs=state.l2AsOf?'?asof='+encodeURIComponent(state.l2AsOf):'';
+  const [forecast,validation]=await Promise.all([
+    settle('/api/v1/l2/styles/forecast'+forecastArgs),
+    settle('/api/v1/l2/styles/validation'+validationArgs)
+  ]);
+  body=forecastResearch(forecast)+validationResearch(validation);
  }else if(state.l2Tab==='evidence'){
-  const french=await settle('/api/v1/styles?mode=observation');
-  body='<section class="l2-section"><div class="l2-section-head"><h2>方法与证据</h2><span>默认不占据决策视图</span></div>'+evidenceView(data,french?.ok?french.data:null)+'</section>';
+  body='<div class="l2-main-grid">'+quality(data)+details(data,rot)+'</div>'+
+    card('计算口径与验证边界','<div class="l2-protocol">'+
+    '<p><b>相对收益</b>：风格组合收益相对于对应 ETF 基准的复合收益；5 / 20 / 60 为交易日，不是自然日。</p>'+
+    '<p><b>加速度</b>：最近 5 个交易日相对收益减去前 5 个交易日相对收益。</p>'+
+    '<p><b>四象限</b>：20 日相对收益正负 × 5 日相对收益加速度正负；零值及缺数据时为 UNKNOWN。</p>'+
+    '<p><b>数据限制</b>：Yahoo 拆股调整收盘价为当前版本价格收益代理，不是分红再投总收益，也不是交易时点可验证 PIT 历史。</p>'+
+    '</div>','研究口径 v1 · 不构成投资建议');
+ }else if(state.l2Tab==='french'){
+  const factors=await settle('/api/v1/styles?mode=observation');
+  body='<div class="l2-main-grid">'+french(factors)+quality(data)+'</div>';
  }else{
-  body='<div class="l2-layout"><main><section class="l2-section"><div class="l2-section-head"><h2>轮动地图</h2><span>Y：20D 强弱 · X：5D 加速度</span></div>'+quadrant(rotation)+'</section><section class="l2-section"><div class="l2-section-head"><h2>七类风格排名</h2><span>点击行查看趋势</span></div>'+ranked(items,rotation)+'</section></main><aside><section class="l2-section"><div class="l2-section-head"><h2>最新转折</h2></div>'+turns(rotation)+'</section><section class="l2-section"><div class="l2-section-head"><h2>'+e(styleName(state.l2Style))+' · 20D 趋势</h2></div>'+trend(data.series,state.l2Style)+'</section></aside></div>';
+  body='<div class="l2-main-grid">'+card('七风格轮动地图',quadrant(rotationRows),'已发生表现 · 不是未来概率')+
+    card('聚焦风格 · 20D 相对趋势',historyGraph(data.series,state.l2Style),'选择下表风格查看历史')+'</div>'+
+    card('七类 ETF 风格 · 当前强弱',items.length?tableStyles(items,rotationRows):problem(request,'风格强弱'),'点击风格切换右侧详情 · 缺失值显示 —')+
+    '<div class="l2-main-grid">'+details(data,rot)+
+    card('未来 H1 / H3 / H5 领先预测',empty('预测模型尚未通过资格验收',
+    '待建立独立验证的 T+1 开盘到 T+H 收盘相对收益标签、Walk-forward、样本外指标和时间证明。')+
+    '<div class="l2-future"><span>H1 —</span><span>H3 —</span><span>H5 —</span></div>','没有生成概率、收益目标或交易指令')+'</div>';
  }
- return {title:'风格轮动',html:'<div class="l2-desk">'+header+tabs+tape+body+'</div>',mount(){
-  document.querySelectorAll('[data-l2-tab]').forEach(x=>x.addEventListener('click',()=>{state.l2Tab=x.dataset.l2Tab;show('style');}));
-  document.querySelectorAll('[data-l2-style]').forEach(x=>x.addEventListener('click',()=>{state.l2Style=x.dataset.l2Style;show('style');}));
-  document.querySelector('#l2-asof')?.addEventListener('change',ev=>{state.l2AsOf=String(ev.target.value||'');show('style');});
-  document.querySelector('#l2-current')?.addEventListener('click',()=>{state.l2AsOf='';show('style');});
- }};
+ return {title:'L2 · 风格轮动',html:'<div class="l2-page">'+header+controls+tabs+summary+disclaimer+body+'</div>',
+  mount(){
+    document.querySelectorAll('[data-l2-tab]').forEach(el=>el.addEventListener('click',()=>{
+      state.l2Tab=el.dataset.l2Tab;show('style');
+    }));
+    document.querySelectorAll('[data-l2-style]').forEach(el=>el.addEventListener('click',()=>{
+      state.l2Style=el.dataset.l2Style;show('style');
+    }));
+    document.getElementById('l2-asof')?.addEventListener('change',ev=>{
+      state.l2AsOf=String(ev.target.value||'');show('style');
+    });
+    document.getElementById('l2-current')?.addEventListener('click',()=>{
+      state.l2AsOf='';show('style');
+    });
+  }};
 };
 })();
