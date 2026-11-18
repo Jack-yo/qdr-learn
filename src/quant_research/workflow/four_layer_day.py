@@ -98,6 +98,7 @@ def run_four_layer_research_day(
             root,
             source_bundle_id=source_bundle_id,
             output_bundle_id=bound_bundle_id,
+            expected_current_session=session_date,
         )
     except (OSError, ValueError, KeyError, TypeError, FileExistsError) as exc:
         return {
