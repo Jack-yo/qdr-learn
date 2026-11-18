@@ -37,12 +37,41 @@ def observed_v4_adapters(root: Path, readiness: dict):
 
     def styles(day,history):
         try:
-            from quant_research.workflow.styles import calculate
-            _history,latest,_corr,meta=calculate(root,asof=day)
-            return {'status':'RESEARCH_ONLY','code':'CLASSIC_FACTOR_OBSERVATION',
-                    'detail':{'asof_date_et':meta.get('asof_date_et'),
-                              'observed_factors':len(latest)}}
-        except (OSError,ValueError,KeyError) as exc:
+            from quant_research.workflow.l2_downstream import build_downstream_context
+            context=build_downstream_context(root,asof=day)
+            detail={
+                'asof_date_et':context.get('asof_session') or day,
+                'l2_status':context.get('status'),
+                'l2_code':context.get('code'),
+                'admitted_units':context.get('admitted_units',0),
+                'l3_style_context_available':context.get('l3_style_context_available',False),
+                'model_version':context.get('model_version'),
+                'label_bundle_id':context.get('label_bundle_id'),
+            }
+            # French factors remain a separate descriptive stream. Their
+            # availability never upgrades or downgrades L2 model qualification.
+            try:
+                from quant_research.workflow.styles import calculate as calculate_french
+                _history,latest,_corr,meta=calculate_french(root,asof=day)
+                detail['classic_french_observation']={
+                    'status':'OBSERVATION_ONLY',
+                    'asof_date_et':meta.get('asof_date_et'),
+                    'observed_factors':len(latest),
+                }
+            except (OSError,ValueError,KeyError,TypeError):
+                detail['classic_french_observation']={'status':'UNAVAILABLE'}
+
+            if context.get('status')=='BLOCKED':
+                return {'status':'BLOCKED',
+                        'code':context.get('code','L2_DOWNSTREAM_CONTEXT_BLOCKED'),
+                        'detail':detail}
+            if context.get('status')=='MODEL_ADMITTED_CONTEXT':
+                return {'status':'PASS','code':'L2_MODEL_ADMITTED_CONTEXT',
+                        'detail':detail}
+            return {'status':'RESEARCH_ONLY',
+                    'code':context.get('code','L2_STYLE_RESEARCH_ONLY'),
+                    'detail':detail}
+        except (OSError,ValueError,KeyError,TypeError) as exc:
             return {'status':'BLOCKED','code':type(exc).__name__}
 
     def alpha(day,history):
