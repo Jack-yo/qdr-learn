@@ -89,19 +89,18 @@ def calculate(root: Path, *, asof: str | None = None,
     latest = observations.loc[
         observations.date.eq(pd.Timestamp(end))
     ].copy()
-    latest["observation_status"] = latest.apply(
-        lambda row: (
-            "OBSERVATION_ONLY"
-            if pd.notna(row.relative_return_5d)
-            else "BLOCKED_INCOMPLETE_5D_WINDOW"
-        ), axis=1
-    )
-    latest["missing_reason"] = latest.apply(
-        lambda row: (
-            None if pd.notna(row.relative_return_5d)
-            else "MISSING_OR_INCOMPLETE_REQUIRED_PRICE_WINDOW"
-        ), axis=1
-    )
+    def window_status(row):
+        if pd.isna(row.relative_return_5d):
+            return "BLOCKED_INCOMPLETE_5D_WINDOW", "MISSING_OR_INCOMPLETE_REQUIRED_PRICE_WINDOW"
+        if pd.isna(row.relative_return_20d):
+            return "PARTIAL_INCOMPLETE_20D_WINDOW", "MISSING_OR_INCOMPLETE_20D_WINDOW"
+        if pd.isna(row.relative_return_60d) or pd.isna(row.available_at):
+            return "PARTIAL_INCOMPLETE_60D_WINDOW", "MISSING_OR_INCOMPLETE_60D_WINDOW"
+        return "OBSERVATION_ONLY", None
+
+    statuses = latest.apply(window_status, axis=1)
+    latest["observation_status"] = statuses.map(lambda x: x[0])
+    latest["missing_reason"] = statuses.map(lambda x: x[1])
     series = observations.groupby("style_id", sort=False).tail(126)
     records = lambda frame: json.loads(
         frame.to_json(orient="records", date_format="iso")
