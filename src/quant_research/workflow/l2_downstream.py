@@ -48,6 +48,7 @@ def build_downstream_context(root: Path, *, asof: str | None = None) -> dict:
         "contexts": [],
         "admitted_units": 0,
         "l3_style_context_available": False,
+        "historical_decision_eligible": False,
         "decision_eligible": False,
         "real_orders_enabled": False,
     }
