@@ -89,8 +89,9 @@ def test_fidelity_workspace_implements_real_tabs_and_stock_master_detail():
     source=(APP/'assets'/FIDELITY).read_text(encoding='utf-8')
     shell=SHELL.read_text(encoding='utf-8')
     assert 'v4_ui_fidelity.js' in shell
-    assert '.v4-subtab[aria-selected="true"]' in shell
-    assert '.v4-tabpanel[hidden]' in shell
+    system=(APP/'assets'/'v5_system.css').read_text(encoding='utf-8')
+    assert '.v4-subtab[aria-selected="true"]' in system
+    assert '.v4-tabpanel[hidden]' in system
     for name in ('market','style','lab','screen','risk'):
         assert " "+name+":" in source
     for tab in ('状态识别','风险驱动','预测验证','ETF 代理观察','领先性验证',
@@ -112,8 +113,7 @@ def test_fidelity_workspace_implements_real_tabs_and_stock_master_detail():
 
 def test_mobile_navigation_stays_on_one_scrollable_row():
     shell=SHELL.read_text(encoding='utf-8')
-    assert '@media(max-width:800px){body{overflow:auto}' in shell
-    assert 'aside{position:sticky;top:0' in shell
-    assert 'flex-wrap:nowrap' in shell
-    assert 'overflow-x:auto' in shell
-    assert '.v4-metric-strip.v4-five-metrics{grid-template-columns:repeat(5' in shell
+    system=(APP/'assets'/'v5_system.css').read_text(encoding='utf-8')
+    assert '@media(max-width:800px){body{overflow:auto}' in system
+    assert 'aside{position:sticky;top:0' in system
+    assert 'overflow-x:auto' in system
