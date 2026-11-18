@@ -19,7 +19,6 @@ from quant_research.research.l2_forecast import (
     MODEL_VERSION,
     STYLE_IDS,
     ForecastConfig,
-    walk_forward_oos_v1,
 )
 from quant_research.research.l2_label_bundle import load_label_bundle_v1
 from quant_research.research.l2_validation import (
@@ -113,14 +112,6 @@ def build_validation_report(root: Path, *, asof: str | None = None) -> dict:
     evaluation_dates = labeled_dates[-config.oos_evaluation_sessions:]
 
     if len(evaluation_dates):
-        full_predictions = walk_forward_oos_v1(
-            observations,
-            labels,
-            sessions,
-            evaluation_dates,
-            clock,
-            config=forecast_config,
-        )
         ablation_predictions, ablation_scores = run_ablation_oos_v1(
             observations,
             labels,
@@ -128,6 +119,13 @@ def build_validation_report(root: Path, *, asof: str | None = None) -> dict:
             evaluation_dates,
             clock,
             forecast_config=forecast_config,
+        )
+        full_predictions = (
+            ablation_predictions.loc[
+                ablation_predictions.variant.eq("full")
+            ].drop(columns=["variant"]).copy()
+            if not ablation_predictions.empty and "variant" in ablation_predictions
+            else _empty_oos_frame()
         )
     else:
         full_predictions = _empty_oos_frame()
