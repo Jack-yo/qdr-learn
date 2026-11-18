@@ -17,6 +17,44 @@ function compactBoundary(host){
   else if(t.includes('上述为研究基线阈值'))el.textContent='当前显示策略基线与已冻结规则；跳空等风险单独复核。';
  });
 }
+
+function cleanProductCopy(host){
+ const replacements=[
+  ['OBSERVATION_ONLY','观察可用'],
+  ['RESEARCH_ONLY','研究结果'],
+  ['NOT_READY','未就绪'],
+  ['BLOCKED','暂不可用'],
+  ['FAILED','异常'],
+  ['不可变因子版本','因子版本'],
+  ['保存不可变因子版本','保存因子版本'],
+  ['保存不可变策略','保存策略版本'],
+  ['注册历史，不能覆盖旧版','保留历史版本'],
+  ['需真实历史来源资格','历史数据'],
+  ['Yahoo（仅当前版本历史探索）','Yahoo'],
+  ['Alpaca（需真实历史来源资格）','Alpaca'],
+  ['研究结果不自动进入交易',''],
+  ['没有生成概率、收益目标或交易指令',''],
+  ['研究口径 v1 · 不构成投资建议','方法说明'],
+  ['L3 · Alpha / Factor Lab','Alpha 因子'],
+  ['L3 · 多因子选股','Alpha 选股'],
+  ['L4 · 证据检查','按需查看'],
+  ['静态研究限制','风险规则'],
+  ['数据源时间序列 · 非券商绩效','权益变化'],
+  ['账本已内部对账 · 非券商订单','账本已核对']
+ ];
+ host.querySelectorAll('.badge,.ctitle span,.v4-muted-note,.fine,.hint,.knote,.l2-card-foot,.l2-chart-foot,.wh-source-foot,.wh-policy-note,.v4-message,.notice').forEach(el=>{
+  if(el.closest('code,pre'))return;
+  let t=el.textContent||'';
+  replacements.forEach(([a,b])=>{t=t.split(a).join(b);});
+  el.textContent=t.trim();
+  if(!el.textContent)el.remove();
+ });
+ host.querySelectorAll('.ctitle').forEach(el=>{
+  const t=(el.textContent||'').trim();
+  if(t.includes('开发')||t.includes('Codex'))el.querySelector('span')?.remove();
+ });
+}
+
 function collapseCard(host,needle,label){
  const card=[...host.querySelectorAll('.card')].find(x=>(x.querySelector('.ctitle')?.textContent||'').includes(needle));
  if(!card||card.closest('.v5-tech-details'))return;
@@ -26,7 +64,7 @@ function collapseCard(host,needle,label){
 }
 function wrap(key,transform){
  const original=pages[key];if(typeof original!=='function')return;
- pages[key]=async()=>{const result=await original();const host=document.createElement('div');host.innerHTML=result.html;transform(host);return {...result,html:host.innerHTML};};
+ pages[key]=async()=>{const result=await original();const host=document.createElement('div');host.innerHTML=result.html;transform(host);cleanProductCopy(host);return {...result,html:host.innerHTML};};
 }
 wrap('style',host=>{setHeading(host,'风格轮动','七类风格的强弱、转折与领先性研究。');compactBoundary(host);host.querySelectorAll('.l2-tabs button').forEach(btn=>{if(btn.textContent.trim()==='计算证据')btn.textContent='方法与证据';});});
 wrap('lab',host=>{setHeading(host,'因子实验','定义因子 → 计算样本 → 验证有效性 → 保存版本。');compactBoundary(host);collapseCard(host,'研究运行与历史','实验记录与技术状态');});
