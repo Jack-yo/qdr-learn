@@ -162,3 +162,49 @@ def test_l2_forecast_api_is_read_only_and_strictly_validates_query(tmp_path, mon
         server.shutdown()
         server.server_close()
         thread.join()
+
+
+def test_l2_validation_api_reads_frozen_report_only(tmp_path, monkeypatch):
+    from quant_research.workflow import l2_validation
+
+    calls = []
+    monkeypatch.setattr(
+        l2_validation, "read_latest_validation",
+        lambda root, asof=None: calls.append(asof) or {
+            "schema": "qdr.l2.validation.v1",
+            "status": "BLOCKED",
+            "code": "L2_P5_VALIDATION_REPORT_NOT_FOUND",
+            "asof_session": asof,
+            "qualification": [],
+            "real_orders_enabled": False,
+        },
+    )
+    monkeypatch.setattr(
+        l2_validation, "build_validation_report",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("GET must not run P5")
+        ),
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler(Console(tmp_path)))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        with urlopen(base + "/api/v1/l2/styles/validation?asof=2026-01-30") as response:
+            payload = json.load(response)
+            assert response.status == 200
+        assert payload["code"] == "L2_P5_VALIDATION_REPORT_NOT_FOUND"
+        assert calls == ["2026-01-30"]
+        for query in (
+            "?unknown=1",
+            "?asof=2026-02-30",
+            "?asof=2026-01-30&asof=2026-01-31",
+        ):
+            with pytest.raises(HTTPError) as error:
+                urlopen(base + "/api/v1/l2/styles/validation" + query)
+            assert error.value.code == 400
+        assert calls == ["2026-01-30"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
