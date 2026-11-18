@@ -56,7 +56,15 @@ const V4={pages:{},state:{},e,n:(v,d=2)=>v==null?'—':Number(v).toFixed(d),
    if(forecastMode==='blocked')return {ok:true,data:{status:'BLOCKED',code:'L2_VERIFIED_LABEL_BUNDLE_REQUIRED',forecasts:[]}};
    return {ok:true,data:{status:'RESEARCH_ONLY',forecasts:[1,3,5].map(h=>({style_id:'size',horizon:h,predicted_relative_return:.001*h,forecast_status:'RESEARCH_ONLY'}))}};
   }
-  if(path.startsWith('/api/v1/l2/styles/validation'))return {ok:true,data:{status:'P5_RESEARCH_VALIDATION',summary:{oos_validated_units:1,genuine_forward_units:0}}};
+  if(path.startsWith('/api/v1/l2/styles/validation'))return {ok:true,data:{
+   status:'P5_RESEARCH_VALIDATION',probability_calibration_status:'NOT_APPLICABLE_CONTINUOUS_RETURN_ONLY',
+   summary:{oos_validated_units:1,genuine_forward_units:0,model_admitted_units:0,total_units:21},
+   qualification:[{style_id:'size',horizon:1,qualification_status:'OOS_VALIDATED',
+     reasons:['NO_GENUINE_FORWARD_EVIDENCE']}],
+   oos_validation:[{style_id:'size',horizon:1,relative_mse_gain_vs_best_baseline:.08,
+     directional_accuracy:.56,rank_ic:.12}],
+   forward_validation:[]
+  }};
   if(path==='/api/v1/styles?mode=observation')return {ok:true,data:{latest:[{factor_name:'MOM',sum_5d:.01,sum_20d:.02}]}};
   return {ok:false,error:{message:'unavailable'}};
  }};
@@ -77,6 +85,12 @@ vm.runInNewContext(code,{window:{V4},document:{querySelectorAll:()=>[],querySele
  page=await V4.pages.style();
  assert.match(page.html,/H1/);
  assert.match(page.html,/\+0\.10%/);
+ assert.match(page.html,/OOS/);
+ assert.match(page.html,/MSE 改善/);
+ assert.match(page.html,/56\.0%/);
+ assert.match(page.html,/0\.120/);
+ assert.match(page.html,/NO_GENUINE_FORWARD_EVIDENCE/);
+ assert.doesNotMatch(page.html,/胜率/);
  V4.state.l2Tab='evidence';
  page=await V4.pages.style();
  assert.match(page.html,/数据指纹/);
