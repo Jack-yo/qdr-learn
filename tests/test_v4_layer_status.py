@@ -305,6 +305,12 @@ def _wire_ready_four_layers(monkeypatch, *, l3_overrides=None):
         "l2_style_binding_verified": True,
         "l2_style_historical_pit_attested": True,
         "l2_style_binding_context_sha256": "9" * 64,
+        "l2_style_admission_validation_identity": "7" * 64,
+        "l2_style_admission_asof_session": "2026-01-30",
+        "l2_style_context_modes": [
+            "CURRENT_FROZEN_FORWARD", "HISTORICAL_PIT_REPLAY"
+        ],
+        "l2_style_current_forward_session": "2026-01-30",
         "l2_style_binding_start_session": "2025-01-02",
         "l2_style_binding_end_session": "2026-01-30",
         "l2_style_model_versions": ["ridge-v1"],
@@ -403,4 +409,40 @@ def test_l4_review_must_point_to_exact_current_l3_forecast_identity(
         tmp_path, asof="2026-01-30", horizon=3
     )
     assert "L4_L3_FORECAST_IDENTITY_MISMATCH" in result["blockers"]
+    assert result["complete_four_layer_context"] is False
+
+
+def test_l3_receipt_must_bind_exact_current_l2_admission_identity(
+    tmp_path, monkeypatch
+):
+    _wire_ready_four_layers(
+        monkeypatch,
+        l3_overrides={
+            "l2_style_admission_validation_identity": "0" * 64,
+        },
+    )
+    result = v4_layer_status.four_layer_status(
+        tmp_path, asof="2026-01-30", horizon=3
+    )
+    assert (
+        "L3_L2_VALIDATION_IDENTITY_BINDING_MISMATCH"
+        in result["blockers"]
+    )
+    assert result["complete_four_layer_context"] is False
+
+
+def test_l3_receipt_requires_current_forward_row_for_target_session(
+    tmp_path, monkeypatch
+):
+    _wire_ready_four_layers(
+        monkeypatch,
+        l3_overrides={
+            "l2_style_current_forward_session": None,
+            "l2_style_context_modes": ["HISTORICAL_PIT_REPLAY"],
+        },
+    )
+    result = v4_layer_status.four_layer_status(
+        tmp_path, asof="2026-01-30", horizon=3
+    )
+    assert "L3_L2_CURRENT_FORWARD_BINDING_MISMATCH" in result["blockers"]
     assert result["complete_four_layer_context"] is False
