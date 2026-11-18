@@ -482,3 +482,100 @@ real style history, L3/L4 source alignment and browser/API acceptance remain
 local gates.
 
 Local acceptance: [L2 P6 checklist](L2_P6_LOCAL_ACCEPTANCE.md).
+
+
+## 17. P6.1 causal replay/forward binding update (2026-11-18)
+
+The L2→L3 integration was tightened after identifying two temporal deadlocks in
+the original P6 bridge.
+
+### Layered L3 clock
+
+L2 genuine-forward forecasts can only be frozen after the base T-close signal,
+so L3 cannot require every upstream style value to have existed at that same
+base timestamp. L3 now uses one causal staged cutoff:
+
+```text
+l3_signal_time = max(
+  base close+delay signal,
+  latest registered stock-factor availability,
+  L2/market-style availability,
+  candidate-metadata availability
+)
+```
+
+The final cutoff must exist at the actual preflight moment and stay strictly
+before T+1 entry. The same rule is used by historical panel assembly, current
+preflight and forward inference. The forward archive protocol is versioned
+(`v4-forward-layered-signal-v2`) so old timestamp semantics are not silently
+reused.
+
+### Historical L2 replay versus current forward evidence
+
+Requiring years of genuine frozen L2 predictions before L3 could train would
+make a newly admitted L2 model unusable. The v2 L2→L3 contract therefore
+separates two evidence modes:
+
+- `HISTORICAL_PIT_REPLAY`: deterministic causal replay using independently
+  PIT-attested L2 feature/label bundles under one fixed P5 admission report;
+  used as historical L3 model input and never described as a live frozen
+  prediction.
+- `CURRENT_FROZEN_FORWARD`: the final current-session row, bound to the
+  genuine prospective P4 archive.
+
+The v2 receipt binds the exact P5 admission identity, admission as-of session,
+actual admission freeze timestamp, model/bundle/source provenance, exact
+style values, context availability and the current-forward session. V1
+receipts remain readable for archive compatibility but cannot satisfy the new
+P6 readiness requirements.
+
+### Selection-bias boundary
+
+Historical PIT replay may cover the full training history, including dates
+before and after the L2 admission report. Independent L3 OOS evaluation,
+however, must begin strictly after L2 admission became real. The effective
+admission date is the later of the P5 validation as-of session and the New York
+calendar date of the immutable report's `frozen_at_utc`.
+
+This lets L3 train on a long, reproducible fixed-model history without using
+post-selection periods as an allegedly independent L3 test.
+
+### Immutable operational chain
+
+New explicit helpers:
+
+- `workflow/v4_l2_bind_bundle.py` derives a new immutable V4 bundle; it never
+  mutates the source bundle. Unchanged factors/labels/candidate bytes preserve
+  their SHA256, while a new L2-bound `market_style.parquet` and v2 receipt are
+  added and self-verified.
+- `workflow/four_layer_day.py` advances one EOD research day:
+  prospective P4 freeze → stop normally while admission is pending → derive
+  an L2-bound bundle once admitted → L3 forecast → L4 review → four-layer
+  status.
+- The source bundle's latest session must exactly match the requested research
+  day; stale source bundles are rejected before L3 work.
+
+### P6 current readiness rule
+
+`FOUR_LAYER_RESEARCH_CONTEXT_READY` requires all of the following to agree
+for the target session:
+
+- L1 admitted research context;
+- current L2 admitted context and current genuine forward P4 row;
+- L3 receipt verified with PIT-attested history;
+- exact L2 model version, P5 admission identity, label bundle SHA, feature
+  bundle SHA and current source snapshot represented in the L3 archive;
+- L4 review bound to the exact L3 forecast identity and matching source;
+- current-session freshness across layers.
+
+Even this state remains research context only:
+
+```text
+decision_eligible=false
+execution_eligible=false
+real_orders_enabled=false
+```
+
+Local execution of the complete pytest suite, real label/feature bundles,
+prospective close-to-open snapshots and browser acceptance remain mandatory
+before any empirical model-validity claim.
