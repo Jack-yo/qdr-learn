@@ -133,7 +133,7 @@ pages.data=async()=>{
  const html=
   heading('研究准入',
    '集中查看历史模型、严格回测和前向研究的准入状态。',
-   link('/studio#warehouse','查看数据仓库')+link('/data','高级数据维护'))+
+   link('/studio#warehouse','查看数据与保障'))+
   '<div class="v4-muted-note" style="margin-bottom:15px">资格检查时间 '+e(readiness.checked_at_utc||'—')+
    ' · 策略：'+e(readiness.policy||'REAL_ONLY')+
    ' · 真实券商订单：'+(readiness.real_orders_enabled?badge('已开启','red'):badge('永久关闭','amber'))+
