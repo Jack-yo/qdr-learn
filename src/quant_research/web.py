@@ -569,6 +569,26 @@ def handler(console):
                 except (ValueError,OSError,KeyError,TypeError):
                     return self.send(409,{'status':'BLOCKED',
                         'code':'FORECAST_ARCHIVE_INVALID_OR_UNVERIFIED'})
+            if path == '/api/v1/v4/layers':
+                try:
+                    query=parse_qs(urlsplit(self.path).query)
+                    if set(query)-{'asof','horizon'} or any(len(v)!=1 for v in query.values()):
+                        raise ValueError('Invalid four-layer query')
+                    asof=query.get('asof',[None])[0]
+                    horizon=int(query.get('horizon',['3'])[0])
+                    if asof is not None and date.fromisoformat(asof).isoformat()!=asof:
+                        raise ValueError('Invalid four-layer asof date')
+                    if horizon not in (1,3,5):
+                        raise ValueError('Invalid four-layer horizon')
+                    from .workflow.v4_layer_status import four_layer_status
+                    return self.send(200,four_layer_status(
+                        console.root,asof=asof,horizon=horizon))
+                except ValueError as exc:
+                    return self.send(400,{'status':'BLOCKED',
+                        'code':'INVALID_FOUR_LAYER_STATUS_REQUEST',
+                        'detail':str(exc)})
+                except Exception as exc:
+                    return self.send(503,{'status':'BLOCKED','code':type(exc).__name__})
             if path == '/api/v1/v4/daily':
                 from .workflow.v4_daily import latest_v4_daily
                 if urlsplit(self.path).query:
