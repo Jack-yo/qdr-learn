@@ -54,13 +54,19 @@ def _source_bundle(root):
 
 def _receipt():
     return {
-        "contract_version": "qdr-l2-l3-style-binding-v1",
-        "scope": "HISTORICAL_AND_CURRENT",
+        "contract_version": "qdr-l2-l3-style-binding-v2",
+        "scope": "PIT_REPLAY_HISTORY_PLUS_CURRENT_FORWARD",
         "start_session": "2026-01-30",
         "end_session": "2026-01-30",
         "rows": 1,
         "style_columns": ["style_l2_quality_h3"],
         "context_identity_sha256": "1" * 64,
+        "context_modes": ["CURRENT_FROZEN_FORWARD"],
+        "admission_asof_session": "2026-01-30",
+        "admission_validation_identity": "6" * 64,
+        "current_forward_session": "2026-01-30",
+        "historical_replay_rows": 0,
+        "current_forward_rows": 1,
         "model_versions": ["ridge-v1"],
         "label_bundle_sha256s": ["2" * 64],
         "feature_bundle_sha256s": ["3" * 64],
@@ -88,11 +94,18 @@ def test_bound_bundle_is_new_immutable_identity_and_preserves_source_bytes(
         return result
 
     monkeypatch.setattr(
+        v4_l2_bind_bundle, "build_l2_l3_context_builder",
+        lambda root, current_session: (
+            lambda _root, asof=None: {"status": "IGNORED_BY_STUBS"},
+            {"identity": "6" * 64, "asof_session": "2026-01-30"},
+        ),
+    )
+    monkeypatch.setattr(
         v4_l2_bind_bundle, "materialize_l2_style_history", materialize
     )
     monkeypatch.setattr(
         v4_l2_bind_bundle, "build_l2_style_history_binding",
-        lambda root, frame: _receipt(),
+        lambda root, frame, **kwargs: _receipt(),
     )
 
     result = v4_l2_bind_bundle.create_l2_bound_v4_bundle(
@@ -139,9 +152,27 @@ def test_bound_bundle_is_new_immutable_identity_and_preserves_source_bytes(
 
 def test_bound_bundle_never_overwrites_existing_output(tmp_path, monkeypatch):
     _source_bundle(tmp_path)
+    monkeypatch.setattr(
+        v4_l2_bind_bundle, "build_l2_l3_context_builder",
+        lambda root, current_session: (
+            lambda _root, asof=None: {"status": "IGNORED"},
+            {"identity": "6" * 64, "asof_session": "2026-01-30"},
+        ),
+    )
+    monkeypatch.setattr(
+        v4_l2_bind_bundle, "materialize_l2_style_history",
+        lambda root, frame, **kwargs: frame.assign(
+            state_available_at="2026-01-30T21:16:00Z",
+            style_l2_quality_h3=0.003,
+        ),
+    )
+    monkeypatch.setattr(
+        v4_l2_bind_bundle, "build_l2_style_history_binding",
+        lambda root, frame, **kwargs: _receipt(),
+    )
     destination = tmp_path / "data/managed/v4_inputs/existing"
     destination.mkdir(parents=True)
-    with pytest.raises(FileExistsError, match="ALREADY_EXISTS"):
+    with pytest.raises(FileExistsError, match="EXISTS"):
         v4_l2_bind_bundle.create_l2_bound_v4_bundle(
             tmp_path,
             source_bundle_id="source-v1",
