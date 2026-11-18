@@ -110,7 +110,7 @@ def freeze_validation_report_v1(root: Path, report: dict) -> dict:
     folder = root / "outputs/l2_validation" / asof / identity
     target = folder / "manifest.json"
     if target.is_file():
-        existing = json.loads(target.read_text(encoding="utf-8"))
+        existing = _verify(target)
         if existing.get("identity") == identity:
             return existing
         raise FileExistsError("P5_VALIDATION_IDENTITY_CONFLICT")
