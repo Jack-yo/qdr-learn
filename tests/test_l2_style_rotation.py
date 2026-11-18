@@ -136,5 +136,6 @@ def test_missing_availability_blocks_price_based_metrics_without_guessing():
     size = result.loc[result.style_id.eq("size")].set_index("date")
     assert pd.isna(size.loc[sessions[83], "daily_relative_return"])
     assert pd.isna(size.loc[sessions[84], "daily_relative_return"])
-    assert pd.isna(size.loc[sessions[89], "relative_return_5d_available_at"])
+    assert pd.isna(size.loc[sessions[87], "relative_return_5d_available_at"])
+    assert pd.isna(size.loc[sessions[87], "relative_return_5d"])
     assert pd.notna(size.loc[sessions[89], "relative_return_5d"])
