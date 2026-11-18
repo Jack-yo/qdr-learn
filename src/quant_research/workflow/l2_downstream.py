@@ -41,6 +41,11 @@ def build_downstream_context(root: Path, *, asof: str | None = None) -> dict:
         "model_version": forecast.get("model_version"),
         "label_bundle_id": forecast.get("label_bundle_id"),
         "label_bundle_sha256": forecast.get("label_bundle_sha256"),
+        "feature_bundle_id": forecast.get("feature_bundle_id"),
+        "feature_bundle_sha256": forecast.get("feature_bundle_sha256"),
+        "historical_feature_pit_attested": (
+            forecast.get("historical_feature_pit_attested") is True
+        ),
         "source_snapshot_sha256": forecast.get("source_snapshot_sha256"),
         "forecast_identity": None,
         "validation_identity": validation.get("identity"),
@@ -57,6 +62,12 @@ def build_downstream_context(root: Path, *, asof: str | None = None) -> dict:
             **base,
             "status": "RESEARCH_ONLY",
             "code": forecast.get("code") or "L2_CURRENT_FORECAST_NOT_AVAILABLE",
+        }
+    if forecast.get("historical_feature_pit_attested") is not True:
+        return {
+            **base,
+            "status": "BLOCKED",
+            "code": "L2_HISTORICAL_FEATURE_PIT_NOT_ATTESTED",
         }
     if validation.get("status") != "P5_RESEARCH_VALIDATION":
         return {
@@ -76,6 +87,18 @@ def build_downstream_context(root: Path, *, asof: str | None = None) -> dict:
             "status": "BLOCKED",
             "code": "L2_LABEL_BUNDLE_MISMATCH",
         }
+    if validation.get("historical_feature_pit_attested") is not True:
+        return {
+            **base,
+            "status": "BLOCKED",
+            "code": "L2_P5_FEATURE_PIT_NOT_ATTESTED",
+        }
+    if validation.get("feature_bundle_sha256") != forecast.get("feature_bundle_sha256"):
+        return {
+            **base,
+            "status": "BLOCKED",
+            "code": "L2_FEATURE_BUNDLE_MISMATCH",
+        }
 
     try:
         frozen = load_frozen_forecast_v1(
@@ -91,6 +114,8 @@ def build_downstream_context(root: Path, *, asof: str | None = None) -> dict:
         frozen.get("session_date_et") != forecast.get("asof_session")
         or frozen.get("model_version") != forecast.get("model_version")
         or frozen.get("label_bundle_sha256") != forecast.get("label_bundle_sha256")
+        or frozen.get("feature_bundle_sha256") != forecast.get("feature_bundle_sha256")
+        or frozen.get("historical_feature_pit_attested") is not True
         or frozen.get("source_snapshot_sha256") != forecast.get("source_snapshot_sha256")
     ):
         return {
