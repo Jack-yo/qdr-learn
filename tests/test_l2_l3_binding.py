@@ -60,6 +60,7 @@ def _context(day):
         "validation_identity": "c" * 64,
         "admission_asof_session": "2026-01-30",
         "admission_validation_identity": "c" * 64,
+        "admission_frozen_at_utc": "2026-01-31T01:00:00Z",
         "forecast_frozen_at_utc": (
             None if historical else date + "T21:16:00Z"
         ),
@@ -117,6 +118,7 @@ def test_binding_receipt_binds_exact_admitted_style_values():
     assert receipt["current_forward_session"] == "2026-01-30"
     assert receipt["admission_asof_session"] == "2026-01-30"
     assert receipt["admission_validation_identity"] == "c" * 64
+    assert receipt["admission_frozen_at_utc"] == "2026-01-31T01:00:00+00:00"
     assert len(receipt["context_identity_sha256"]) == 64
     assert receipt["decision_eligible"] is False
     assert receipt["real_orders_enabled"] is False
