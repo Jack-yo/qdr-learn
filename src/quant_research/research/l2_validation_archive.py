@@ -86,9 +86,14 @@ def freeze_validation_report_v1(root: Path, report: dict) -> dict:
             raise ValueError
     except ValueError:
         raise ValueError("Invalid P5 validation session") from None
-    for key in ("source_snapshot_sha256", "label_bundle_sha256"):
+    for key in (
+        "source_snapshot_sha256", "label_bundle_sha256",
+        "feature_bundle_sha256"
+    ):
         if not _SHA.fullmatch(str(report.get(key) or "")):
             raise ValueError("P5 validation requires " + key)
+    if report.get("historical_feature_pit_attested") is not True:
+        raise ValueError("P5 validation requires verified historical feature PIT")
     _validate_qualification(report)
 
     payload = {
@@ -130,6 +135,19 @@ def _verify(path: Path) -> dict:
     if not identity or not frozen or _identity(data) != identity:
         raise ValueError("P5_VALIDATION_REPORT_IDENTITY_MISMATCH")
     _validate_qualification(data)
+    feature_sha=data.get("feature_bundle_sha256")
+    feature_pit=data.get("historical_feature_pit_attested")
+    if feature_sha is None and feature_pit is None:
+        # Legacy P5 reports remain inspectable but can never be used as
+        # model-admission evidence by P6.
+        data={**data,
+              "historical_feature_pit_attested":False,
+              "legacy_feature_evidence_missing":True}
+    elif (
+        not _SHA.fullmatch(str(feature_sha or ""))
+        or feature_pit is not True
+    ):
+        raise ValueError("P5_VALIDATION_FEATURE_EVIDENCE_INVALID")
     return {**data, "identity": identity, "frozen_at_utc": frozen}
 
 
