@@ -263,3 +263,67 @@ Start the existing local console on the machine with access to the existing real
 - **P4 target and baselines:** independently verified raw, corporate-action-consistent T+1-open-to-T+H-close relative return labels per style and H1/H3/H5; no model if verification is missing.
 - **P5 forecast validation:** purged and embargoed walk-forward; baseline comparisons; immutable prediction records; independent OOS admission and only then appropriately calibrated probability claims.
 - **P6 integration:** L1 regime and L3/L4 read-only contracts; no brokerage order execution.
+
+## 15. P4 implementation update (2026-11-18)
+
+P4 engineering has been added to the same L2 branch without changing the
+P1/P2 evidence boundary.
+
+### Implemented
+
+- `research/l2_labels.py`: exact T+1-open → T+H-close, H1/H3/H5 style-relative
+  label construction for all seven styles. It accepts only
+  `VERIFIED_ACTION_CONSISTENT_TRADE_RETURN_BASIS` and per-session corporate
+  action/source-availability evidence. P1 Yahoo current-vintage history is
+  intentionally rejected as a label basis.
+- `research/l2_label_bundle.py`: small immutable derived-label bundle with
+  SHA256 verification, seven-style/H1-H3-H5 scope checks and write-once bundle
+  IDs. It does not create a parallel price warehouse.
+- `research/l2_forecast.py`: 21 independent style×horizon research units,
+  StandardScaler + Ridge(alpha=1), fail-closed missing/current-late features,
+  at least five-session embargo, verified-label availability gating and three
+  baselines: zero, expanding mean and 5D momentum extrapolation.
+- Model features: 5/20/60 relative return, five-day acceleration, ten-session
+  relative up-day count, 20D relative volatility, 20/60 drawdown, cross-style
+  20D dispersion and four explicit rotation-quadrant indicators.
+- `walk_forward_oos_v1` and `score_oos_v1`: causal date-by-date OOS output,
+  MAE/RMSE/MSE, gains versus all three baselines and direction accuracy.
+  These are research metrics only and do not admit the model.
+- `workflow/l2_forecast.py` + `GET /api/v1/l2/styles/forecast`: read-only
+  source-gated P4 API. Default configuration has no label bundle and therefore
+  returns `L2_VERIFIED_LABEL_BUNDLE_REQUIRED` rather than generating numbers.
+- P4 is lazy-loaded in the existing `/studio#style` workspace under
+  「领先预测」. Default P1/P2 page does not invoke model fitting.
+- `research/l2_forecast_archive.py` and
+  `workflow/l2_forecast_freeze.py`: explicit write-once forward-research
+  snapshot. GET never writes. The archive requires the exact 7×3 grid, source
+  SHA, label bundle SHA, research-only eligibility and no order capability.
+
+### Tests authored
+
+- label timing, pair/basket arithmetic and action-evidence blockers;
+- immutable label bundle round-trip/hash/scope protection;
+- 21-unit forecast output, H1/H3/H5, baselines, embargo and future-mutation
+  causality;
+- OOS score contract;
+- source-gated forecast workflow and strict HTTP query validation;
+- lazy P4 UI BLOCKED/RESEARCH_ONLY rendering;
+- immutable forecast snapshot identity and no-write blocker behavior.
+
+The actual committed L2 JavaScript P4 tab has passed an isolated runtime
+smoke in this connector environment. Full Python pytest, user's real DuckDB
+evidence, actual label source, and real browser acceptance remain local gates.
+
+### P4 status
+
+**Engineering: implemented, not accepted.** The committed
+`configs/l2_forecast.yaml` has `label_bundle_id: null` on purpose. No
+qualified label bundle has been supplied in this environment, so no real P4
+forecast is claimed. All system-level eligibility remains
+`historical_decision_eligible=false`, `real_orders_enabled=false`.
+
+Local acceptance: [L2 P4 checklist](L2_P4_LOCAL_ACCEPTANCE.md).
+
+P5 remains responsible for adequate OOS sample size, baseline improvement,
+stability/ablation, immutable forward-outcome accumulation and any separately
+defined probability calibration/model admission.
