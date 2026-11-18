@@ -55,8 +55,8 @@ def test_forecast_requires_current_asof_hash_clock_and_admission_evidence():
     assert "Number.isFinite(cutoff)" in src
     assert "frozen < cutoff || cutoff >= entry" in src
     assert "f.quantiles.some((q,i) => i > 0 && Number(q)<Number(f.quantiles[i-1]))" in src
-    assert "x.model_admitted === false" in src
-    assert "x.historical_pit_verified === true" in src
+    assert "x.model_admitted===false" in src
+    assert "x.historical_pit_verified===true" in src
     assert "first_passage_calibration_status==='CALIBRATED_TEMP_HOLDOUT'" in src
     assert "Math.random" not in src
 
