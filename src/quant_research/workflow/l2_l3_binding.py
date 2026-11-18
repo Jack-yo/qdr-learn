@@ -206,7 +206,12 @@ def build_l2_style_history_binding(
         label_shas.add(str(context["label_bundle_sha256"]))
         feature_shas.add(str(context["feature_bundle_sha256"]))
         source_shas.add(str(context["source_snapshot_sha256"]))
-        all_pit = all_pit and context.get("historical_decision_eligible") is True
+        # PIT attestation is an evidence property, not trading eligibility.
+        # The downstream contract deliberately keeps historical_decision_eligible
+        # false even for admitted research context, so using it here would make
+        # P6 impossible to satisfy. The feature bundle is the explicit
+        # point-in-time attestation already verified above for this session.
+        all_pit = all_pit and context.get("historical_feature_pit_attested") is True
         identities.append({
             "date": session,
             "forecast_identity": context["forecast_identity"],
