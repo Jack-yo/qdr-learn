@@ -212,51 +212,51 @@ def local_app():
 def _open(browser,base,route):
     page=browser.new_page(viewport={"width":1536,"height":900})
     page.goto(base+"/studio#"+route,wait_until="domcontentloaded")
-    if route=="overview":
-        page.locator("#content .desk-head").wait_for(timeout=10000)
-    else:
-        page.locator("#content .heading").wait_for(timeout=10000)
-    if route=="style":
-        page.locator(".v4-subtab").first.wait_for(timeout=10000)
+    page.locator("#content .heading").wait_for(timeout=10000)
+    if route!="overview":
+        try:
+            page.locator(".v4-subtab").first.wait_for(timeout=10000)
+        except Exception as exc:
+            raise AssertionError(f"{route} did not render its tabs: {page.locator('#content').inner_text()[:500]}") from exc
     page.wait_for_load_state('networkidle',timeout=10000)
     page.locator('.v4-pending-banner').wait_for(state='hidden',timeout=10000)
     return page
 
 
 def test_six_page_information_architecture_and_keyboard_tabs(browser,local_app):
-    for name,heading_name,control in (
-        ("lab","因子实验","#v4-factor-name"),
-        ("screen","选股与回测","#v4-strategy-name"),
-        ("risk","持仓与风控",".kpis"),
-    ):
+    # L1 V3 has its own horizon controls; the remaining workspaces retain tabs.
+    expected={"style":5,"lab":4,"screen":4,"risk":5}
+    for name,count in expected.items():
         page=_open(browser,local_app,name)
         try:
-            page.get_by_role("heading",name=heading_name).wait_for(timeout=10000)
-            assert page.locator(control).count()>=1
-            assert page.get_by_role("tab").count()==0
+            tabs=page.get_by_role("tab")
+            assert tabs.count()==count
+            selected=1 if name=="screen" else 0
+            following=(selected+1)%count
+            assert tabs.nth(selected).get_attribute("aria-selected")=="true"
+            tabs.nth(selected).press("ArrowRight")
+            assert tabs.nth(following).get_attribute("aria-selected")=="true"
+            assert page.locator("#v4-panel-"+name+"-"+str(following)).is_visible()
+            assert not page.locator("#v4-panel-"+name+"-"+str(selected)).is_visible()
+            if name=="risk":
+                assert page.locator(".v4-five-metrics .kpi").count()==5
+            if name=="lab":
+                assert page.locator("details #v4-factor-hypothesis").count()==1
+                assert not page.locator("#v4-factor-hypothesis").is_visible()
         finally:
             page.close()
-
-    page=_open(browser,local_app,"style")
+    page=browser.new_page(viewport={"width":1536,"height":900})
     try:
-        tabs=page.get_by_role("tab")
-        assert tabs.count()==3
-        assert page.get_by_text("20D 相对领先",exact=True).count()==1
-        tabs.nth(1).click()
-        page.get_by_text("H1 / H3 / H5 领先预测",exact=True).wait_for()
-    finally:
-        page.close()
-
-    page=_open(browser,local_app,"market")
-    try:
-        page.locator('.market-desk').wait_for(timeout=10000)
+        page.goto(local_app+"/studio#market",wait_until="domcontentloaded")
+        page.locator('.lv3-heading').wait_for(timeout=10000)
         for horizon in (1,3,5):
-            button=page.locator(f'[data-l1-horizon="{horizon}"]')
+            button=page.locator(f'[data-lv3-h="{horizon}"]')
             button.click()
-            page.locator(f'[data-l1-horizon="{horizon}"]').wait_for()
-            assert page.locator(f'[data-l1-horizon="{horizon}"]').get_attribute('aria-pressed')=='true'
-        assert page.get_by_text('模型验证与研究记录',exact=True).count()==1
-        assert page.get_by_text('12 维市场自动观测',exact=True).count()==1
+            page.get_by_role('heading',name=f'H{horizon} · 这次概率如何算出').wait_for()
+            assert page.locator(f'[data-lv3-h="{horizon}"]').get_attribute('aria-pressed')=='true'
+        page.locator('[data-lv3-old]').click()
+        page.locator('.l1-v2-legacy > summary').click()
+        page.get_by_text('预测验证与历史对照').wait_for()
     finally:
         page.close()
 
@@ -268,7 +268,7 @@ def test_overview_research_flow_and_market_validation(browser,local_app):
         assert page.get_by_text('今日候选',exact=True).count()==1
         assert page.get_by_text('持仓与风险',exact=True).count()==1
         assert page.get_by_text('今日变化',exact=True).count()==1
-        assert page.get_by_text('决策上下文',exact=True).count()==1
+        assert page.get_by_text('数据与模型状态',exact=True).count()==1
         assert page.get_by_text('归档研究预测行数').count()==0
         page.locator("#nav-market").click()
         page.get_by_role('heading',name='市场展望').wait_for(timeout=10000)

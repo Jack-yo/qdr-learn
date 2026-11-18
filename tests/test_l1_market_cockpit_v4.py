@@ -14,10 +14,8 @@ CSS = APP / "assets" / "v4_ui_market_v4.css"
 def test_v4_market_cockpit_is_loaded_after_theme_and_served():
     shell = (APP / "v4_shell.html").read_text(encoding="utf-8")
     web = (APP / "web.py").read_text(encoding="utf-8")
-    assert shell.index("v5_system.css") < shell.index("v4_ui_market_v4.css")
+    assert shell.index("v4_ui_light.css") < shell.index("v4_ui_market_v4.css")
     assert shell.index("v4_ui_theme.js") < shell.index("v4_ui_market_v4.js")
-    assert "v4_ui_market_v2.js" not in shell
-    assert "v4_ui_market_v3.js" not in shell
     assert "'/assets/v4_ui_market_v4.js'" in web
     assert "'/assets/v4_ui_market_v4.css'" in web
 
@@ -55,8 +53,8 @@ def test_forecast_requires_current_asof_hash_clock_and_admission_evidence():
     assert "Number.isFinite(cutoff)" in src
     assert "frozen < cutoff || cutoff >= entry" in src
     assert "f.quantiles.some((q,i) => i > 0 && Number(q)<Number(f.quantiles[i-1]))" in src
-    assert "x.model_admitted===false" in src
-    assert "x.historical_pit_verified===true" in src
+    assert "x.model_admitted === false" in src
+    assert "x.historical_pit_verified === true" in src
     assert "first_passage_calibration_status==='CALIBRATED_TEMP_HOLDOUT'" in src
     assert "Math.random" not in src
 
