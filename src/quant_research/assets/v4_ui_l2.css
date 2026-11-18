@@ -1,0 +1,77 @@
+/* QDR L2 P3 observation cockpit; loaded after the shared light theme. */
+.l2-page{display:flex;flex-direction:column;gap:14px;max-width:1540px;margin:0 auto;color:var(--txt)}
+.l2-page .heading{margin-bottom:0;align-items:center}
+.l2-page .title{font-size:23px;line-height:1.35;letter-spacing:0}
+.l2-page .subtitle{line-height:1.65;max-width:860px}
+.l2-controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;border:1px solid #dee6ef;border-radius:9px;background:#fff;padding:10px 14px;color:#66788b;font-size:12px}
+.l2-controls label{color:#304258;font-weight:650}
+.l2-controls input[type=date]{border:1px solid #cedae7;border-radius:7px;background:#fff;color:#283a4e;padding:7px 10px;font-size:12px;font-family:inherit}
+.l2-controls>span:nth-last-child(2){margin-left:auto}
+.l2-tabs{display:flex;flex-wrap:wrap;border-bottom:1px solid #dce4ef;gap:20px}
+.l2-tab{background:transparent;border:0;border-bottom:3px solid transparent;padding:12px 5px 10px;font-size:13px;color:#66788b;cursor:pointer;font-weight:550;font-family:inherit}
+.l2-tab:hover,.l2-tab:focus-visible{color:#2766a4}
+.l2-tab.selected{color:#1a5ca3;font-weight:700;border-bottom-color:#2d70ba}
+.l2-stat-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:11px}
+.l2-stat{background:#fff;border:1px solid #dce5ef;border-radius:9px;padding:13px 16px;display:flex;flex-direction:column;min-height:102px;gap:6px}
+.l2-stat>div{font-size:12px;color:#66788d}
+.l2-stat>b{font-weight:750;font-size:21px;color:#24374f;line-height:1.15}
+.l2-stat>small{color:#7c8a9e;line-height:1.4}
+.l2-disclaimer{font-size:12px;line-height:1.6;color:#765a24;background:#fcf7e9;border:1px solid #f0e3c3;border-radius:8px;padding:9px 14px}
+.l2-main-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(320px,1fr);gap:13px;align-items:stretch}
+.l2-page .card{background:#fff;border-color:#dce4ef;border-radius:10px;box-shadow:none}
+.l2-page .ctitle{color:#24364e;margin-bottom:14px}
+.l2-page .ctitle span{color:#72849b}
+.l2-page .v4-table-scroll{overflow-x:auto;max-width:100%}
+.l2-page .table{min-width:650px}
+.l2-page .table td,.l2-page .table th{padding:11px 10px;white-space:nowrap}
+.l2-page .table td:last-child{max-width:280px;overflow:hidden;text-overflow:ellipsis}
+.l2-style-select{cursor:pointer;border:0;background:transparent;color:#256bb0;font-family:inherit;font-size:12px;font-weight:650;padding:5px 2px;text-align:left}
+.l2-style-select:hover,.l2-style-select:focus-visible{text-decoration:underline}
+.l2-style-select.current{color:#183f7a}
+.l2-state{display:inline-block;font-size:11px;font-weight:700;padding:5px 8px;border-radius:6px;white-space:nowrap}
+.l2-strong{background:#e7f5ef;color:#167951}
+.l2-cooling{background:#fdf3e4;color:#a2681d}
+.l2-improving{background:#eaf2fd;color:#2566b2}
+.l2-weak{background:#fcecef;color:#b33f54}
+.l2-unknown{background:#edf0f4;color:#657387}
+.l2-number{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+.l2-number.up{color:var(--rise,#188861)}
+.l2-number.down{color:var(--fall,#c34751)}
+.l2-number.na,.l2-number.flat{color:#6d7e92}
+.l2-plot-scroll{max-width:100%;overflow-x:auto}
+.l2-plot{min-width:440px;max-width:100%;width:100%;height:auto;display:block}
+.l2-q-neutral{fill:#f9f7f1}.l2-q-good{fill:#f3faf5}.l2-q-low{fill:#fdf5f6}.l2-q-warn{fill:#f2f7ff}
+.l2-axis{stroke:#a5b4c8;stroke-width:1.1;stroke-dasharray:5 5}
+.l2-quadrant-label{fill:#6c7e91;font-size:12px;font-weight:600}
+.l2-axis-label{fill:#8c9aab;font-size:10px}
+.l2-plot-point{fill:#4276b2;stroke:#fff;stroke-width:2px}
+.l2-selected-point .l2-plot-point{fill:#e68a30;stroke:#fff;stroke-width:3px}
+.l2-point-label{font-size:11px;font-weight:650;fill:#344e69}
+.l2-selected-point .l2-point-label{fill:#a85d0f;font-weight:800}
+.l2-chart-foot{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:5px;font-size:10px;color:#8593a5;margin-top:5px}
+.l2-trend{width:100%;height:auto;display:block}
+.l2-trend-line{stroke:#3977b7}
+.l2-zero{stroke:#a7b7c7;stroke-dasharray:5 5}
+.l2-detail-status{display:flex;align-items:center;gap:12px;flex-wrap:wrap;color:#6f7f90;font-size:11px;margin-bottom:13px}
+.l2-mini-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.l2-mini{padding:10px 12px;background:#f8fafc;border:1px solid #edf1f5;border-radius:7px;display:flex;flex-direction:column;gap:5px}
+.l2-mini>span{font-size:11px;color:#738499}
+.l2-mini>b{font-size:16px}
+.l2-pair{display:flex;flex-wrap:wrap;justify-content:space-between;gap:7px;padding:11px 0;color:#4a637e;font-size:11px;border-bottom:1px solid #e5eaf2}
+.l2-source-line{font-size:11px;color:#8694a5;margin-top:9px;line-height:1.6;overflow-wrap:anywhere}
+.l2-page .v4-muted-note{margin-top:10px;line-height:1.65}
+.l2-future{display:flex;gap:12px;margin-top:12px}
+.l2-future span{background:#f3f6fa;color:#798ba0;padding:10px 15px;border-radius:6px;font-weight:750;flex:1;text-align:center}
+.l2-quality{padding:8px 5px 16px;display:flex;align-items:center;gap:16px;font-size:12px;color:#647b92}
+.l2-quality b{font-size:26px;color:#243b52}
+.l2-protocol{color:#5d6f84;font-size:12px;line-height:1.75}
+.l2-protocol p{margin:7px 0}
+.l2-protocol b{color:#30445d}
+.l2-fr-note{margin-bottom:12px;font-size:12px;color:#586f86;line-height:1.6}
+
+.l2-forecast-blocked{display:inline-block;padding:4px 7px;border-radius:5px;background:#f1f3f6;color:#77869a;font-size:10px;font-weight:700}
+.l2-forecast-h{padding:12px 0;border-bottom:1px solid #e7edf4}
+.l2-forecast-h:last-child{border-bottom:0}
+.l2-forecast-h>div:first-child{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px;color:#2c425d}
+@media(max-width:1140px){.l2-main-grid{grid-template-columns:minmax(0,1fr)}.l2-stat-strip{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:680px){.l2-controls>span:nth-last-child(2){margin-left:0}.l2-stat-strip{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.l2-stat{padding:10px;min-height:90px}.l2-stat>b{font-size:17px}.l2-tabs{gap:8px}.l2-tab{font-size:12px;padding:9px 3px}.l2-mini-grid{grid-template-columns:1fr}.l2-page .card.pad{padding:13px}.l2-plot{min-width:375px}.l2-page .title{font-size:20px}}

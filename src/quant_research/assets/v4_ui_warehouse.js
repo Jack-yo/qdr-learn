@@ -99,9 +99,7 @@
   ((item.limitations||[]).length?'<div class="wh-reason"><b>使用限制</b><span>'+e(item.limitations.join('；'))+'</span></div>':'')+
   '<div class="wh-policy-note">数据已采集不等于历史 PIT 已验证，也不代表已获得模型预测或交易资格。</div>';
  };
- const renderFields=(detail,loading=false,error=null,retryUrl='')=>{
-  if(loading)return V.moduleLoading('字段结构');
-  if(error)return V.moduleError('字段结构',error,retryUrl);
+ const renderFields=(detail)=>{
   const fields=detail?.fields||[];
   if(!fields.length)return empty('暂无可读取的字段结构',detail?.preview_reason||'该资产可能是报告、归档或尚未创建的数据表。');
   return '<div class="v4-table-scroll"><table class="table wh-table"><thead><tr><th>字段名</th><th>数据类型</th><th>可空</th><th>键约束</th></tr></thead><tbody>'+
@@ -109,11 +107,9 @@
     (f.nullable?'是':'否')+'</td><td>'+e(f.key||'—')+'</td></tr>').join('')+
    '</tbody></table></div>';
  };
- const renderPreview=(preview,detail,error,loading=false,retryUrl='')=>{
-  if(loading)return V.moduleLoading('真实样本');
-  if(error)return V.moduleError('真实样本预览',error,retryUrl);
+ const renderPreview=(preview,detail,error)=>{
   if(!detail?.preview_supported)return empty('该资产暂不支持表格预览',detail?.preview_reason||'V1 仅开放已登记的只读表。');
-  if(!preview)return V.moduleLoading('真实样本');
+  if(!preview)return empty('无法读取真实样本',error||'样本尚未返回；不会用示例数据填充。');
   const rows=preview.rows||[];
   if(!rows.length)return empty('当前筛选没有样本','该数据表在当前过滤条件下没有真实记录。');
   const cols=Object.keys(rows[0]).slice(0,12);
@@ -145,13 +141,13 @@
    '<div class="wh-lineage-arrow">↓</div><div><small>03 · 使用边界</small><b>'+e(lineage.use_policy||item.use_policy||'未定义')+'</b></div></div>'+
    '<div class="wh-policy-note">当前展示资产登记层的来源—存储关系，不代表每条样本都已逐条复核原始回执或完整派生链；未验证的 PIT、历史身份和许可条件不会因此自动通过。</div>';
  };
- const renderDetail=(item,detail,detailLoading,detailError,detailRetryUrl,preview,previewLoading,previewError,previewRetryUrl,runs)=>{
+ const renderDetail=(item,detail,preview,runs,previewError)=>{
   if(!item)return empty('选择一个数据资产','从左侧资产清单中选择数据集，查看来源、字段、样本和维护记录。');
   const tabs=[['overview','概览'],['preview','数据预览'],['fields','字段结构'],['history','更新记录'],['lineage','血缘与资格']];
   let body='';
   if(state.tab==='overview')body=renderOverview(item);
-  if(state.tab==='preview')body=detailLoading?V.moduleLoading('数据表结构'):detailError?V.moduleError('数据预览依赖的资产详情',detailError,detailRetryUrl):renderPreview(preview,detail,previewError,previewLoading,previewRetryUrl);
-  if(state.tab==='fields')body=renderFields(detail,detailLoading,detailError,detailRetryUrl);
+  if(state.tab==='preview')body=renderPreview(preview,detail,previewError);
+  if(state.tab==='fields')body=renderFields(detail);
   if(state.tab==='history')body=renderHistory(runs);
   if(state.tab==='lineage')body=renderLineage(item,detail);
   const fieldNames=new Set((detail?.fields||[]).map(field=>field.name));
@@ -171,10 +167,8 @@
  };
  pages.warehouse=async()=>{
   const response=await settle('/api/v1/warehouse/overview');
-  if(response.pending)return {title:'数据仓库',html:heading('数据仓库','数据资产、来源、质量与更新状态')+
-    '<div class="wh-module-loading">'+V.moduleLoading('数据资产目录')+'</div>'};
   if(!response.ok)return {title:'数据仓库',html:heading('数据仓库','数据资产、来源、质量与更新状态')+
-    '<div class="wh-module-error">'+V.moduleError('数据仓库总览',response.error,'/api/v1/warehouse/overview')+'</div>'};
+    empty('暂时无法读取数据仓库',response.error?.message||'请检查本地服务和数据目录。')};
   const data=response.data||{};
   if(data.status==='MAINTENANCE_RUNNING'){
    return {title:'数据仓库',html:heading('数据仓库','数据资产、来源、质量与更新状态',
@@ -192,30 +186,22 @@
    state.selected=(visibleAssets[0]||assets.find(x=>x.dataset_id==='market_prices')||assets[0]).dataset_id;
   }
   const selected=assets.find(x=>x.dataset_id===state.selected);
-  const detailUrl='/api/v1/warehouse/datasets/'+encodeURIComponent(state.selected);
-  const detailResponse=await settle(detailUrl);
-  const detailLoading=!!detailResponse.pending;
-  const detailError=!detailResponse.ok&&!detailResponse.pending?detailResponse.error:null;
-  const detail=detailResponse.ok?detailResponse.data:{fields:[],preview_supported:false,preview_reason:'资产详情暂不可用'};
+  const detailResponse=await settle('/api/v1/warehouse/datasets/'+encodeURIComponent(state.selected));
+  const detail=detailResponse.ok?detailResponse.data:{fields:[],preview_supported:false,preview_reason:detailResponse.error?.message||'资产详情读取失败'};
   const previewFields=new Set((detail?.fields||[]).map(field=>field.name));
-  if(detailResponse.ok){
-   if(!previewFields.has('symbol'))state.previewSymbol='';
-   if(!['session_date','observation_date','date','scheduled_at','started_at','observed_start'].some(field=>previewFields.has(field))){
-    state.previewStart='';state.previewEnd='';
-   }
+  if(!previewFields.has('symbol'))state.previewSymbol='';
+  if(!['session_date','observation_date','date','scheduled_at','started_at','observed_start'].some(field=>previewFields.has(field))){
+   state.previewStart='';state.previewEnd='';
   }
-  let preview=null,previewError=null,previewLoading=false,previewUrl='';
-  if(state.tab==='preview'&&detailResponse.ok&&detail?.preview_supported){
+  let preview=null,previewError=null;
+  if(state.tab==='preview'&&detail?.preview_supported){
    const params=new URLSearchParams({limit:'25',offset:String(state.previewOffset)});
    if(state.previewQ)params.set('q',state.previewQ);
    if(state.previewSymbol)params.set('symbol',state.previewSymbol);
    if(state.previewStart)params.set('start',state.previewStart);
    if(state.previewEnd)params.set('end',state.previewEnd);
-   previewUrl=detailUrl+'/preview?'+params.toString();
-   const previewResponse=await settle(previewUrl);
-   if(previewResponse.ok)preview=previewResponse.data;
-   else if(previewResponse.pending)previewLoading=true;
-   else previewError=previewResponse.error||new Error('样本读取失败');
+   const previewResponse=await settle('/api/v1/warehouse/datasets/'+encodeURIComponent(state.selected)+'/preview?'+params.toString());
+   if(previewResponse.ok)preview=previewResponse.data;else previewError=previewResponse.error?.message||'样本读取失败';
   }
   const summary=data.summary||{};
   const maintenance=data.maintenance||{};
@@ -244,7 +230,7 @@
    '<select id="wh-status"><option value="all">全部状态</option>'+[...new Set(assets.map(x=>x.status))].sort().map(v=>
     '<option value="'+e(v)+'"'+(state.status===v?' selected':'')+'>'+e(pretty(v))+'</option>').join('')+'</select></div>'+
    renderAssets(assets)+'</section><section class="card pad wh-detail-card"><div class="wh-section-title"><b>资产详情</b><span>只读视图</span></div>'+
-   renderDetail(selected,detail,detailLoading,detailError,detailUrl,preview,previewLoading,previewError,previewUrl,maintenance.recent_runs||[])+'</section></div>';
+   renderDetail(selected,detail,preview,maintenance.recent_runs||[],previewError)+'</section></div>';
   const sources=(data.sources||[]).slice().sort((a,b)=>{
    const priority=x=>['BLOCKED','ERROR','FAILED','MISSING'].includes(x.runtime_status)?0:
     x.runtime_status==='NOT_OBSERVED'?1:2;
@@ -264,7 +250,7 @@
    '<div class="wh-source-foot">注册状态不等于真实运行状态；没有运行记录时显示「尚无运行观测」。</div></section>';
   const html=top+kpis+registryLine+attentionBlock+main+sourceMonitor;
   return {title:'数据仓库',html,mount:()=>{
-   document.getElementById('wh-refresh')?.addEventListener('click',()=>V.refresh('/api/v1/warehouse/'));
+   document.getElementById('wh-refresh')?.addEventListener('click',()=>window.location.reload());
    document.getElementById('wh-search')?.addEventListener('input',ev=>{
     state.search=ev.target.value;V.show('warehouse');
    });

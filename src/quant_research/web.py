@@ -335,7 +335,8 @@ def handler(console):
                         '/assets/v4_ui_market_v2.js', '/assets/v4_ui_market_v2.css',
                          '/assets/v4_ui_market_v3.js', '/assets/v4_ui_market_v3.css',
                          '/assets/v4_ui_light.css', '/assets/v4_ui_warehouse.js', '/assets/v4_ui_warehouse.css', '/assets/v4_ui_theme.js',
-                         '/assets/v4_ui_market_v4.js', '/assets/v4_ui_market_v4.css'}:
+                         '/assets/v4_ui_market_v4.js', '/assets/v4_ui_market_v4.css',
+                         '/assets/v4_ui_l2.js', '/assets/v4_ui_l2.css'}:
                 asset = Path(__file__).with_name('assets') / path.rsplit('/',1)[1]
                 content_type = 'text/css; charset=utf-8' if path.endswith('.css') else 'text/javascript; charset=utf-8'
                 return self.send(200, asset.read_bytes(), content_type)
@@ -903,6 +904,54 @@ def handler(console):
                 except ValueError:return self.send(400,{'status':'BLOCKED','code':'INVALID_FACTOR_LAB_REQUEST'})
                 except Exception as exc:return self.send(503,{'status':'BLOCKED','code':type(exc).__name__})
             if path=='/api/v1/jobs/current':return self.send(200,console.job)
+            if path in {'/api/v1/l2/styles/overview', '/api/v1/l2/styles/rotation'}:
+                try:
+                    query=parse_qs(urlsplit(self.path).query)
+                    allowed={'asof','cutoff','start'}
+                    if path.endswith('/overview'):allowed.add('rotation')
+                    if set(query)-allowed or any(len(v)!=1 for v in query.values()):
+                        raise ValueError('Invalid L2 style query')
+                    if 'rotation' in query and query['rotation'][0]!='1':
+                        raise ValueError('Invalid L2 rotation flag')
+                    asof=query.get('asof',[None])[0]
+                    cutoff=datetime.fromisoformat(query['cutoff'][0]) if 'cutoff' in query else None
+                    start=query.get('start',['2017-01-03'])[0]
+                    if asof is not None and date.fromisoformat(asof).isoformat()!=asof:
+                        raise ValueError('Invalid L2 asof date')
+                    if date.fromisoformat(start).isoformat()!=start:
+                        raise ValueError('Invalid L2 start date')
+                    from .workflow.l2_styles import calculate, calculate_rotation
+                    if path.endswith('/rotation'):
+                        data=calculate_rotation(console.root,asof=asof,cutoff=cutoff,start=start)
+                    else:
+                        data=calculate(console.root,asof=asof,cutoff=cutoff,start=start,
+                                       **({'include_rotation': True} if 'rotation' in query else {}))
+                    return self.send(200,data)
+                except PolicyError as exc:return self.send(409,exc.payload())
+                except ValueError as exc:
+                    return self.send(400,{'status':'BLOCKED','code':'INVALID_L2_STYLE_REQUEST','detail':str(exc)})
+                except Exception as exc:return self.send(503,{'status':'BLOCKED','code':type(exc).__name__})
+            if path == '/api/v1/l2/styles/forecast':
+                try:
+                    query=parse_qs(urlsplit(self.path).query)
+                    if set(query)-{'asof','horizon','start'} or any(len(v)!=1 for v in query.values()):
+                        raise ValueError('Invalid L2 forecast query')
+                    asof=query.get('asof',[None])[0]
+                    start=query.get('start',['2017-01-03'])[0]
+                    horizon=int(query['horizon'][0]) if 'horizon' in query else None
+                    if asof is not None and date.fromisoformat(asof).isoformat()!=asof:
+                        raise ValueError('Invalid L2 forecast asof date')
+                    if date.fromisoformat(start).isoformat()!=start:
+                        raise ValueError('Invalid L2 forecast start date')
+                    from .workflow.l2_forecast import calculate_forecast
+                    return self.send(200,calculate_forecast(
+                        console.root,asof=asof,horizon=horizon,start=start))
+                except FileNotFoundError as exc:
+                    return self.send(409,{'status':'BLOCKED','code':str(exc)})
+                except PolicyError as exc:return self.send(409,exc.payload())
+                except ValueError as exc:
+                    return self.send(400,{'status':'BLOCKED','code':'INVALID_L2_FORECAST_REQUEST','detail':str(exc)})
+                except Exception as exc:return self.send(503,{'status':'BLOCKED','code':type(exc).__name__})
             if path in {'/api/v1/styles','/api/v1/styles/export.csv'}:
                 try:
                     query=parse_qs(urlsplit(self.path).query)
