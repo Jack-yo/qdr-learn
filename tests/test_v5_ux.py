@@ -28,10 +28,11 @@ def test_v5_overview_is_decision_first():
 
 def test_l1_uses_progressive_disclosure_for_evidence():
     src=(APP/"assets"/"v4_ui_market_v4.js").read_text(encoding="utf-8")
-    for marker in ("市场展望","关键变化","查看 12 维市场证据","模型验证与研究记录","l1-evidence-details","l1-audit-details"):
+    for marker in ("市场展望","关键变化","12 维市场自动观测","模型验证与研究记录","market-details","market-audit"):
         assert marker in src
     assert "完成 Codex 数据接入" not in src
-    assert "前向预测待验证 · 当前仅展示市场观察" in src
+    assert "v4_ui_market_v2" not in src
+    assert "lv3-" not in src
 
 def test_v5_visual_system_is_restrained():
     css=(APP/"assets"/"v5_system.css").read_text(encoding="utf-8")
