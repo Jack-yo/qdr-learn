@@ -102,7 +102,8 @@ def build_downstream_context(root: Path, *, asof: str | None = None) -> dict:
     window = clock.window(forecast["asof_session"], 1)
     frozen_at = pd.Timestamp(frozen.get("frozen_at_utc"))
     if (
-        frozen_at.tzinfo is None
+        frozen.get("prospective_before_next_open") is not True
+        or frozen_at.tzinfo is None
         or not (
             pd.Timestamp(window.signal_time)
             <= frozen_at.tz_convert("UTC")
