@@ -55,19 +55,66 @@ decision_eligible=false
 real_orders_enabled=false
 ```
 
+
+## 2A. Layered close-to-open clock
+
+The four layers do not pretend to become available at one identical timestamp.
+
+For L3:
+
+```text
+base_signal_time = XNYS close + 15 minutes
+l3_signal_time   = max(base_signal_time,
+                       latest required stock-factor availability,
+                       market_style.state_available_at)
+```
+
+The derived L3 signal must already exist at the actual preflight time and must
+remain strictly earlier than T+1 entry.
+
+When `market_style` contains admitted L2 values:
+
+- `state_available_at` must be no earlier than the actual
+  `forecast_frozen_at_utc` of the L2 forecast;
+- it may therefore be later than the base signal;
+- it must still be earlier than T+1 open;
+- historical panel assembly uses the same max-availability rule as current
+  preflight.
+
+Never backdate an L2 value to 21:15 merely to make L3 accept it.
+
 ## 3. L2 -> L3 history binding
 
 L3 must not consume arbitrary numeric `style_*` columns while claiming they
 came from admitted L2.
 
-For a candidate `market_style.parquet`, generate an audited receipt:
+For a market-only `market_style.parquet`, materialize admitted L2 columns
+into a **new** Parquet and generate an audited receipt:
 
 ```bash
 uv run --locked python -m quant_research.workflow.l2_l3_binding \
   --root . \
-  --market-style /path/to/market_style.parquet \
+  --market-style /path/to/base_market_style.parquet \
+  --materialized-market-style /path/to/l2_bound_market_style.parquet \
   --output /path/to/l2_style_context_receipt.json
 ```
+
+The original file is never modified. Existing legacy/exploratory `style_*`
+columns are rejected rather than silently replaced.
+
+For a managed V4 input bundle, the safer path is to derive a new immutable
+bundle directly:
+
+```bash
+uv run --locked python -m quant_research.workflow.v4_l2_bind_bundle \
+  --root . \
+  --source-bundle <source_bundle_id> \
+  --output-bundle <new_l2_bound_bundle_id>
+```
+
+This copies unchanged factors/labels/candidate bytes, writes a new
+`market_style.parquet`, updates artifact SHA256 values, embeds the validated
+L2 receipt, and never mutates the source bundle.
 
 The audit requires every dated row to map exactly to frozen,
 `MODEL_ADMITTED` L2 context. Canonical style columns are:
@@ -249,6 +296,36 @@ L4_L3_FORECAST_IDENTITY_MISMATCH
 ```
 
 Do not turn these into warnings merely to obtain a green status.
+
+
+## 10A. Operational daily order
+
+For genuine L2 forward evidence, run P4 inside the real close-to-next-open
+window:
+
+```bash
+uv run --locked python -m quant_research.workflow.l2_forecast_freeze \
+  --date YYYY-MM-DD --prospective-only
+```
+
+If run before the base signal or after T+1 entry, it returns
+`L2_NOT_IN_PROSPECTIVE_FREEZE_WINDOW` and writes **no** archive.
+
+Daily progression is therefore:
+
+1. verified T-close source/feature evidence exists;
+2. freeze P4 prospectively;
+3. while P5 is not admitted, stop here and continue accumulating genuine
+   forward L2 evidence;
+4. after the exact L2 units are MODEL_ADMITTED, materialize/bind L2 context
+   into a new V4 bundle;
+5. run L3 preflight/model on the L2-bound bundle using the staged L3 signal;
+6. freeze L4 research review bound to the exact L3 forecast identity;
+7. inspect `GET /api/v1/v4/layers`.
+
+P5 Walk-forward/ablation is not a per-page or per-GET task and should not be
+silently rerun every day. Run/freeze it explicitly when validation evidence is
+being refreshed.
 
 ## 11. P6 exit condition
 
