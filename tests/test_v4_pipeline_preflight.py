@@ -197,3 +197,51 @@ def test_unverified_sector_and_missing_market_style_block():
     source['market_style'].loc[0,'market_return_5']=float('nan')
     with pytest.raises(ValueError,match='CONDITIONS_MISSING'):
         _check(frames=source)
+
+
+def test_optional_l2_style_binding_is_reverified_before_model_fit(monkeypatch):
+    from quant_research.workflow import l2_l3_binding
+
+    source, manifest = _inputs()
+    manifest["l2_style_context_receipt"] = {"placeholder": "receipt"}
+    called = []
+
+    def verify(root, market_style, receipt, *, clock=None):
+        called.append((receipt, len(market_style)))
+        return {
+            "binding_verified": True,
+            "historical_pit_attested": False,
+            "context_identity_sha256": "9" * 64,
+        }
+
+    monkeypatch.setattr(l2_l3_binding, "verify_l2_style_history_binding", verify)
+    output = _check(frames=source, manifest=manifest)
+    assert called == [({"placeholder": "receipt"}, 1)]
+    assert output["l2_style_binding_verified"] is True
+    assert output["l2_style_historical_pit_attested"] is False
+    assert output["l2_style_binding_context_sha256"] == "9" * 64
+    assert output["real_orders_enabled"] is False
+
+
+def test_invalid_l2_style_binding_blocks_preflight_before_archive(monkeypatch):
+    from quant_research.workflow import l2_l3_binding
+
+    source, manifest = _inputs()
+    manifest["l2_style_context_receipt"] = {"placeholder": "forged"}
+
+    monkeypatch.setattr(
+        l2_l3_binding,
+        "verify_l2_style_history_binding",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            ValueError("L3_L2_STYLE_BINDING_RECEIPT_MISMATCH")
+        ),
+    )
+    with pytest.raises(ValueError, match="STYLE_BINDING_RECEIPT_MISMATCH"):
+        _check(frames=source, manifest=manifest)
+
+
+def test_legacy_unbound_bundle_remains_research_only_without_binding_claim():
+    output = _check()
+    assert output["l2_style_binding_verified"] is False
+    assert output["l2_style_historical_pit_attested"] is False
+    assert output["l2_style_binding_context_sha256"] is None
