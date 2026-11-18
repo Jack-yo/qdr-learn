@@ -238,7 +238,19 @@ def latest_forward_research(root, *, limit=5):
                                   receipt and receipt.get('historical_pit_attested') is True),
                               'l2_style_binding_context_sha256':(
                                   receipt.get('context_identity_sha256')
-                                  if receipt else None)})
+                                  if receipt else None),
+                              'l2_style_binding_start_session':(
+                                  receipt.get('start_session') if receipt else None),
+                              'l2_style_binding_end_session':(
+                                  receipt.get('end_session') if receipt else None),
+                              'l2_style_model_versions':(
+                                  receipt.get('model_versions') if receipt else []),
+                              'l2_style_label_bundle_sha256s':(
+                                  receipt.get('label_bundle_sha256s') if receipt else []),
+                              'l2_style_feature_bundle_sha256s':(
+                                  receipt.get('feature_bundle_sha256s') if receipt else []),
+                              'l2_style_source_snapshot_sha256s':(
+                                  receipt.get('source_snapshot_sha256s') if receipt else [])})
             except (ValueError,OSError,KeyError,TypeError):
                 items.append({'session_date_et':session_dir.name,
                               'identity':folder.name,'status':'CORRUPT_FORECAST_ARCHIVE'})
