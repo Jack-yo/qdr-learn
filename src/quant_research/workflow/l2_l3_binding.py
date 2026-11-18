@@ -281,10 +281,11 @@ def build_l2_style_history_binding(
     downstream_builder=build_downstream_context,
     clock: TradingClock | None = None,
 ) -> dict:
-    """Audit every market_style row against the exact frozen L2 context.
+    """Audit every market_style row against one fixed L2 admission regime.
 
-    This is an explicit offline bundle-build check. It may be expensive and
-    must never run inside a GET endpoint.
+    Historical rows may be causal PIT replays governed by the fixed admission
+    report; the final current row may be genuine forward-frozen evidence.
+    This explicit offline check must never run inside a GET endpoint.
     """
     if not isinstance(market_style, pd.DataFrame) or market_style.empty:
         raise ValueError("L3_L2_MARKET_STYLE_FRAME_REQUIRED")
@@ -547,16 +548,29 @@ def main(argv=None):
         frame = pd.read_csv(path)
     else:
         parser.error("market_style must be Parquet or CSV")
+    dates=pd.to_datetime(frame["date"],errors="raise")
+    if dates.empty or dates.dt.tz is not None:
+        parser.error("market_style requires timezone-free session dates")
+    from quant_research.workflow.l2_downstream import (
+        build_l2_l3_context_builder,
+    )
+    context_builder,_admission=build_l2_l3_context_builder(
+        args.root,current_session=dates.max().date().isoformat()
+    )
     if args.materialized_market_style is not None:
         materialized_path = args.materialized_market_style.resolve()
         if materialized_path.exists():
             raise FileExistsError("L2_L3_MATERIALIZED_MARKET_STYLE_ALREADY_EXISTS")
         if materialized_path.suffix.lower() != ".parquet":
             parser.error("--materialized-market-style must end in .parquet")
-        frame = materialize_l2_style_history(args.root, frame)
+        frame = materialize_l2_style_history(
+            args.root,frame,downstream_builder=context_builder
+        )
         materialized_path.parent.mkdir(parents=True, exist_ok=True)
         frame.to_parquet(materialized_path, index=False)
-    receipt = build_l2_style_history_binding(args.root, frame)
+    receipt = build_l2_style_history_binding(
+        args.root,frame,downstream_builder=context_builder
+    )
     encoded = json.dumps(
         receipt, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False
     )
