@@ -92,6 +92,7 @@ The receipt binds:
 - each P5 validation identity;
 - model version;
 - label-bundle SHA;
+- verified historical feature-bundle SHA;
 - daily source-snapshot SHA;
 - exact style values;
 - start/end sessions and row count;
@@ -111,18 +112,20 @@ historical_pit_attested
 `binding_verified=true` proves the L3 style input is exactly linked to the
 frozen/admitted L2 context.
 
-It does **not** prove that the historical source itself was independently
-point-in-time. With the current P1/P4 evidence boundary,
-`historical_pit_attested` remains false until that separate local evidence is
-established.
+It does **not** derive PIT status from trading eligibility. The binding audit
+must instead verify the dedicated historical feature bundle for every signal
+session. When that bundle is independently attested and every bound L2 context
+uses it, `historical_pit_attested=true` is permitted while
+`historical_decision_eligible` and all execution flags remain false.
 
-Do not remove or rename the blocker:
+A verified identity binding with missing/failed feature-PIT evidence still
+produces:
 
 ```text
 L3_L2_STYLE_HISTORY_NOT_PIT_ATTESTED
 ```
 
-merely because the binding receipt is valid.
+Do not weaken this blocker merely because the values happen to match.
 
 ## 5. Managed V4 bundle contract
 
@@ -210,6 +213,11 @@ The current implementation checks:
 - L3 latest nonfuture forward-research archive;
 - L2->L3 style binding receipt;
 - L2 style historical PIT attestation;
+- receipt coverage through the current signal session;
+- receipt model version matches current admitted L2;
+- receipt label-bundle SHA matches current admitted L2;
+- receipt feature-bundle SHA matches current admitted L2;
+- receipt L2 source-snapshot set contains the current L2 source snapshot;
 - L4 latest nonfuture risk/research-plan review;
 - L3/L4 session freshness;
 - L3/L4 source-snapshot consistency.
@@ -227,6 +235,11 @@ L2_NO_MODEL_ADMITTED_STYLE_CONTEXT
 L3_FORWARD_RESEARCH_MISSING
 L3_L2_STYLE_BINDING_NOT_VERIFIED
 L3_L2_STYLE_HISTORY_NOT_PIT_ATTESTED
+L3_L2_BINDING_SESSION_MISMATCH
+L3_L2_MODEL_VERSION_BINDING_MISMATCH
+L3_L2_LABEL_BUNDLE_BINDING_MISMATCH
+L3_L2_FEATURE_BUNDLE_BINDING_MISMATCH
+L3_L2_SOURCE_BINDING_MISMATCH
 L3_SESSION_NOT_CURRENT
 L4_RISK_REVIEW_MISSING
 L4_SESSION_NOT_CURRENT
