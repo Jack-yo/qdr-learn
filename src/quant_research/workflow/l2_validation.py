@@ -90,7 +90,7 @@ def build_validation_report(root: Path, *, asof: str | None = None) -> dict:
 
     clock = TradingClock()
     labels, label_manifest = load_label_bundle_v1(root, bundle_id, clock)
-    observations, _, metadata, sessions, _ = load_observation_frame(
+    observations, _, metadata, sessions, cutoff_timestamp = load_observation_frame(
         root, asof=asof
     )
     config = validation_settings(root)
@@ -100,9 +100,18 @@ def build_validation_report(root: Path, *, asof: str | None = None) -> dict:
         ridge_alpha=f_settings["ridge_alpha"],
     )
     asof_day = pd.Timestamp(metadata["asof_date_et"]).tz_localize(None).normalize()
+    labels = labels.copy()
+    labels["label_available_at"] = pd.to_datetime(
+        labels["label_available_at"], utc=True, errors="coerce"
+    )
+    known_labels = labels.loc[
+        labels.forward_relative_return.notna()
+        & labels.label_available_at.notna()
+        & labels.label_available_at.le(cutoff_timestamp)
+    ].copy()
     labeled_dates = pd.DatetimeIndex(
         sorted(pd.to_datetime(
-            labels.loc[labels.forward_relative_return.notna(), "date"]
+            known_labels["date"]
         ).dt.tz_localize(None).dt.normalize().unique())
     )
     labeled_dates = labeled_dates[
@@ -114,7 +123,7 @@ def build_validation_report(root: Path, *, asof: str | None = None) -> dict:
     if len(evaluation_dates):
         ablation_predictions, ablation_scores = run_ablation_oos_v1(
             observations,
-            labels,
+            known_labels,
             sessions,
             evaluation_dates,
             clock,
@@ -137,7 +146,10 @@ def build_validation_report(root: Path, *, asof: str | None = None) -> dict:
     oos_validation = validate_oos_v1(full_predictions, config=config)
 
     frozen = collect_frozen_forecasts_v1(root, MODEL_VERSION)
-    forward_validation = score_genuine_forward_v1(frozen, labels)
+    if not frozen.empty:
+        frozen_dates = pd.to_datetime(frozen["date"], errors="coerce").dt.tz_localize(None).dt.normalize()
+        frozen = frozen.loc[frozen_dates.le(asof_day)].copy()
+    forward_validation = score_genuine_forward_v1(frozen, known_labels)
     qualification = qualify_models_v1(
         oos_validation, forward_validation, config=config
     )
