@@ -219,3 +219,25 @@ Every payload must expose schema/version, as-of session, signal cutoff, per-sour
 - No rewriting L1 data management or L1 model logic.
 - No stock-level Alpha selection, portfolio sizing, broker integration, or order execution.
 - No claims of profitability or trading readiness from descriptive monitoring.
+
+
+## 12. P2 implementation update (2026-11-18)
+
+- P1 rolling source availability was repaired: pandas cannot run rolling maximum directly over timezone-aware datetime columns. The revised implementation calculates an exact int64 UTC-nanosecond window maximum over all N+1 required closes, preserving missingness and timestamp precision.
+- P1 source availability is now an actual observation gate: prices without known availability or first available only after the knowledge cutoff do not participate in relative returns. Symbol coverage distinguishes a raw as-of row from an as-of price available by cutoff.
+- P2 descriptive state machine added in `research/l2_rotation.py`: +20d/-20d strength crossed with +5d/-5d relative acceleration yields four states. An exact zero value is neutral UNKNOWN (not a fabricated directional signal). The initial valid state is not a transition.
+- Every state event records the versioned protocol, state start, prior state when genuinely transitioned, last transition session, consecutive known exchange-session observations, source timestamp, and explicit missingness reason.
+- Missing/late source observations break streaks; UNKNOWN-to-known creates a fresh baseline rather than a false transition.
+- New read-only endpoint `GET /api/v1/l2/styles/rotation?asof=&cutoff=&start=` returns seven latest states, recent 126-session history per style and 50 latest genuine transitions; `asof` is a date-based observation replay, not a historical PIT claim.
+- Synthetic deterministic Python unit tests and HTTP contract tests have been committed for the core quadrant, gap, replay, missingness, and cutoff rules.
+- **Not yet accepted**: full pytest suite, browser behavior, latest live seven-symbol completeness and source entitlement/coverage tests must be executed in the user's local repository environment. No forecast or admission is granted.
+- P3 cockpit and P4–P6 forecasting/integration remain out of scope of this increment.
+
+### Required local acceptance before merging to main
+
+```bash
+python -m pytest -q tests/test_l2_style_rotation.py tests/test_l2_style_workflow.py tests/test_l2_style_api.py tests/test_l2_rotation.py
+python -m pytest -q
+```
+
+Start the existing local console on the machine with access to the existing real-data DuckDB, then request `/api/v1/l2/styles/overview` and `/api/v1/l2/styles/rotation` (optionally with `asof`). Confirm all fourteen proxies have first/last session and cutoff-qualified freshness, seven latest states are either known or explicitly UNKNOWN with reasons, source hashes match, all payloads remain observation-only, and no data writes/forecasts/broker orders occur.
