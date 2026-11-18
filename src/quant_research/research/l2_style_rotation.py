@@ -126,10 +126,7 @@ def _rolling_available(availability: pd.DataFrame, symbols: tuple[str, ...],
         maxima = np.lib.stride_tricks.sliding_window_view(
             np.where(complete, raw, np.iinfo(np.int64).min), count
         ).max(axis=1)
-        valid = np.convolve(
-            complete.astype(np.int16), np.ones(count, dtype=np.int16),
-            mode="valid"
-        ).eq(count) if hasattr(np.ndarray, "eq") else (
+        valid = (
             np.convolve(complete.astype(np.int16),
                         np.ones(count, dtype=np.int16), mode="valid") == count
         )
