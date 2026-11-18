@@ -239,6 +239,17 @@ def latest_forward_research(root, *, limit=5):
                               'l2_style_binding_context_sha256':(
                                   receipt.get('context_identity_sha256')
                                   if receipt else None),
+                              'l2_style_admission_validation_identity':(
+                                  receipt.get('admission_validation_identity')
+                                  if receipt else None),
+                              'l2_style_admission_asof_session':(
+                                  receipt.get('admission_asof_session')
+                                  if receipt else None),
+                              'l2_style_context_modes':(
+                                  receipt.get('context_modes') if receipt else []),
+                              'l2_style_current_forward_session':(
+                                  receipt.get('current_forward_session')
+                                  if receipt else None),
                               'l2_style_binding_start_session':(
                                   receipt.get('start_session') if receipt else None),
                               'l2_style_binding_end_session':(
