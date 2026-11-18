@@ -89,7 +89,7 @@ function forecastView(result,validation){
   evidence='<details class="l2-method"><summary>样本外验证 · '+e(styleName(state.l2Style))+'</summary>'+
    '<div class="l2-validation"><span>OOS '+n(v?.summary?.oos_validated_units||0,0)+' / '+n(v?.summary?.total_units||21,0)+'</span><span>真实前向 '+n(v?.summary?.genuine_forward_units||0,0)+'</span><span>ADMITTED '+n(v?.summary?.model_admitted_units||0,0)+'</span><span>'+e(v?.probability_calibration_status||'CONTINUOUS_RETURN_ONLY')+'</span></div>'+
    '<div class="l2-validation-scroll"><table class="l2-table l2-validation-table"><thead><tr><th>期限</th><th>资格</th><th>MSE 改善</th><th>方向</th><th>Rank IC</th><th>前向日</th><th>阻断</th></tr></thead><tbody>'+selected+'</tbody></table></div>'+
-   '<p>预测值是相对基准的连续收益研究估计，不是概率、胜率或交易目标。</p></details>';
+   '<p>预测值是相对基准的连续收益研究估计，不是概率或交易目标。</p></details>';
  }else{
   evidence='<details class="l2-method"><summary>样本外验证</summary><div class="l2-validation"><span>暂无冻结 P5 验证报告</span><span>'+e(v?.code||validation?.error?.message||'L2_P5_VALIDATION_REPORT_NOT_FOUND')+'</span></div></details>';
  }
