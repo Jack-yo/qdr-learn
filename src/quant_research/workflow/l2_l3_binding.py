@@ -250,3 +250,44 @@ def verify_l2_style_history_binding(
     if _canonical(actual) != _canonical(supplied):
         raise ValueError("L3_L2_STYLE_BINDING_RECEIPT_MISMATCH")
     return actual
+
+
+def main(argv=None):
+    """Build one audited receipt for an existing market_style file; no bundle mutation."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Audit L2 MODEL_ADMITTED history against V4 market_style; no model fit"
+    )
+    parser.add_argument("--root", type=Path, default=Path.cwd())
+    parser.add_argument("--market-style", type=Path, required=True)
+    parser.add_argument(
+        "--output", type=Path, default=None,
+        help="Optional new JSON receipt path; existing files are never overwritten",
+    )
+    args = parser.parse_args(argv)
+    path = args.market_style
+    if not path.is_file():
+        parser.error("market_style file does not exist")
+    if path.suffix.lower() == ".parquet":
+        frame = pd.read_parquet(path)
+    elif path.suffix.lower() == ".csv":
+        frame = pd.read_csv(path)
+    else:
+        parser.error("market_style must be Parquet or CSV")
+    receipt = build_l2_style_history_binding(args.root, frame)
+    encoded = json.dumps(
+        receipt, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False
+    )
+    if args.output is not None:
+        output = args.output.resolve()
+        if output.exists():
+            raise FileExistsError("L2_L3_BINDING_RECEIPT_ALREADY_EXISTS")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(encoded, encoding="utf-8")
+    print(encoded)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
