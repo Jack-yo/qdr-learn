@@ -42,7 +42,11 @@ def main(argv=None):
     args=parser.parse_args(argv)
     result=freeze_current_forecast(args.root,asof=args.date)
     print(json.dumps(result,ensure_ascii=False,indent=2,allow_nan=False))
-    return 0 if result["status"]=="FROZEN_L2_RESEARCH_ONLY" else 4
+    return 0 if result["status"] in {
+        "FROZEN_L2_FORWARD_RESEARCH_ONLY",
+        "FROZEN_L2_RETROSPECTIVE_ASOF_ONLY",
+        "FROZEN_L2_RESEARCH_ONLY",
+    } else 4
 
 
 if __name__=="__main__":
