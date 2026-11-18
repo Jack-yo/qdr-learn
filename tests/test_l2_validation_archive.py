@@ -7,6 +7,7 @@ from quant_research.research.l2_forecast import HORIZONS, STYLE_IDS
 from quant_research.research.l2_validation_archive import (
     freeze_validation_report_v1,
     load_latest_validation_v1,
+    load_validation_on_or_before_v1,
 )
 
 
@@ -87,3 +88,29 @@ def test_validation_archive_rejects_non_21_unit_report(tmp_path):
     report["qualification"] = report["qualification"][:-1]
     with pytest.raises(ValueError, match="7x3"):
         freeze_validation_report_v1(tmp_path, report)
+
+
+def test_validation_archive_rejects_forged_admission_when_switch_disabled(tmp_path):
+    report = _report()
+    report["qualification"][0].update({
+        "qualification_status": "MODEL_ADMITTED",
+        "model_admitted": True,
+        "oos_gate_passed": True,
+        "forward_gate_passed": True,
+    })
+    report["summary"]["model_admitted_units"] = 1
+    report["summary"]["model_admission_enabled"] = False
+    with pytest.raises(ValueError, match="switch is disabled"):
+        freeze_validation_report_v1(tmp_path, report)
+
+
+def test_on_or_before_loader_never_reads_future_validation(tmp_path):
+    first = freeze_validation_report_v1(tmp_path, _report("2026-01-10"))
+    second = freeze_validation_report_v1(tmp_path, _report("2026-01-20"))
+    third = freeze_validation_report_v1(tmp_path, _report("2026-02-02"))
+    picked = load_validation_on_or_before_v1(tmp_path, "2026-01-25")
+    assert picked["identity"] == second["identity"]
+    assert picked["asof_session"] == "2026-01-20"
+    assert picked["identity"] != third["identity"]
+    picked_early = load_validation_on_or_before_v1(tmp_path, "2026-01-10")
+    assert picked_early["identity"] == first["identity"]
