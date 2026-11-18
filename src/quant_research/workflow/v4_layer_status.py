@@ -155,6 +155,22 @@ def four_layer_status(root: Path, *, asof: str | None = None,
             l3_record.get("l2_style_binding_context_sha256")
             if l3_record else None
         ),
+        "style_admission_validation_identity": (
+            l3_record.get("l2_style_admission_validation_identity")
+            if l3_record else None
+        ),
+        "style_admission_asof_session": (
+            l3_record.get("l2_style_admission_asof_session")
+            if l3_record else None
+        ),
+        "style_context_modes": (
+            l3_record.get("l2_style_context_modes") or []
+            if l3_record else []
+        ),
+        "style_current_forward_session": (
+            l3_record.get("l2_style_current_forward_session")
+            if l3_record else None
+        ),
         "style_binding_start_session": (
             l3_record.get("l2_style_binding_start_session")
             if l3_record else None
@@ -242,6 +258,18 @@ def four_layer_status(root: Path, *, asof: str | None = None,
             or l2.get("model_version") not in l3.get("style_binding_model_versions", [])
         ):
             blockers.append("L3_L2_MODEL_VERSION_BINDING_MISMATCH")
+        if (
+            not l2.get("validation_identity")
+            or l3.get("style_admission_validation_identity")
+                != l2.get("validation_identity")
+        ):
+            blockers.append("L3_L2_VALIDATION_IDENTITY_BINDING_MISMATCH")
+        if (
+            l3.get("style_current_forward_session") != target_asof
+            or "CURRENT_FROZEN_FORWARD"
+                not in l3.get("style_context_modes", [])
+        ):
+            blockers.append("L3_L2_CURRENT_FORWARD_BINDING_MISMATCH")
         if (
             not l2.get("label_bundle_sha256")
             or l2.get("label_bundle_sha256")
