@@ -51,8 +51,8 @@ def validate_l2_style_binding_receipt(receipt: dict) -> dict:
     base_required = {
         "contract_version", "scope", "start_session", "end_session", "rows",
         "style_columns", "context_identity_sha256", "model_versions",
-        "label_bundle_sha256s", "feature_bundle_sha256s",
-        "source_snapshot_sha256s", "binding_verified", "historical_pit_attested",
+        "label_bundle_sha256s", "source_snapshot_sha256s",
+        "binding_verified", "historical_pit_attested",
         "decision_eligible", "real_orders_enabled",
     }
     if not isinstance(receipt, dict) or base_required - set(receipt):
@@ -62,11 +62,17 @@ def validate_l2_style_binding_receipt(receipt: dict) -> dict:
     if version==_LEGACY_CONTRACT_VERSION:
         if scope!=_LEGACY_SCOPE:
             raise ValueError("L3_L2_STYLE_BINDING_RECEIPT_VERSION_INVALID")
-        required=base_required
+        # V1 predates the independent feature-bundle provenance field.
+        # Preserve it when present so old archive identities still verify,
+        # but do not require or synthesize it.
+        required=base_required|{
+            "feature_bundle_sha256s"
+        } if "feature_bundle_sha256s" in receipt else base_required
     elif version==CONTRACT_VERSION:
         if scope!=_SCOPE:
             raise ValueError("L3_L2_STYLE_BINDING_RECEIPT_VERSION_INVALID")
         required=base_required|{
+            "feature_bundle_sha256s",
             "context_modes", "admission_asof_session",
             "admission_validation_identity", "admission_frozen_at_utc",
             "current_forward_session",
@@ -102,10 +108,12 @@ def validate_l2_style_binding_receipt(receipt: dict) -> dict:
         raise ValueError("L3_L2_STYLE_BINDING_COLUMNS_INVALID")
     if not _SHA.fullmatch(str(receipt["context_identity_sha256"])):
         raise ValueError("L3_L2_STYLE_BINDING_IDENTITY_INVALID")
-    for field in (
-        "model_versions", "label_bundle_sha256s", "feature_bundle_sha256s",
-        "source_snapshot_sha256s"
-    ):
+    provenance_fields=[
+        "model_versions", "label_bundle_sha256s", "source_snapshot_sha256s"
+    ]
+    if "feature_bundle_sha256s" in receipt:
+        provenance_fields.append("feature_bundle_sha256s")
+    for field in provenance_fields:
         values = receipt[field]
         if not isinstance(values, list) or not values or values != sorted(set(values)):
             raise ValueError("L3_L2_STYLE_BINDING_PROVENANCE_INVALID")
@@ -113,7 +121,13 @@ def validate_l2_style_binding_receipt(receipt: dict) -> dict:
         raise ValueError("L3_L2_STYLE_BINDING_MODEL_VERSION_INVALID")
     if any(not _SHA.fullmatch(str(x)) for x in receipt["label_bundle_sha256s"]):
         raise ValueError("L3_L2_STYLE_BINDING_LABEL_SHA_INVALID")
-    if any(not _SHA.fullmatch(str(x)) for x in receipt["feature_bundle_sha256s"]):
+    if (
+        "feature_bundle_sha256s" in receipt
+        and any(
+            not _SHA.fullmatch(str(x))
+            for x in receipt["feature_bundle_sha256s"]
+        )
+    ):
         raise ValueError("L3_L2_STYLE_BINDING_FEATURE_SHA_INVALID")
     if any(not _SHA.fullmatch(str(x)) for x in receipt["source_snapshot_sha256s"]):
         raise ValueError("L3_L2_STYLE_BINDING_SOURCE_SHA_INVALID")
