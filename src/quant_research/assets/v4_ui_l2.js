@@ -48,14 +48,52 @@ function turns(rotation){
 function forecastView(result,validation){
  const d=result?.ok?result.data:null,v=validation?.ok?validation.data:null;
  if(!d||d.status==='BLOCKED'){
-  return '<div class="l2-forecast-empty"><b>领先预测待验证</b><span>当前不展示未通过数据和样本外验证的 H1 / H3 / H5 预测。</span><details><summary>查看阻断原因</summary><code>'+e(d?.code||result?.error?.message||'EVIDENCE_REQUIRED')+'</code></details></div>';
+  return '<div class="l2-forecast-empty"><b>领先预测待验证</b><span>当前不展示缺少合格标签或训练证据的 H1 / H3 / H5 结果。</span><details><summary>查看阻断原因</summary><code>'+e(d?.code||result?.error?.message||'EVIDENCE_REQUIRED')+'</code></details></div>';
  }
- const rows=Array.isArray(d.forecasts)?d.forecasts.filter(x=>x.forecast_status==='RESEARCH_ONLY'):[];
+ const rows=Array.isArray(d.forecasts)?d.forecasts:[];
+ const qualification=Array.isArray(v?.qualification)?v.qualification:[];
+ const oos=Array.isArray(v?.oos_validation)?v.oos_validation:[];
+ const forward=Array.isArray(v?.forward_validation)?v.forward_validation:[];
+ const key=(style,h)=>style+'::'+Number(h);
+ const qmap=new Map(qualification.map(x=>[key(x.style_id,x.horizon),x]));
+ const omap=new Map(oos.map(x=>[key(x.style_id,x.horizon),x]));
+ const fmap=new Map(forward.map(x=>[key(x.style_id,x.horizon),x]));
  const grouped=new Map();
- rows.forEach(x=>{if(!grouped.has(x.style_id))grouped.set(x.style_id,{});grouped.get(x.style_id)[x.horizon]=x;});
- const body=[...grouped.entries()].map(([id,h])=>'<tr><td><b>'+e(styleName(id))+'</b></td>'+[1,3,5].map(k=>'<td class="'+(finite(h[k]?.predicted_relative_return)?Number(h[k].predicted_relative_return)>0?'is-up':'is-down':'')+'">'+(finite(h[k]?.predicted_relative_return)?signed(h[k].predicted_relative_return):'—')+'</td>').join('')+'</tr>').join('');
- return '<table class="l2-table"><thead><tr><th>风格</th><th>H1</th><th>H3</th><th>H5</th></tr></thead><tbody>'+body+'</tbody></table>'+
- '<details class="l2-method"><summary>验证摘要</summary><div class="l2-validation"><span>状态 '+e(v?.status||'—')+'</span><span>OOS '+n(v?.summary?.oos_validated_units||0,0)+'</span><span>前向 '+n(v?.summary?.genuine_forward_units||0,0)+'</span></div></details>';
+ rows.forEach(x=>{if(!grouped.has(x.style_id))grouped.set(x.style_id,{});grouped.get(x.style_id)[Number(x.horizon)]=x;});
+ const qualText=q=>{
+  const status=q?.qualification_status;
+  return status==='MODEL_ADMITTED'?'ADMITTED':status==='OOS_VALIDATED'?'OOS':'研究';
+ };
+ const cell=(id,h)=>{
+  const x=grouped.get(id)?.[h],q=qmap.get(key(id,h));
+  if(!x)return '<td>—</td>';
+  if(x.forecast_status!=='RESEARCH_ONLY'||!finite(x.predicted_relative_return)){
+   return '<td><span class="l2-cell-blocked" title="'+e(x.block_reason||'BLOCKED')+'">BLOCKED</span></td>';
+  }
+  const cls=Number(x.predicted_relative_return)>0?'is-up':Number(x.predicted_relative_return)<0?'is-down':'';
+  const qclass=q?.qualification_status==='MODEL_ADMITTED'?'admitted':q?.qualification_status==='OOS_VALIDATED'?'oos':'research';
+  return '<td class="l2-forecast-cell '+cls+'"><b>'+signed(x.predicted_relative_return)+'</b><small class="'+qclass+'">'+e(qualText(q))+'</small></td>';
+ };
+ const body=[...grouped.keys()].map(id=>'<tr data-l2-style="'+e(id)+'" class="'+(state.l2Style===id?'selected':'')+'"><td><b>'+e(styleName(id))+'</b></td>'+[1,3,5].map(h=>cell(id,h)).join('')+'</tr>').join('');
+ let evidence='';
+ if(v?.status==='P5_RESEARCH_VALIDATION'){
+  const selected=[1,3,5].map(h=>{
+   const q=qmap.get(key(state.l2Style,h))||{},o=omap.get(key(state.l2Style,h))||{},fw=fmap.get(key(state.l2Style,h))||{};
+   const gain=finite(o.relative_mse_gain_vs_best_baseline)?signed(o.relative_mse_gain_vs_best_baseline):'—';
+   const direction=finite(o.directional_accuracy)?(Number(o.directional_accuracy)*100).toFixed(1)+'%':'—';
+   const rank=finite(o.rank_ic)?n(o.rank_ic,3):'—';
+   const fwd=finite(fw.genuine_forward_sessions)?n(fw.genuine_forward_sessions,0):'0';
+   const reasons=Array.isArray(q.reasons)?q.reasons:[];
+   return '<tr><td>H'+h+'</td><td>'+e(q.qualification_status||'RESEARCH_ONLY')+'</td><td>'+gain+'</td><td>'+direction+'</td><td>'+rank+'</td><td>'+fwd+'</td><td class="l2-reason">'+e(reasons.join(' · ')||'—')+'</td></tr>';
+  }).join('');
+  evidence='<details class="l2-method"><summary>样本外验证 · '+e(styleName(state.l2Style))+'</summary>'+
+   '<div class="l2-validation"><span>OOS '+n(v?.summary?.oos_validated_units||0,0)+' / '+n(v?.summary?.total_units||21,0)+'</span><span>真实前向 '+n(v?.summary?.genuine_forward_units||0,0)+'</span><span>ADMITTED '+n(v?.summary?.model_admitted_units||0,0)+'</span><span>'+e(v?.probability_calibration_status||'CONTINUOUS_RETURN_ONLY')+'</span></div>'+
+   '<div class="l2-validation-scroll"><table class="l2-table l2-validation-table"><thead><tr><th>期限</th><th>资格</th><th>MSE 改善</th><th>方向</th><th>Rank IC</th><th>前向日</th><th>阻断</th></tr></thead><tbody>'+selected+'</tbody></table></div>'+
+   '<p>预测值是相对基准的连续收益研究估计，不是概率、胜率或交易目标。</p></details>';
+ }else{
+  evidence='<details class="l2-method"><summary>样本外验证</summary><div class="l2-validation"><span>暂无冻结 P5 验证报告</span><span>'+e(v?.code||validation?.error?.message||'L2_P5_VALIDATION_REPORT_NOT_FOUND')+'</span></div></details>';
+ }
+ return '<table class="l2-table l2-forecast-table"><thead><tr><th>风格</th><th>H1</th><th>H3</th><th>H5</th></tr></thead><tbody>'+body+'</tbody></table>'+evidence;
 }
 function evidenceView(data,french){
  const coverage=data?.coverage||{},latest=Array.isArray(french?.latest)?french.latest:[];
@@ -80,7 +118,7 @@ pages.style=async()=>{
  else if(state.l2Tab==='forecast'){
   const q=state.l2AsOf?'?asof='+encodeURIComponent(state.l2AsOf):'';
   const [forecast,validation]=await Promise.all([settle('/api/v1/l2/styles/forecast'+q),settle('/api/v1/l2/styles/validation'+q)]);
-  body='<section class="l2-section"><div class="l2-section-head"><h2>H1 / H3 / H5 领先预测</h2><span>仅显示通过研究门禁的结果</span></div>'+forecastView(forecast,validation)+'</section>';
+  body='<section class="l2-section"><div class="l2-section-head"><h2>H1 / H3 / H5 领先预测</h2><span>研究预测 · 资格独立显示</span></div>'+forecastView(forecast,validation)+'</section>';
  }else if(state.l2Tab==='evidence'){
   const french=await settle('/api/v1/styles?mode=observation');
   body='<section class="l2-section"><div class="l2-section-head"><h2>方法与证据</h2><span>默认不占据决策视图</span></div>'+evidenceView(data,french?.ok?french.data:null)+'</section>';
