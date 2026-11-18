@@ -336,7 +336,7 @@ class LiveSources:
         if not key or not secret:raise SourceUnavailable('MISSING_ALPACA_CREDENTIALS')
         feed=self.env.get('QDR_L1_FEED','delayed_sip').lower()
         if feed not in {'delayed_sip','sip','iex'}:raise SourceUnavailable('INVALID_FEED')
-        symbols=tuple(symbols or self.ETF_SYMBOLS)
+        symbols=tuple(sorted({str(x).upper() for x in (symbols or self.ETF_SYMBOLS)}))
         if not symbols or len(symbols)>500:
             raise SourceUnavailable('INVALID_SNAPSHOT_SYMBOLS')
         params={'symbols':','.join(sorted(set(symbols))),'feed':feed}
@@ -351,10 +351,29 @@ class LiveSources:
             raise
         try:
             doc=json.loads(body)
-            if not isinstance(doc.get('snapshots'),dict):raise ValueError('Invalid snapshots')
-        except (ValueError,TypeError) as exc:raise SourceUnavailable('INVALID_ALPACA_SNAPSHOTS') from exc
-        return doc['snapshots'],{'fetched_at':stamp,'sha256':digest,'source':'ALPACA_'+feed,
-                                 'scope':'LAST_TRADE_LEVEL1_QUOTE_NOT_FULL_DEPTH'}
+            if not isinstance(doc,dict):
+                raise ValueError('Invalid snapshots response')
+            if isinstance(doc.get('snapshots'),dict):
+                payload=doc['snapshots']
+                response_shape='SNAPSHOTS_ENVELOPE'
+            else:
+                # Alpaca's stock snapshot endpoint may return a top-level
+                # {symbol: snapshot} map. Accept only symbols explicitly asked
+                # for; do not mistake metadata keys for instruments.
+                payload={symbol:doc[symbol] for symbol in symbols
+                         if isinstance(doc.get(symbol),dict)}
+                response_shape='TOP_LEVEL_SYMBOL_MAP'
+            payload={str(symbol).upper():value for symbol,value in payload.items()
+                     if str(symbol).upper() in set(symbols) and isinstance(value,dict)}
+            if not payload:
+                raise ValueError('No requested symbol snapshots')
+        except (ValueError,TypeError) as exc:
+            raise SourceUnavailable('INVALID_ALPACA_SNAPSHOTS') from exc
+        return payload,{'fetched_at':stamp,'sha256':digest,'source':'ALPACA_'+feed,
+                        'scope':'LAST_TRADE_LEVEL1_QUOTE_NOT_FULL_DEPTH',
+                        'response_shape':response_shape,
+                        'requested_symbols':len(set(symbols)),
+                        'returned_symbols':len(payload)}
 
     def snapshots_for_symbols(self, symbols, *, refresh=False, batch_size=200, max_workers=4):
         """Fetch current snapshots in bounded batches; return partial coverage explicitly."""

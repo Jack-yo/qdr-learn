@@ -10,8 +10,10 @@ from quant_research.research.l1_market_features import (
 
 def sample_market(n=280, members=40):
     days = pd.bdate_range("2025-01-02", periods=n)
-    symbols = ["SPY", "XLB", "XLC", "XLE", "XLF", "XLI", "XLK",
-               "XLP", "XLRE", "XLU", "XLV", "XLY", "IWM", "IWB"] + [
+    symbols = ["SPY", "QQQ", "IWM", "RSP", "HYG", "LQD", "TLT", "SHY",
+               "XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE",
+               "XLU", "XLV", "XLY", "IWB", "IWD", "IWF", "MTUM", "QUAL",
+               "USMV", "VLUE", "VTV", "VUG"] + [
                    f"STK{i:03d}" for i in range(members)]
     bars, universe = [], []
     for j, symbol in enumerate(symbols):
@@ -45,7 +47,16 @@ def test_market_engine_computes_price_volatility_and_sector_features():
     result = compute_l1_market_features(bars, cutoffs)
     values = result["observations"]
     latest = values.loc[values.session_date.eq(cutoffs.session_date.iloc[-1].date().isoformat())]
-    assert {"spy_return_5","rv20","downside_rv20","sector_dispersion_5"} <= set(latest.feature_id)
+    assert {"spy_return_5","rv20","downside_rv20","sector_dispersion_5",
+            "sector_dispersion_1","sector_up_share_1","breadth_proxy_rsp_spy_5",
+            "small_cap_relative_5","credit_proxy_hyg_lqd_5","duration_proxy_5",
+            "overnight","intraday","close_location","vol_ratio"} <= set(latest.feature_id)
+    by_feature = latest.set_index("feature_id")
+    assert by_feature.loc["close_location","value"] == pytest.approx(0.5)
+    assert by_feature.loc["sector_up_share_1","value"] >= 0
+    assert by_feature.loc["sector_up_share_1","value"] <= 100
+    assert by_feature.loc["breadth_proxy_rsp_spy_5","pit_status"] == "ETF_PROXY_NOT_FULL_MARKET_PIT"
+    assert by_feature.loc["credit_proxy_hyg_lqd_5","metadata"]["proxy"] is True
     assert result["policy"]["forecast_eligible"] is False
     assert not result["security_features"].empty
 

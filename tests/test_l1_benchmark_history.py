@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import hashlib
 
 import pytest
+import pandas as pd
 
 from quant_research.clock import TradingClock
 from quant_research.data.l1_light_sources import SourceUnavailable
@@ -134,6 +135,70 @@ def test_second_sync_is_incremental_with_small_overlap(tmp_path):
     assert len(source.bar_calls) == 2
     assert source.bar_calls[1]["days"] <= 20
     assert second["bars"]["coverage"]["coverage_pct"] >= 99.5
+    assert second["bars"]["rows_written"] == 0
+    assert second["bars"]["rows_unchanged"] == second["bars"]["rows_received"]
+    assert second["bars"]["rows_revised"] == 0
+    from quant_research.data.l1_market_store import L1MarketStore
+    with L1MarketStore(tmp_path) as store:
+        duplicate_groups=store.conn.execute(
+            """SELECT COUNT(*) FROM (
+                SELECT session_date,security_id,provider,price_basis
+                FROM l1_market_bars
+                GROUP BY session_date,security_id,provider,price_basis
+                HAVING COUNT(*)>1
+            ) AS duplicates"""
+        ).fetchone()[0]
+        assert duplicate_groups == 0
+
+
+def test_corrected_overlap_bar_is_appended_as_revision_not_suppressed(tmp_path):
+    pytest.importorskip("duckdb")
+
+    class CorrectingSources(FakeSources):
+        def __init__(self):
+            super().__init__()
+            self.correct_latest_spy = False
+
+        def bars(self, **kwargs):
+            raw, receipts = super().bars(**kwargs)
+            if self.correct_latest_spy:
+                latest = raw["SPY"][-1]
+                latest["c"] += 0.25
+                latest["h"] = max(latest["h"], latest["c"] + 0.1)
+                receipts[0]["sha256"] = _digest(receipts[0]["sha256"] + ":corrected")
+            return raw, receipts
+
+    source=CorrectingSources()
+    now=datetime(2026,11,17,23,tzinfo=timezone.utc)
+    first=sync_benchmark_history(
+        tmp_path,years=3,sources=source,include_macro=False,now=now,history_feed="iex")
+    source.correct_latest_spy=True
+    second=sync_benchmark_history(
+        tmp_path,years=3,sources=source,include_macro=False,now=now,history_feed="iex")
+
+    assert first["bars"]["mode"]=="BOOTSTRAP"
+    assert second["bars"]["mode"]=="INCREMENTAL"
+    assert second["bars"]["rows_written"]==1
+    assert second["bars"]["rows_revised"]==1
+    assert second["bars"]["rows_new"]==0
+    assert second["bars"]["rows_unchanged"]==second["bars"]["rows_received"]-1
+
+    from quant_research.data.l1_market_store import L1MarketStore
+    with L1MarketStore(tmp_path) as store:
+        latest=store.read_bars(end=second["asof_session"],symbols=["SPY"])
+        latest=latest.loc[latest.provider.eq(BAR_PROVIDER)].iloc[-1]
+        start=source.bar_calls[0]["start_date"]
+        session_count=len([
+            x for x in TradingClock().calendar.sessions
+            if start<=x.date().isoformat()<=second["asof_session"]
+        ])
+        original_close=100.0+BENCHMARK_SYMBOLS.index("SPY")+(session_count-1)*0.01
+        assert latest.close==pytest.approx(original_close+0.25)
+        revision_count=store.conn.execute(
+            """SELECT COUNT(*) FROM l1_market_bars
+               WHERE symbol='SPY' AND provider=? AND session_date=?""",
+            [BAR_PROVIDER,second["asof_session"]]).fetchone()[0]
+        assert revision_count==2
 
 
 def test_incremental_sync_repairs_old_historical_gap(tmp_path):
@@ -162,6 +227,9 @@ def test_incremental_sync_repairs_old_historical_gap(tmp_path):
     assert repaired["bars"]["repairing_gap_from"] == gap_day
     assert repaired["bars"]["request_start"] <= gap_day
     assert repaired["bars"]["coverage"]["coverage_pct"] >= 99.5
+    assert repaired["bars"]["rows_written"] == 1
+    assert repaired["bars"]["rows_revised"] == 0
+    assert repaired["bars"]["rows_unchanged"] == repaired["bars"]["rows_received"] - 1
 
 
 def test_macro_history_is_current_download_not_historical_pit(tmp_path):
@@ -184,8 +252,8 @@ def test_macro_history_is_current_download_not_historical_pit(tmp_path):
         assert not refs.empty
         assert refs.pit_status.eq(
             "CURRENT_VINTAGE_NOT_HISTORICAL_PIT").all()
-        assert refs.available_at.astype(str).str.startswith(
-            "2026-11-17 23:00:00").all()
+        available_utc=pd.to_datetime(refs.available_at,utc=True)
+        assert (available_utc==pd.Timestamp("2026-11-17T23:00:00Z")).all()
         # Reference history is intentionally isolated from live observation
         # coverage and cannot silently become a model input.
         obs = store.read_observations()
