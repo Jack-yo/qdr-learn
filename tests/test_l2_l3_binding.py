@@ -18,6 +18,11 @@ class Clock:
     def signal(self, day):
         return pd.Timestamp(str(day)[:10] + "T21:15:00Z")
 
+    def window(self, day, horizon):
+        class Window:
+            entry_time = pd.Timestamp(str(day)[:10] + "T23:30:00Z")
+        return Window()
+
 
 def _context(day):
     date = str(pd.Timestamp(day).date())
@@ -40,6 +45,7 @@ def _context(day):
         "asof_session": date,
         "forecast_identity": ("a" if date.endswith("29") else "b") * 64,
         "validation_identity": "c" * 64,
+        "forecast_frozen_at_utc": date + "T21:16:00Z",
         "model_version": "ridge-v1",
         "label_bundle_sha256": "d" * 64,
         "feature_bundle_sha256": "9" * 64,
@@ -54,14 +60,14 @@ def _market_style():
     return pd.DataFrame([
         {
             "date": DATES[0],
-            "state_available_at": "2026-01-29T21:10:00Z",
+            "state_available_at": "2026-01-29T21:20:00Z",
             style_column("size", 3): 0.003,
             style_column("quality", 3): 0.002,
             "market_return_5": 0.01,
         },
         {
             "date": DATES[1],
-            "state_available_at": "2026-01-30T21:10:00Z",
+            "state_available_at": "2026-01-30T21:20:00Z",
             style_column("size", 3): 0.004,
             style_column("quality", 3): 0.0025,
             "market_return_5": 0.02,
@@ -155,3 +161,14 @@ def test_structural_receipt_cannot_claim_execution():
     receipt["real_orders_enabled"] = True
     with pytest.raises(ValueError, match="CANNOT_ENABLE_EXECUTION"):
         validate_l2_style_binding_receipt(receipt)
+
+
+def test_market_style_cannot_claim_l2_value_before_forecast_was_frozen():
+    frame = _market_style()
+    frame.loc[0, "state_available_at"] = "2026-01-29T21:15:30Z"
+    with pytest.raises(ValueError, match="AVAILABLE_BEFORE_L2_FREEZE"):
+        build_l2_style_history_binding(
+            ".", frame,
+            downstream_builder=lambda root, asof=None: _context(asof),
+            clock=Clock(),
+        )
