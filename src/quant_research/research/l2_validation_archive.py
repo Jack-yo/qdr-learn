@@ -105,3 +105,33 @@ def load_latest_validation_v1(root: Path, *, asof: str | None = None) -> dict:
         if candidates:
             return max(candidates, key=lambda item: item["frozen_at_utc"])
     raise FileNotFoundError("L2_P5_VALIDATION_REPORT_NOT_FOUND")
+
+
+def load_validation_on_or_before_v1(root: Path, asof: str) -> dict:
+    """Load newest integrity-checked report whose session is <= requested date."""
+    requested = date.fromisoformat(asof)
+    if requested.isoformat() != asof:
+        raise ValueError("Invalid P5 downstream asof session")
+    base = Path(root).resolve() / "outputs/l2_validation"
+    if not base.is_dir():
+        raise FileNotFoundError("L2_P5_VALIDATION_REPORT_NOT_FOUND")
+    sessions = []
+    for folder in base.iterdir():
+        if not folder.is_dir():
+            continue
+        try:
+            session = date.fromisoformat(folder.name)
+        except ValueError:
+            continue
+        if session.isoformat() == folder.name and session <= requested:
+            sessions.append(folder.name)
+    for session in sorted(sessions, reverse=True):
+        folder = base / session
+        candidates = []
+        for identity_dir in folder.iterdir():
+            path = identity_dir / "manifest.json"
+            if path.is_file():
+                candidates.append(_verify(path))
+        if candidates:
+            return max(candidates, key=lambda item: item["frozen_at_utc"])
+    raise FileNotFoundError("L2_P5_VALIDATION_REPORT_NOT_FOUND")
