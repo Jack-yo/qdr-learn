@@ -32,6 +32,9 @@ def _report(asof="2026-01-30"):
         "source_snapshot_sha256": "a" * 64,
         "label_bundle_sha256": "b" * 64,
         "label_bundle_id": "accepted-v1",
+        "feature_bundle_sha256": "c" * 64,
+        "feature_bundle_id": "features-v1",
+        "historical_feature_pit_attested": True,
         "model_version": "ridge-v1",
         "summary": {
             "oos_validated_units": 21,
@@ -114,3 +117,30 @@ def test_on_or_before_loader_never_reads_future_validation(tmp_path):
     assert picked["identity"] != third["identity"]
     picked_early = load_validation_on_or_before_v1(tmp_path, "2026-01-10")
     assert picked_early["identity"] == first["identity"]
+
+
+def test_new_validation_report_requires_feature_bundle_evidence(tmp_path):
+    report=_report()
+    report.pop("feature_bundle_sha256")
+    with pytest.raises(ValueError,match="feature_bundle_sha256"):
+        freeze_validation_report_v1(tmp_path,report)
+
+
+def test_legacy_report_without_feature_evidence_is_readable_but_not_attested(tmp_path):
+    # Construct a legacy artifact directly to verify backward-compatible read.
+    from quant_research.research import l2_validation_archive as archive
+    report=_report()
+    report.pop("feature_bundle_sha256")
+    report.pop("feature_bundle_id")
+    report.pop("historical_feature_pit_attested")
+    payload={**report,"schema":archive.SCHEMA}
+    identity=archive._identity(payload)
+    folder=tmp_path/"outputs/l2_validation/2026-01-30"/identity
+    folder.mkdir(parents=True)
+    (folder/"manifest.json").write_text(json.dumps({
+        **payload,"identity":identity,
+        "frozen_at_utc":"2026-01-31T00:00:00+00:00",
+    }),encoding="utf-8")
+    loaded=load_latest_validation_v1(tmp_path,asof="2026-01-30")
+    assert loaded["historical_feature_pit_attested"] is False
+    assert loaded["legacy_feature_evidence_missing"] is True
