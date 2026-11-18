@@ -20,6 +20,7 @@ def _receipt():
         ],
         "admission_asof_session": "2026-01-30",
         "admission_validation_identity": "2" * 64,
+        "admission_frozen_at_utc": "2026-01-31T01:00:00Z",
         "current_forward_session": "2026-02-05",
         "historical_replay_rows": 274,
         "current_forward_rows": 1,
