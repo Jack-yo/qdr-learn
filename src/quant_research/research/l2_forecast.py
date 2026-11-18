@@ -182,7 +182,8 @@ def _blocked_row(style_id: str, horizon: int, asof: pd.Timestamp, signal_time,
 
 def forecast_asof_v1(observations: pd.DataFrame, labels: pd.DataFrame,
                      exchange_sessions, asof, trading_clock, *,
-                     config: ForecastConfig | None = None) -> pd.DataFrame:
+                     config: ForecastConfig | None = None,
+                     feature_columns: tuple[str, ...] | None = None) -> pd.DataFrame:
     """Fit 21 independent research models and predict one completed signal date.
 
     Every style/horizon produces a row. Missing evidence becomes BLOCKED rather
@@ -190,6 +191,9 @@ def forecast_asof_v1(observations: pd.DataFrame, labels: pd.DataFrame,
     """
     config = config or ForecastConfig()
     config.validate()
+    features = tuple(feature_columns or FEATURES)
+    if not features or len(set(features)) != len(features) or not set(features).issubset(FEATURES):
+        raise ValueError("Invalid L2 forecast feature subset")
     obs = _prepare_observations(observations)
     lab = validate_forward_labels_v1(labels, trading_clock)
     sessions = _normalize_sessions(exchange_sessions)
@@ -229,7 +233,7 @@ def forecast_asof_v1(observations: pd.DataFrame, labels: pd.DataFrame,
                     style_id, horizon, day, signal_time, "CURRENT_OBSERVATION_AVAILABLE_AFTER_SIGNAL"
                 ))
                 continue
-            if current.loc[list(FEATURES)].isna().any():
+            if current.loc[list(features)].isna().any():
                 rows.append(_blocked_row(
                     style_id, horizon, day, signal_time, "INCOMPLETE_CURRENT_FEATURE_VECTOR"
                 ))
@@ -248,7 +252,7 @@ def forecast_asof_v1(observations: pd.DataFrame, labels: pd.DataFrame,
             evidence = evidence.loc[
                 evidence.available_at.notna()
                 & evidence.available_at.le(evidence.signal_time)
-            ].dropna(subset=[*FEATURES, "forward_relative_return"])
+            ].dropna(subset=[*features, "forward_relative_return"])
             n_sessions = int(evidence.date.nunique())
             if n_sessions < config.min_training_sessions:
                 row = _blocked_row(
@@ -266,12 +270,12 @@ def forecast_asof_v1(observations: pd.DataFrame, labels: pd.DataFrame,
                 StandardScaler(),
                 Ridge(alpha=config.ridge_alpha),
             )
-            x_train = evidence.loc[:, FEATURES]
+            x_train = evidence.loc[:, features]
             y_train = evidence.forward_relative_return.astype(float)
             pipeline.fit(x_train, y_train)
             x_now = pd.DataFrame(
-                [{feature: float(current[feature]) for feature in FEATURES}],
-                columns=FEATURES,
+                [{feature: float(current[feature]) for feature in features}],
+                columns=features,
             )
             prediction = float(pipeline.predict(x_now)[0])
             scaler = pipeline.named_steps["standardscaler"]
@@ -297,20 +301,20 @@ def forecast_asof_v1(observations: pd.DataFrame, labels: pd.DataFrame,
                 "decision_eligible": False,
                 "real_orders_enabled": False,
                 "feature_values": {
-                    feature: float(current[feature]) for feature in FEATURES
+                    feature: float(current[feature]) for feature in features
                 },
                 "standardized_coefficients": {
                     feature: float(coef)
-                    for feature, coef in zip(FEATURES, ridge.coef_, strict=True)
+                    for feature, coef in zip(features, ridge.coef_, strict=True)
                 },
                 "ridge_intercept": float(ridge.intercept_),
                 "scaler_mean": {
                     feature: float(value)
-                    for feature, value in zip(FEATURES, scaler.mean_, strict=True)
+                    for feature, value in zip(features, scaler.mean_, strict=True)
                 },
                 "scaler_scale": {
                     feature: float(value)
-                    for feature, value in zip(FEATURES, scaler.scale_, strict=True)
+                    for feature, value in zip(features, scaler.scale_, strict=True)
                 },
             })
     return pd.DataFrame(rows).sort_values(
@@ -320,7 +324,8 @@ def forecast_asof_v1(observations: pd.DataFrame, labels: pd.DataFrame,
 
 def walk_forward_oos_v1(observations: pd.DataFrame, labels: pd.DataFrame,
                         exchange_sessions, evaluation_dates, trading_clock, *,
-                        config: ForecastConfig | None = None) -> pd.DataFrame:
+                        config: ForecastConfig | None = None,
+                        feature_columns: tuple[str, ...] | None = None) -> pd.DataFrame:
     """Generate causal date-by-date research predictions and attach later outcomes."""
     config = config or ForecastConfig()
     validated = validate_forward_labels_v1(labels, trading_clock)
@@ -339,7 +344,8 @@ def walk_forward_oos_v1(observations: pd.DataFrame, labels: pd.DataFrame,
     ]]
     for day in dates:
         prediction = forecast_asof_v1(
-            observations, validated, sessions, day, trading_clock, config=config
+            observations, validated, sessions, day, trading_clock,
+            config=config, feature_columns=feature_columns
         )
         prediction = prediction.loc[prediction.forecast_status.eq("RESEARCH_ONLY")].copy()
         if prediction.empty:
