@@ -53,10 +53,15 @@ def freeze_forecast_snapshot_v1(
         raise ValueError("Invalid L2 forecast asof session") from None
     source_sha = str(forecast_payload.get("source_snapshot_sha256") or "")
     labels_sha = str(forecast_payload.get("label_bundle_sha256") or "")
+    features_sha = str(forecast_payload.get("feature_bundle_sha256") or "")
     if not re.fullmatch(r"[0-9a-f]{64}", source_sha):
         raise ValueError("L2 forecast source snapshot SHA256 is required")
     if not re.fullmatch(r"[0-9a-f]{64}", labels_sha):
         raise ValueError("L2 forecast label bundle SHA256 is required")
+    if not re.fullmatch(r"[0-9a-f]{64}", features_sha):
+        raise ValueError("L2 forecast feature bundle SHA256 is required")
+    if forecast_payload.get("historical_feature_pit_attested") is not True:
+        raise ValueError("L2 forecast historical feature PIT attestation is required")
     model_version = _safe_model(str(forecast_payload.get("model_version") or ""))
 
     rows = forecast_payload.get("forecasts")
@@ -95,6 +100,11 @@ def freeze_forecast_snapshot_v1(
         "label_bundle_id": forecast_payload.get("label_bundle_id"),
         "label_bundle_sha256": labels_sha,
         "label_source_evidence_sha256": forecast_payload.get("label_source_evidence_sha256"),
+        "feature_bundle_id": forecast_payload.get("feature_bundle_id"),
+        "feature_bundle_sha256": features_sha,
+        "feature_source_evidence_sha256": forecast_payload.get("feature_source_evidence_sha256"),
+        "feature_price_basis": forecast_payload.get("feature_price_basis"),
+        "historical_feature_pit_attested": True,
         "config": forecast_payload.get("config"),
         "eligible_units": eligible,
         "blocked_units": int(forecast_payload.get("blocked_units", 0)),
