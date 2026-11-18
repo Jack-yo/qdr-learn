@@ -188,6 +188,7 @@ def four_layer_status(root: Path, *, asof: str | None = None,
             l3_record
             and l3_record.get("status") == "VERIFIED_LOCAL_FORWARD_RESEARCH_ONLY"
             and l3_record.get("l2_style_binding_verified") is True
+            and l3_record.get("l2_style_historical_pit_attested") is True
         ),
     }
 
