@@ -179,3 +179,22 @@ def test_bound_bundle_never_overwrites_existing_output(tmp_path, monkeypatch):
             source_bundle_id="source-v1",
             output_bundle_id="existing",
         )
+
+
+def test_bound_bundle_rejects_source_whose_latest_session_is_not_requested(
+    tmp_path, monkeypatch
+):
+    _source_bundle(tmp_path)
+    with pytest.raises(
+        ValueError, match="CURRENT_SESSION_MISMATCH"
+    ):
+        v4_l2_bind_bundle.create_l2_bound_v4_bundle(
+            tmp_path,
+            source_bundle_id="source-v1",
+            output_bundle_id="source-v1-l2-wrong-day",
+            expected_current_session="2026-01-31",
+        )
+    assert not (
+        tmp_path
+        / "data/managed/v4_inputs/source-v1-l2-wrong-day"
+    ).exists()
