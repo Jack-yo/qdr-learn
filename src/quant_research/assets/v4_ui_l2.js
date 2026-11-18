@@ -145,7 +145,7 @@ function forecastResearch(result){
   return card('P4 · H1 / H3 / H5 领先预测',
     empty('预测研究被数据资格阻断',
       String(d.code||'缺少合格预测输入')+(missing.length?' · '+missing.join('；'):''))
-    +note('不会从当前版本 Yahoo 历史临时生成未来标签，也不会把轮动四象限转换成胜率。'),
+    +note('不会从当前版本 Yahoo 历史临时生成未来标签，也不会把轮动四象限转换成预测概率。'),
     'BLOCKED · '+String(d.code||'EVIDENCE_REQUIRED'));
  }
  const byStyle=new Map();
@@ -178,7 +178,7 @@ function forecastResearch(result){
  return '<div class="l2-main-grid">'+
   card('七风格 · 未来相对收益研究',
    table(['风格','H1','H3','H5','资格'],tableRows)+
-   note('数值是相对基准的研究预测收益，不是绝对收益、胜率或交易目标。'),
+   note('数值是相对基准的研究预测收益，不是绝对收益、概率或交易目标。'),
    '模型 '+String(d.model_version||'—')+' · '+String(d.status||'—'))+
   card(itemName(state.l2Style)+' · P4 预测依据',detail,
    '标签包 '+String(d.label_bundle_id||'—')+' · 合格单元 '+String(d.eligible_units??0)+' / '+String((d.eligible_units??0)+(d.blocked_units??0)))+
