@@ -42,7 +42,9 @@ def _context(day):
         "validation_identity": "c" * 64,
         "model_version": "ridge-v1",
         "label_bundle_sha256": "d" * 64,
+        "feature_bundle_sha256": "9" * 64,
         "source_snapshot_sha256": ("e" if date.endswith("29") else "f") * 64,
+        "historical_feature_pit_attested": True,
         "historical_decision_eligible": False,
         "contexts": admitted,
     }
@@ -75,7 +77,7 @@ def test_binding_receipt_binds_exact_admitted_style_values():
         clock=Clock(),
     )
     assert receipt["binding_verified"] is True
-    assert receipt["historical_pit_attested"] is False
+    assert receipt["historical_pit_attested"] is True
     assert receipt["rows"] == 2
     assert receipt["start_session"] == "2026-01-29"
     assert receipt["end_session"] == "2026-01-30"
