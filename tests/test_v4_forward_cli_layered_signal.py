@@ -165,9 +165,10 @@ oos:
         tmp_path, bundle_id="bound-v1", asof_session="2026-11-10"
     )
     assert result["status"] == "FORWARD_RESEARCH_FROZEN_ONLY"
-    assert list(seen["signal"]) == [
-        pd.Timestamp("2026-11-10T21:17:00Z").to_datetime64()
-    ]
+    assert len(seen["signal"]) == 1
+    assert pd.Timestamp(seen["signal"][0]) == pd.Timestamp(
+        "2026-11-10T21:17:00Z"
+    )
     expected = sha256(
         config_path.read_bytes()
         + v4_forward_cli.FORWARD_PROTOCOL_VERSION.encode("utf-8")
