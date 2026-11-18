@@ -159,3 +159,13 @@ def test_refuse_too_little_history_and_missing_core(etf_bars):
     missing=etf_bars.loc[etf_bars["symbol"]!="HYG"]
     with pytest.raises(SourceUnavailable,match="MARKET_CORE_SYMBOLS_MISSING"):
         analyze_l1_v3(missing)
+
+
+def test_training_indices_observe_five_session_minimum_embargo():
+    import numpy as np
+    from quant_research.workflow.l1_probability_v3 import _valid_indices
+    x=np.ones((30,2))
+    y=np.zeros(30,dtype=int)
+    for h in (1,3,5):
+        indices=_valid_indices(x,y,h,20)
+        assert indices.max()==14

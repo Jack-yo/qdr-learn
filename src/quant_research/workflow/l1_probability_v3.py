@@ -131,7 +131,7 @@ def _labels(features, open_, close, horizon):
 
 def _valid_indices(x, y, horizon, cutoff, low=0):
     """Labels must finish STRICTLY BEFORE the forecast origin/cutoff."""
-    ix = np.arange(max(0, low), cutoff - horizon, dtype=int)
+    ix = np.arange(max(0, low), cutoff - max(horizon, 5), dtype=int)
     return ix[(y[ix] >= 0) & np.isfinite(x[ix]).all(axis=1)]
 
 

@@ -77,6 +77,10 @@ def main(argv=None):
     parser.add_argument("--live",action="store_true",
                         help="Run real Alpaca training/prediction with local credentials")
     args=parser.parse_args(argv)
+    credentials=args.root / '.env'
+    if credentials.is_file():
+        from quant_research.cli import load_local_credentials
+        load_local_credentials(credentials)
     report=check_local(args.root,live=args.live)
     print(json.dumps(report,ensure_ascii=False,sort_keys=True,default=str))
     return 0 if report["status"] in ("READY_FOR_REAL_RUN","LIVE_ACCEPTANCE_PASS") else 2

@@ -1,5 +1,6 @@
 """Forward research settlements are strictly due-date scoped and append-only."""
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from hashlib import sha256
 import json
 
 import numpy as np
@@ -7,9 +8,40 @@ import pandas as pd
 from quant_research.clock import TradingClock
 from quant_research.workflow.l1_v3 import save_research_snapshot
 from quant_research.workflow.l1_v3_outcomes import (
-    settle_due_research, recent_v3_outcomes,
+    settle_due_research as _settle_due_research, recent_v3_outcomes,
 )
 from quant_research.workflow.l1_v3_scorecard import forward_scorecard
+
+
+def _receipt(root,bars,adjustment="split",fetched_at=None,end=None):
+    rows=[]
+    for row in bars.loc[bars.symbol.eq("SPY")].to_dict("records"):
+        rows.append({"t":str(row["date"])+"T05:00:00Z",
+            "o":float(row["open"]),"c":float(row["close"]),
+            "h":float(row["high"]),"l":float(row["low"]),
+            "v":int(row["volume"])})
+    body=json.dumps({"bars":{"SPY":rows}},sort_keys=True,
+                    separators=(",",":")).encode()
+    digest=sha256(body).hexdigest()
+    rel=f"l1_v3_source_evidence/sha256/{digest}.json"
+    evidence=root/"outputs"/rel
+    evidence.parent.mkdir(parents=True,exist_ok=True)
+    evidence.write_bytes(body)
+    end=end or str(bars.date.max())
+    if fetched_at is None:
+        clock=TradingClock()
+        close=clock.close(clock.session(end)).astimezone(timezone.utc)
+        fetched_at=(close+clock.delay+timedelta(minutes=1)).isoformat()
+    return [{"feed":"sip","adjustment":adjustment,"sha256":digest,
+             "evidence_path":rel,"start":str(bars.date.min()),"end":end,
+             "fetched_at":fetched_at}]
+
+
+def settle_due_research(root,bars,**kwargs):
+    latest=kwargs["latest_session"]
+    eligible=bars.loc[bars.date<=latest].copy()
+    return _settle_due_research(root,eligible,
+        price_receipts=_receipt(root,eligible,end=latest),**kwargs)
 
 
 def _fixture(clock):
@@ -26,9 +58,14 @@ def _fixture(clock):
     frozen={
         "schema":"qdr.l1.probability.v3","status":"RESEARCH_ONLY",
         "historical_pit_verified":False,"execution_eligible":False,
+        "snapshot_status":"IMMUTABLE_DAILY_FROZEN",
+        "frozen_at_utc":"2026-11-02T22:00:00+00:00",
         "asof_session":asof.date().isoformat(),
-        "model_version":"L1_V3_ETF7.1",
-        "source_receipts":[{"sha256":"f"*64,"fetched_at":"2026-11-02T22:00:00Z"}],
+        "model_version":"L1_V3_ETF7.3",
+        "minimum_embargo_sessions":5,
+        "data_feed":"sip",
+        "source_receipts":[{"sha256":"f"*64,"feed":"sip","adjustment":"split",
+                            "fetched_at":"2026-11-02T22:00:00Z"}],
         "horizons":{
             str(h):{"horizon":h,"status":"RESEARCH_ONLY",
                     "research_estimates":{"UP":.35,"FLAT":.45,"DOWN":.20},
@@ -77,6 +114,29 @@ def test_reject_modified_frozen_source(tmp_path):
     assert recent_v3_outcomes(tmp_path)==[]
 
 
+def test_late_or_on_demand_snapshot_is_not_forward_settled(tmp_path):
+    clock=TradingClock()
+    window,bars,frozen=_fixture(clock)
+    frozen['snapshot_status']='ON_DEMAND_NOT_DAILY_SCHEDULED'
+    save_research_snapshot(tmp_path,frozen)
+    frozen['snapshot_status']='IMMUTABLE_DAILY_FROZEN'
+    frozen['frozen_at_utc']='2026-11-03T15:00:00+00:00'
+    save_research_snapshot(tmp_path,frozen)
+    result=settle_due_research(tmp_path,bars,latest_session=window[6].date().isoformat())
+    assert result['new_outcomes']==0
+    assert recent_v3_outcomes(tmp_path)==[]
+
+
+def test_missing_split_bar_receipt_blocks_due_outcome(tmp_path):
+    clock=TradingClock()
+    window,bars,frozen=_fixture(clock)
+    save_research_snapshot(tmp_path,frozen)
+    result=_settle_due_research(tmp_path,bars,latest_session=window[6].date().isoformat())
+    assert result['new_outcomes']==0
+    assert result['blocked_price_evidence']==3
+    assert recent_v3_outcomes(tmp_path)==[]
+
+
 def test_forward_scorecard_accepts_only_digest_linked_outcomes(tmp_path):
     clock=TradingClock()
     window,bars,frozen=_fixture(clock)
@@ -98,3 +158,116 @@ def test_forward_scorecard_accepts_only_digest_linked_outcomes(tmp_path):
     bad=forward_scorecard(tmp_path,minimum_samples=1)
     assert bad["horizons"]["1"]["samples"]==0
     assert bad["horizons"]["3"]["samples"]==1
+
+
+def test_legacy_unchecked_price_outcome_is_not_scored(tmp_path):
+    from hashlib import sha256
+    clock=TradingClock()
+    window,bars,frozen=_fixture(clock)
+    save_research_snapshot(tmp_path,frozen)
+    settle_due_research(tmp_path,bars,latest_session=window[6].date().isoformat())
+    first=next((tmp_path/'outputs'/'l1_v3_outcomes').glob('*/*_H1_*.json'))
+    row=json.loads(first.read_bytes())
+    row.pop('price_basis')
+    row.pop('settlement_receipts_sha256')
+    body=json.dumps(row,ensure_ascii=False,sort_keys=True,allow_nan=False,separators=(',',':')).encode()
+    target=first.with_name(first.stem.rsplit('_',1)[0]+'_'+sha256(body).hexdigest()[:16]+'.json')
+    first.unlink()
+    target.write_bytes(body)
+    assert forward_scorecard(tmp_path,minimum_samples=1)['horizons']['1']['samples']==0
+    assert all(item['horizon']!=1 for item in recent_v3_outcomes(tmp_path))
+
+
+def test_fabricated_action_checker_cannot_bypass_price_receipts(tmp_path):
+    clock=TradingClock()
+    window,bars,frozen=_fixture(clock)
+    save_research_snapshot(tmp_path,frozen)
+    result=_settle_due_research(tmp_path,bars,
+        latest_session=window[6].date().isoformat(),
+        action_checker=lambda start,end:["a"*64])
+    assert result["new_outcomes"]==0
+    assert result["blocked_price_evidence"]==3
+
+
+def test_raw_or_premature_price_receipts_do_not_settle(tmp_path):
+    clock=TradingClock()
+    window,bars,frozen=_fixture(clock)
+    save_research_snapshot(tmp_path,frozen)
+    observed=bars.loc[bars.date<=window[6].date().isoformat()].copy()
+    for receipts in [
+        _receipt(tmp_path,observed,adjustment="raw",end=window[6].date().isoformat()),
+        _receipt(tmp_path,observed,fetched_at="2026-11-03T12:00:00Z",
+                 end=window[6].date().isoformat())
+    ]:
+        result=_settle_due_research(tmp_path,bars,
+            latest_session=window[6].date().isoformat(),
+            price_receipts=receipts)
+        assert result["new_outcomes"]==0
+        assert result["blocked_price_evidence"]==3
+    assert recent_v3_outcomes(tmp_path)==[]
+
+
+def test_valid_price_only_settlement_does_not_claim_dividend_or_pnl(tmp_path):
+    clock=TradingClock()
+    window,bars,frozen=_fixture(clock)
+    save_research_snapshot(tmp_path,frozen)
+    settled=settle_due_research(tmp_path,bars,
+        latest_session=window[6].date().isoformat())
+    assert settled["new_outcomes"]==3
+    first=next((tmp_path/"outputs"/"l1_v3_outcomes").glob("*/*_H3_*.json"))
+    payload=json.loads(first.read_bytes())
+    assert payload["price_basis"]=="SPLIT_ADJUSTED_PRICE_RETURN"
+    assert payload["settlement_adjustment"]=="split"
+    assert len(payload["settlement_receipts_sha256"])==1
+    assert payload["settlement_receipts_sha256"][0]==payload["settlement_evidence_paths"][0].rsplit("/",1)[-1][:-5]
+    assert payload["cash_dividends_included"] is False
+    assert payload["market_execution_pnl_verified"] is False
+    assert "VERIFIED_NO_ACTION" not in json.dumps(payload)
+    assert forward_scorecard(tmp_path,minimum_samples=1)["horizons"]["3"]["samples"]==1
+
+
+def test_raw_source_evidence_remains_required_for_display_and_score(tmp_path):
+    clock=TradingClock()
+    window,bars,frozen=_fixture(clock)
+    save_research_snapshot(tmp_path,frozen)
+    settled=settle_due_research(tmp_path,bars,
+        latest_session=window[6].date().isoformat())
+    assert settled["new_outcomes"]==3
+    outcome_path=next((tmp_path/"outputs"/"l1_v3_outcomes").glob("*/*_H1_*.json"))
+    outcome=json.loads(outcome_path.read_bytes())
+    source_path=tmp_path/"outputs"/outcome["settlement_evidence_paths"][0]
+    source_path.write_bytes(source_path.read_bytes()+b" ")
+    assert all(item["horizon"]!=1 for item in recent_v3_outcomes(tmp_path))
+    assert forward_scorecard(tmp_path,minimum_samples=1)["horizons"]["1"]["samples"]==0
+
+
+def test_pre_embargo_frozen_model_not_silently_scored(tmp_path):
+    clock=TradingClock()
+    window,bars,frozen=_fixture(clock)
+    frozen["minimum_embargo_sessions"]=0
+    frozen["model_version"]="L1_V3_ETF7.2"
+    save_research_snapshot(tmp_path,frozen)
+    result=settle_due_research(tmp_path,bars,
+        latest_session=window[6].date().isoformat())
+    assert result["new_outcomes"]==0
+    assert result["blocked_price_evidence"]==3
+
+
+def test_split_adjusted_price_label_avoids_false_half_price_crash(tmp_path):
+    """A 2:1 split is not a -50% economic price movement."""
+    clock=TradingClock()
+    window,bars,frozen=_fixture(clock)
+    frozen["horizons"]["1"]["boundary_return"]=.004
+    entry_day=window[1].date().isoformat()
+    bars=bars.copy()
+    bars.loc[bars.date==entry_day,["open","close","high","low"]]=[50.,50.,50.5,49.5]
+    # Both endpoints refer to a common post-split share basis.
+    save_research_snapshot(tmp_path,frozen)
+    result=settle_due_research(tmp_path,bars,latest_session=entry_day)
+    assert result["new_outcomes"]==1
+    row=next((tmp_path/"outputs"/"l1_v3_outcomes").glob("*/*_H1_*.json"))
+    outcome=json.loads(row.read_bytes())
+    assert outcome["entry_open_split_adjusted"]==50.
+    assert outcome["exit_close_split_adjusted"]==50.
+    assert outcome["actual_return"]==0.
+    assert outcome["actual_scenario"]=="FLAT"

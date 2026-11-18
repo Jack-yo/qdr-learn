@@ -12,6 +12,7 @@ import math
 from pathlib import Path
 
 import numpy as np
+from quant_research.workflow.l1_v3_outcomes import stored_settlement_evidence_valid
 
 SCHEMA="qdr.l1.v3.forward.scorecard.v1"
 CLASSES=("UP","FLAT","DOWN")
@@ -61,6 +62,11 @@ def forward_scorecard(root, *, max_records=1600, minimum_samples=60):
                 if (row.get("schema")!="qdr.l1.v3.outcome.v1" or
                     row.get("historical_pit_verified") is not False or
                     row.get("execution_eligible") is not False or
+                    row.get("price_basis")!="SPLIT_ADJUSTED_PRICE_RETURN" or
+                    row.get("settlement_status")!="VERIFIED_SOURCE_PRICE_ONLY_NOT_TOTAL_RETURN" or
+                    row.get("settlement_adjustment")!="split" or
+                    not row.get("settlement_receipts_sha256") or
+                    not stored_settlement_evidence_valid(root,row) or
                     row.get("asof_session")!=path.parent.name or
                     row.get("actual_scenario") not in CLASSES):
                     continue
@@ -78,6 +84,8 @@ def forward_scorecard(root, *, max_records=1600, minimum_samples=60):
                 if sha256(raw).hexdigest()!=frozen_digest:
                     continue
                 freeze=json.loads(raw)
+                if freeze.get("minimum_embargo_sessions",0)<5:
+                    continue
                 horizon=freeze.get("horizons",{}).get(str(h),{})
                 prior=_probs(horizon.get("baseline_probabilities"))
                 original=_probs(horizon.get("research_estimates"))

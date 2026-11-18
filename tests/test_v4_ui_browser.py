@@ -173,7 +173,9 @@ def _server():
         def log_message(self,*args):
             pass
 
-    server=ThreadingHTTPServer(("127.0.0.1",0),Handler)
+    class TestBrowserServer(ThreadingHTTPServer):
+        request_queue_size=64
+    server=TestBrowserServer(("127.0.0.1",0),Handler)
     t=threading.Thread(target=server.serve_forever,daemon=True)
     t.start()
     try:
@@ -212,12 +214,18 @@ def _open(browser,base,route):
     page.goto(base+"/studio#"+route,wait_until="domcontentloaded")
     page.locator("#content .heading").wait_for(timeout=10000)
     if route!="overview":
-        page.locator(".v4-subtab").first.wait_for(timeout=10000)
+        try:
+            page.locator(".v4-subtab").first.wait_for(timeout=10000)
+        except Exception as exc:
+            raise AssertionError(f"{route} did not render its tabs: {page.locator('#content').inner_text()[:500]}") from exc
+    page.wait_for_load_state('networkidle',timeout=10000)
+    page.locator('.v4-pending-banner').wait_for(state='hidden',timeout=10000)
     return page
 
 
 def test_six_page_information_architecture_and_keyboard_tabs(browser,local_app):
-    expected={"market":4,"style":5,"lab":4,"screen":4,"risk":5}
+    # L1 V3 has its own horizon controls; the remaining workspaces retain tabs.
+    expected={"style":5,"lab":4,"screen":4,"risk":5}
     for name,count in expected.items():
         page=_open(browser,local_app,name)
         try:
@@ -230,24 +238,33 @@ def test_six_page_information_architecture_and_keyboard_tabs(browser,local_app):
             assert tabs.nth(following).get_attribute("aria-selected")=="true"
             assert page.locator("#v4-panel-"+name+"-"+str(following)).is_visible()
             assert not page.locator("#v4-panel-"+name+"-"+str(selected)).is_visible()
-            if name=="market":
-                assert page.locator(".v4-five-metrics .kpi").count()==5
-                assert page.get_by_text("历史 H1 上涨概率").count()==1
             if name=="risk":
                 assert page.locator(".v4-five-metrics .kpi").count()==5
             if name=="lab":
                 assert page.locator("details #v4-factor-hypothesis").count()==1
                 assert not page.locator("#v4-factor-hypothesis").is_visible()
-            if name=="market":
-                tabs.nth(3).click()
-                assert "undefined" not in page.locator("#v4-panel-market-3").inner_text()
         finally:
             page.close()
+    page=browser.new_page(viewport={"width":1536,"height":900})
+    try:
+        page.goto(local_app+"/studio#market",wait_until="domcontentloaded")
+        page.locator('.lv3-heading').wait_for(timeout=10000)
+        for horizon in (1,3,5):
+            button=page.locator(f'[data-lv3-h="{horizon}"]')
+            button.click()
+            page.get_by_role('heading',name=f'H{horizon} · 这次概率如何算出').wait_for()
+            assert page.locator(f'[data-lv3-h="{horizon}"]').get_attribute('aria-pressed')=='true'
+        page.locator('[data-lv3-old]').click()
+        page.locator('.l1-v2-legacy > summary').click()
+        page.get_by_text('预测验证与历史对照').wait_for()
+    finally:
+        page.close()
 
 
 def test_overview_research_flow_and_market_validation(browser,local_app):
     page=_open(browser,local_app,"overview")
     try:
+        page.get_by_text('最新已收盘行情观察').wait_for(timeout=10000)
         assert page.get_by_text('最新已收盘行情观察').count()==1
         assert page.locator('.v4-current-quotes').get_by_text('$100.00').count()==1
         assert page.get_by_text('采集时间晚于当日决策截止',exact=False).count()==1
@@ -256,13 +273,12 @@ def test_overview_research_flow_and_market_validation(browser,local_app):
         page.locator("#v4-run-observation").click()
         page.get_by_text("已提交日终观察", exact=False).first.wait_for()
         page.locator("#nav-market").click()
-        page.get_by_role("tab",name="预测验证").click()
-        panel=page.locator("#v4-panel-market-3")
-        assert panel.get_by_text("历史样本外概率可靠性").count()==1
-        assert page.get_by_text("0.2200").count()>=1
-        assert panel.locator(".v4-calibration-row").count()==1
-        page.get_by_role("tab",name="风险驱动").click()
-        assert page.get_by_text("5D / 20D 波动比").count()>=1
+        page.locator('[data-lv3-old]').click(timeout=10000)
+        page.locator('.l1-v2-legacy > summary').click()
+        panel=page.locator('.l1-validation')
+        panel.get_by_text('预测验证与历史对照').wait_for()
+        panel.get_by_text('0.2200',exact=False).first.wait_for(timeout=10000)
+        assert panel.get_by_text('历史回溯 Brier 差',exact=False).count()==1
     finally:
         page.close()
 
@@ -276,6 +292,8 @@ def test_latest_quote_does_not_use_freshness_for_a_different_date(browser,local_
             status=200,content_type='application/json',body=json.dumps(payload)))
         page.goto(local_app+'/studio#overview',wait_until='domcontentloaded')
         page.locator('.v4-current-quotes').wait_for(timeout=10000)
+        page.wait_for_load_state('networkidle',timeout=10000)
+        page.locator('.v4-pending-banner').wait_for(state='hidden',timeout=10000)
         strip=page.locator('.v4-current-quotes')
         assert strip.get_by_text('日期待核验',exact=False).count()==1
         assert strip.get_by_text('到达时间待核验',exact=False).count()==1
@@ -346,11 +364,13 @@ def test_factor_lab_quintile_chart_tracks_selected_factor_version(browser,local_
         assert page.locator('[data-factor-version="F2"]').is_visible()
         search.fill('')
         page.get_by_role("tab",name="因子有效性").click()
+        page.locator("#v4-panel-lab-1 .v4-factor-chart").wait_for(timeout=10000)
         assert page.locator("#v4-panel-lab-1 .v4-factor-chart").count()==1
         assert page.get_by_text("0.1200").count()>=1
         page.get_by_role("tab",name="因子实验室").click()
         page.locator('[data-factor-version="F2"]').click()
         page.get_by_role("tab",name="因子有效性").click()
+        page.locator("#v4-panel-lab-1").get_by_text("0.0300").first.wait_for(timeout=10000)
         assert page.locator("#v4-panel-lab-1 .v4-factor-chart").count()==1
         assert page.get_by_text("0.0300").count()>=1
         assert page.locator("#v4-panel-lab-1 .v4-factor-chart").get_by_text("2.00%").count()>=1
