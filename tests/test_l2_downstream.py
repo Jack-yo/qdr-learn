@@ -57,6 +57,7 @@ def _validation(status="OOS_VALIDATED", admitted=False):
         "status": "P5_RESEARCH_VALIDATION",
         "asof_session": "2026-01-30",
         "identity": "e" * 64,
+        "frozen_at_utc": "2026-01-31T01:00:00Z",
         "model_version": "ridge-v1",
         "label_bundle_sha256": "a" * 64,
         "feature_bundle_id": "features-v1",
