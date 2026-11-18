@@ -13,6 +13,9 @@ def _forecast():
         "model_version": "ridge-v1",
         "label_bundle_id": "accepted-v1",
         "label_bundle_sha256": "a" * 64,
+        "feature_bundle_id": "features-v1",
+        "feature_bundle_sha256": "f" * 64,
+        "historical_feature_pit_attested": True,
         "source_snapshot_sha256": "b" * 64,
         "forecasts": [
             {
@@ -34,6 +37,9 @@ def _frozen():
         "session_date_et": live["asof_session"],
         "model_version": live["model_version"],
         "label_bundle_sha256": live["label_bundle_sha256"],
+        "feature_bundle_id": live["feature_bundle_id"],
+        "feature_bundle_sha256": live["feature_bundle_sha256"],
+        "historical_feature_pit_attested": True,
         "source_snapshot_sha256": live["source_snapshot_sha256"],
         "identity": "d" * 64,
         "frozen_at_utc": (
@@ -51,6 +57,9 @@ def _validation(status="OOS_VALIDATED", admitted=False):
         "identity": "e" * 64,
         "model_version": "ridge-v1",
         "label_bundle_sha256": "a" * 64,
+        "feature_bundle_id": "features-v1",
+        "feature_bundle_sha256": "f" * 64,
+        "historical_feature_pit_attested": True,
         "qualification": [
             {
                 "style_id": style,
@@ -185,3 +194,22 @@ def test_missing_p4_evidence_returns_research_only(monkeypatch, tmp_path):
     assert result["status"] == "RESEARCH_ONLY"
     assert result["code"] == "L2_VERIFIED_LABEL_BUNDLE_REQUIRED"
     assert result["l3_style_context_available"] is False
+
+
+def test_feature_bundle_mismatch_blocks_bridge(monkeypatch,tmp_path):
+    forecast=_forecast()
+    validation=_validation("MODEL_ADMITTED",True)
+    validation["feature_bundle_sha256"]="9"*64
+    _wire(monkeypatch,forecast=forecast,validation=validation)
+    result=l2_downstream.build_downstream_context(tmp_path)
+    assert result["status"]=="BLOCKED"
+    assert result["code"]=="L2_FEATURE_BUNDLE_MISMATCH"
+
+
+def test_legacy_p5_without_feature_pit_cannot_feed_l3(monkeypatch,tmp_path):
+    validation=_validation("MODEL_ADMITTED",True)
+    validation["historical_feature_pit_attested"]=False
+    _wire(monkeypatch,validation=validation)
+    result=l2_downstream.build_downstream_context(tmp_path)
+    assert result["status"]=="BLOCKED"
+    assert result["code"]=="L2_P5_FEATURE_PIT_NOT_ATTESTED"
