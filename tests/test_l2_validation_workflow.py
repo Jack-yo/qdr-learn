@@ -114,10 +114,10 @@ def test_p5_build_uses_fixed_oos_span_and_preserves_21_units(tmp_path, monkeypat
         ),
     )
     captured = {}
-    def fake_walk(*args, **kwargs):
+    def fake_ablation(*args, **kwargs):
         evaluation = pd.DatetimeIndex(args[3])
-        captured["full_eval"] = evaluation
-        return pd.DataFrame([
+        captured["ablation_eval"] = evaluation
+        full = pd.DataFrame([
             {
                 "date": evaluation[-1],
                 "style_id": style,
@@ -127,14 +127,12 @@ def test_p5_build_uses_fixed_oos_span_and_preserves_21_units(tmp_path, monkeypat
                 "zero_baseline": 0.0,
                 "mean_baseline": 0.0001,
                 "momentum_baseline": 0.0002,
+                "variant": "full",
             }
             for style in STYLE_IDS for horizon in HORIZONS
         ])
-    monkeypatch.setattr(l2_validation, "walk_forward_oos_v1", fake_walk)
-    def fake_ablation(*args, **kwargs):
-        captured["ablation_eval"] = pd.DatetimeIndex(args[3])
         return (
-            pd.DataFrame({"variant": ["full"]}),
+            full,
             pd.DataFrame([{"variant": "full", "style_id": "size", "horizon": 1}]),
         )
     monkeypatch.setattr(l2_validation, "run_ablation_oos_v1", fake_ablation)
@@ -158,8 +156,7 @@ def test_p5_build_uses_fixed_oos_span_and_preserves_21_units(tmp_path, monkeypat
     report = l2_validation.build_validation_report(tmp_path)
     assert report["status"] == "P5_RESEARCH_VALIDATION"
     assert report["evaluation"]["actual_sessions"] == 252
-    assert len(captured["full_eval"]) == 252
-    assert captured["full_eval"].equals(captured["ablation_eval"])
+    assert len(captured["ablation_eval"]) == 252
     assert len(report["qualification"]) == 21
     assert report["summary"]["oos_validated_units"] == 21
     assert report["summary"]["model_admitted_units"] == 0
