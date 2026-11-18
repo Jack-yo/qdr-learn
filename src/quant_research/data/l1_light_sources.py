@@ -6,6 +6,7 @@ transport: receipt time does not establish point-in-time historical availability
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from hashlib import sha256
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
@@ -103,8 +104,9 @@ def _network(url, headers, *, max_bytes=5_000_000):
 
 class LiveSources:
     ETF_SYMBOLS=('SPY','QQQ','IWM','RSP','HYG','LQD','TLT','SHY',
-                 'XLB','XLC','XLE','XLF','XLI','XLK','XLP','XLRE','XLU','XLV','XLY')
-    CBOE_VIX='https://cdn-api.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv'
+                 'XLB','XLC','XLE','XLF','XLI','XLK','XLP','XLRE','XLU','XLV','XLY',
+                 'IWB','IWD','IWF','MTUM','QUAL','USMV','VLUE','VTV','VUG')
+    CBOE_VIX='https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv'
     def __init__(self, root, *, cache=None, fetch=None, env=None, now=None):
         self.cache=cache or BoundedCache(root, now=now)
         self.fetch=fetch or _network
@@ -114,9 +116,36 @@ class LiveSources:
     def request(self, endpoint, params=None, headers=None, *, ttl=1800, refresh=False, feed=''):
         params=params or {}
         host=urlsplit(endpoint).hostname
-        if endpoint not in {self.CBOE_VIX,'https://data.alpaca.markets/v2/stocks/bars',
-                            'https://data.alpaca.markets/v2/stocks/snapshots',
-                            'https://api.stlouisfed.org/fred/series/observations'}:
+        allowed_static = {
+            self.CBOE_VIX,
+            'https://paper-api.alpaca.markets/v2/assets',
+            'https://api.alpaca.markets/v2/assets',
+            'https://data.alpaca.markets/v2/stocks/bars',
+            'https://data.alpaca.markets/v2/stocks/snapshots',
+            'https://api.stlouisfed.org/fred/series/observations',
+            'https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml',
+            'https://markets.newyorkfed.org/api/rates/secured/sofr/last/10.json',
+            'https://markets.newyorkfed.org/api/rates/unsecured/effr/last/10.json',
+            'https://publicreporting.cftc.gov/resource/gpe5-46if.json',
+            'https://publicreporting.cftc.gov/resource/72hh-3qpy.json',
+            'https://www.financialresearch.gov/financial-stress-index/data/fsi.csv',
+            'https://www.bls.gov/schedule/news_release/bls.ics',
+            'https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm',
+            'https://www.ici.org/research/stats/etf_flows',
+        }
+        cboe_date = re.fullmatch(
+            r'https://cdn[.]cboe[.]com/data/us/options/market_statistics/daily/[0-9]{4}-[0-9]{2}-[0-9]{2}_daily_options',
+            endpoint,
+        )
+        cboe_volume = re.fullmatch(
+            r'https://cdn[.]cboe[.]com/resources/us/equities/market-statistics/historical-market-volume/market_history_20[0-9]{2}[.]csv',
+            endpoint,
+        )
+        finra_daily = re.fullmatch(
+            r'https://cdn[.]finra[.]org/equity/regsho/daily/CNMSshvol20[0-9]{6}[.]txt',
+            endpoint,
+        )
+        if endpoint not in allowed_static and not cboe_date and not cboe_volume and not finra_daily:
             raise SourceUnavailable('UNAPPROVED_SOURCE')
         key=self.cache.identity(endpoint,params,feed=feed)
         if not refresh:
@@ -126,65 +155,254 @@ class LiveSources:
         result=self.fetch(url,headers or {})
         return self.cache.put(key,result)
 
-    def bars(self, *, days=530, refresh=False, symbols=None):
+    def bars(self, *, days=530, refresh=False, symbols=None,
+             start_date=None, end_date=None, adjustment='raw',
+             history_feed=None):
+        """Historical 1Day stock bars: SIP/IEX only; never delayed_sip.
+
+        end_date selects the completed exchange session. Query end is its
+        close + 1 minute (never the following midnight); SIP waits out the
+        vendor's recent-data embargo. All pages retain source receipts.
+        """
         key=self.env.get('ALPACA_API_KEY'); secret=self.env.get('ALPACA_SECRET_KEY')
         if not key or not secret:
             raise SourceUnavailable('MISSING_ALPACA_CREDENTIALS')
-        requested_feed=self.env.get('QDR_L1_FEED','delayed_sip').lower()
-        if requested_feed not in {'delayed_sip','sip','iex'}:raise SourceUnavailable('INVALID_FEED')
-        # delayed_sip is a snapshot feed; daily historical bars use SIP and a
-        # completed-session boundary, avoiding the restricted recent window.
-        feed='sip' if requested_feed=='delayed_sip' else requested_feed
+        feed=(history_feed or self.env.get('QDR_L1_HISTORY_FEED','sip')).lower()
+        if feed not in {'sip','iex'}:
+            raise SourceUnavailable('INVALID_HISTORICAL_FEED')
+        if adjustment not in {'raw','split'}:
+            raise SourceUnavailable('INVALID_HISTORICAL_ADJUSTMENT')
+        if type(days) is not int or not 10<=days<=5000:
+            raise SourceUnavailable('INVALID_HISTORY_WINDOW')
+        # Use the exchange session close, not tomorrow's midnight. A request
+        # extending into the newest 15 minutes (or into the future) is rejected
+        # for free-plan SIP history even when the requested daily bar has closed.
         from quant_research.clock import TradingClock
-        clock=TradingClock()
         now=self._now()
-        if now.tzinfo is None:raise SourceUnavailable('NAIVE_CLOCK')
-        session=clock.calendar.date_to_session(now.date(),direction='previous')
-        while clock.close(session)+timedelta(minutes=20)>now:
-            session=clock.calendar.previous_session(session)
-        end=clock.close(session)+timedelta(minutes=1)
-        start=session.date()-timedelta(days=int(days))
+        if not isinstance(now,datetime) or now.tzinfo is None or now.utcoffset() is None:
+            raise SourceUnavailable('INVALID_SOURCE_CLOCK')
+        now=now.astimezone(timezone.utc)
+        clock=TradingClock()
+        try:
+            if end_date:
+                end=datetime.fromisoformat(str(end_date)).date()
+                session=clock.session(end.isoformat())
+            else:
+                session=clock.calendar.date_to_session(now.date(),direction='previous')
+                while clock.close(session)+timedelta(minutes=20)>now:
+                    session=clock.calendar.previous_session(session)
+                end=session.date()
+            start=(datetime.fromisoformat(str(start_date)).date() if start_date
+                   else end-timedelta(days=days-1))
+            if start>end or (end-start).days>5000:
+                raise ValueError('Bad history date window')
+        except (TypeError,ValueError,OverflowError,KeyError):
+            raise SourceUnavailable('INVALID_HISTORY_DATES')
+        close_at=clock.close(session).astimezone(timezone.utc)
+        query_end=close_at+timedelta(minutes=1)
+        if now<query_end:
+            raise SourceUnavailable('HISTORICAL_SESSION_NOT_CLOSED')
+        if feed=='sip' and now<query_end+timedelta(minutes=16):
+            # Wait and retry rather than silently switching to IEX or using
+            # a partially formed daily bar. Margin covers provider clock skew.
+            raise SourceUnavailable('HISTORICAL_SIP_EMBARGO_PENDING')
         symbols=tuple(symbols or self.ETF_SYMBOLS)
-        if not symbols or len(symbols)>50 or any(not re.fullmatch(r'[A-Z][A-Z0-9.-]{0,13}',x) for x in symbols):
+        if (not symbols or len(symbols)>50 or
+                any(not re.fullmatch(r'[A-Z][A-Z0-9.-]{0,13}',x) for x in symbols)):
             raise SourceUnavailable('INVALID_SYMBOLS')
         headers={'APCA-API-KEY-ID':key,'APCA-API-SECRET-KEY':secret}
-        query={'symbols':','.join(sorted(set(symbols))),'start':start.isoformat(),'end':end.isoformat(),
-               'timeframe':'1Day','adjustment':'raw','feed':feed,'sort':'asc','limit':10000}
-        merged={sym:[] for sym in symbols}; receipts=[]
-        for page in range(6):
-            body,stamp,digest=self.request('https://data.alpaca.markets/v2/stocks/bars',query,headers,
-                                           ttl=900,refresh=refresh,feed=feed)
-            try:doc=json.loads(body)
-            except ValueError as exc:raise SourceUnavailable('INVALID_ALPACA_JSON') from exc
-            if not isinstance(doc.get('bars'),dict):raise SourceUnavailable('INVALID_ALPACA_RESPONSE')
+        query={'symbols':','.join(sorted(set(symbols))),
+               'start':start.isoformat(),
+               'end':query_end.isoformat(),
+               'timeframe':'1Day','adjustment':adjustment,
+               'feed':feed,'sort':'asc','limit':10000}
+        merged={sym:[] for sym in symbols}
+        receipts=[]; known_tokens=set(); count=0
+        for page in range(15):
+            try:
+                body,stamp,digest=self.request('https://data.alpaca.markets/v2/stocks/bars',
+                                              query,headers,ttl=900,
+                                              refresh=refresh,feed=feed)
+            except SourceUnavailable as exc:
+                if exc.code=='HTTP_403':
+                    raise SourceUnavailable('ALPACA_HISTORY_FEED_FORBIDDEN_'+feed.upper()) from exc
+                if exc.code=='HTTP_401':
+                    raise SourceUnavailable('ALPACA_CREDENTIALS_REJECTED') from exc
+                raise
+            try:
+                doc=json.loads(body)
+            except (ValueError,TypeError) as exc:
+                raise SourceUnavailable('INVALID_ALPACA_JSON') from exc
+            if not isinstance(doc,dict) or not isinstance(doc.get('bars'),dict):
+                raise SourceUnavailable('INVALID_ALPACA_RESPONSE')
             for symbol,rows in doc['bars'].items():
-                if symbol not in merged or not isinstance(rows,list):raise SourceUnavailable('INVALID_ALPACA_SYMBOL')
-                merged[symbol].extend(rows)
-            receipts.append({'fetched_at':stamp,'sha256':digest,'feed':feed})
+                if symbol not in merged or not isinstance(rows,list):
+                    raise SourceUnavailable('INVALID_ALPACA_SYMBOL')
+                for record in rows:
+                    if not isinstance(record,dict) or not isinstance(record.get('t'),str):
+                        raise SourceUnavailable('INVALID_ALPACA_BAR')
+                    day=record['t'][:10]
+                    if len(day)!=10 or not start.isoformat()<=day<=end.isoformat():
+                        raise SourceUnavailable('BAR_OUTSIDE_REQUEST_WINDOW')
+                    merged[symbol].append(record)
+                    count+=1
+                    if count>150_000:
+                        raise SourceUnavailable('HISTORY_ROW_CAP')
+            receipts.append({'fetched_at':stamp,'sha256':digest,'feed':feed,
+                             'adjustment':adjustment,'start':start.isoformat(),
+                             'end':end.isoformat(),'page':page+1})
             token=doc.get('next_page_token')
-            if not token:break
+            if not token:
+                break
+            if not isinstance(token,str) or len(token)>1024 or token in known_tokens:
+                raise SourceUnavailable('ALPACA_PAGINATION_INVALID')
+            known_tokens.add(token)
             query['page_token']=token
-        else:raise SourceUnavailable('ALPACA_PAGINATION_LIMIT')
+        else:
+            raise SourceUnavailable('ALPACA_PAGINATION_LIMIT')
+        if not count:
+            raise SourceUnavailable('HISTORICAL_BARS_EMPTY')
+        for symbol,rows in merged.items():
+            markers=[r['t'] for r in rows]
+            if len(markers)!=len(set(markers)):
+                raise SourceUnavailable('DUPLICATE_ALPACA_BARS')
+            if markers!=sorted(markers):
+                raise SourceUnavailable('UNSORTED_ALPACA_BARS')
         return merged,receipts
 
-    def snapshots(self, *, refresh=False, symbols=('SPY','QQQ','IWM','RSP','HYG','LQD')):
+    def assets(self, *, refresh=False, max_assets=10000):
+        """Current active, tradable, non-OTC US-equity asset directory.
+
+        This is a current vendor directory, not historical index membership
+        and not a survivorship-bias-free point-in-time universe.
+        """
+        key=self.env.get('ALPACA_API_KEY');secret=self.env.get('ALPACA_SECRET_KEY')
+        if not key or not secret:
+            raise SourceUnavailable('MISSING_ALPACA_CREDENTIALS')
+        base=(self.env.get('ALPACA_TRADING_API_URL') or
+              self.env.get('APCA_API_BASE_URL') or
+              'https://paper-api.alpaca.markets').rstrip('/')
+        if base not in {'https://paper-api.alpaca.markets','https://api.alpaca.markets'}:
+            raise SourceUnavailable('UNAPPROVED_ALPACA_TRADING_API')
+        try:
+            body,stamp,digest=self.request(base+'/v2/assets',
+                {'status':'active','asset_class':'us_equity'},
+                {'APCA-API-KEY-ID':key,'APCA-API-SECRET-KEY':secret},
+                ttl=21600,refresh=refresh)
+        except SourceUnavailable as exc:
+            if exc.code=='HTTP_403':
+                raise SourceUnavailable('ALPACA_ASSET_DIRECTORY_FORBIDDEN') from exc
+            if exc.code=='HTTP_401':
+                raise SourceUnavailable('ALPACA_CREDENTIALS_REJECTED') from exc
+            raise
+        try:
+            records=json.loads(body)
+            if not isinstance(records,list):
+                raise ValueError('Expected asset list')
+            clean=[]
+            for item in records:
+                if not isinstance(item,dict):
+                    continue
+                symbol=str(item.get('symbol') or '').upper()
+                exchange=str(item.get('exchange') or '').upper()
+                if (item.get('class')!='us_equity' or item.get('status')!='active' or
+                    item.get('tradable') is not True or exchange=='OTC' or
+                    not re.fullmatch(r'[A-Z][A-Z0-9.-]{0,13}',symbol)):
+                    continue
+                clean.append(item)
+            clean.sort(key=lambda x:x['symbol'])
+            if not clean:
+                raise ValueError('No active tradable US equities')
+            if len(clean)>max_assets:
+                raise SourceUnavailable('ALPACA_ASSET_UNIVERSE_EXCEEDS_LIMIT')
+            symbols=[x['symbol'] for x in clean]
+            if len(symbols)!=len(set(symbols)):
+                raise ValueError('Duplicate active symbols')
+        except SourceUnavailable:
+            raise
+        except (ValueError,TypeError,KeyError) as exc:
+            raise SourceUnavailable('INVALID_ALPACA_ASSET_DIRECTORY') from exc
+        return clean,{'fetched_at':stamp,'sha256':digest,'source':'ALPACA_ACTIVE_US_EQUITY_ASSETS',
+                      'asset_count':len(clean),'scope':'ACTIVE_TRADABLE_NON_OTC_CURRENT_DIRECTORY_NOT_PIT'}
+
+    def snapshots(self, *, refresh=False, symbols=None):
+        """Fetch the L1 core ETF basket by default; caller may request a smaller set.
+
+        The basket is deliberately limited to liquid index, sector, style and
+        risk ETFs. Broad current-universe breadth is handled separately by
+        snapshots_for_symbols through the market_breadth scanner.
+        """
         key=self.env.get('ALPACA_API_KEY');secret=self.env.get('ALPACA_SECRET_KEY')
         if not key or not secret:raise SourceUnavailable('MISSING_ALPACA_CREDENTIALS')
         feed=self.env.get('QDR_L1_FEED','delayed_sip').lower()
         if feed not in {'delayed_sip','sip','iex'}:raise SourceUnavailable('INVALID_FEED')
+        symbols=tuple(sorted({str(x).upper() for x in (symbols or self.ETF_SYMBOLS)}))
+        if not symbols or len(symbols)>500:
+            raise SourceUnavailable('INVALID_SNAPSHOT_SYMBOLS')
         params={'symbols':','.join(sorted(set(symbols))),'feed':feed}
-        body,stamp,digest=self.request('https://data.alpaca.markets/v2/stocks/snapshots',params,
-            {'APCA-API-KEY-ID':key,'APCA-API-SECRET-KEY':secret},ttl=60,refresh=refresh,feed=feed)
+        try:
+            body,stamp,digest=self.request('https://data.alpaca.markets/v2/stocks/snapshots',params,
+                {'APCA-API-KEY-ID':key,'APCA-API-SECRET-KEY':secret},ttl=60,refresh=refresh,feed=feed)
+        except SourceUnavailable as exc:
+            if exc.code=='HTTP_403':
+                raise SourceUnavailable('ALPACA_SNAPSHOT_FEED_FORBIDDEN_'+feed.upper()) from exc
+            if exc.code=='HTTP_401':
+                raise SourceUnavailable('ALPACA_CREDENTIALS_REJECTED') from exc
+            raise
         try:
             doc=json.loads(body)
-            if not isinstance(doc,dict):raise ValueError('Invalid snapshots')
-            snapshots=doc.get('snapshots',doc)
-            if (not isinstance(snapshots,dict) or not set(snapshots)<=set(symbols)
-                    or any(not isinstance(value,dict) for value in snapshots.values())):
-                raise ValueError('Invalid snapshots')
-        except (ValueError,TypeError) as exc:raise SourceUnavailable('INVALID_ALPACA_SNAPSHOTS') from exc
-        return snapshots,{'fetched_at':stamp,'sha256':digest,'source':'ALPACA_'+feed,
-                                 'scope':'LAST_TRADE_LEVEL1_QUOTE_NOT_FULL_DEPTH'}
+            if not isinstance(doc,dict):
+                raise ValueError('Invalid snapshots response')
+            if isinstance(doc.get('snapshots'),dict):
+                payload=doc['snapshots']
+                response_shape='SNAPSHOTS_ENVELOPE'
+            else:
+                # Alpaca's stock snapshot endpoint may return a top-level
+                # {symbol: snapshot} map. Accept only symbols explicitly asked
+                # for; do not mistake metadata keys for instruments.
+                payload={symbol:doc[symbol] for symbol in symbols
+                         if isinstance(doc.get(symbol),dict)}
+                response_shape='TOP_LEVEL_SYMBOL_MAP'
+            payload={str(symbol).upper():value for symbol,value in payload.items()
+                     if str(symbol).upper() in set(symbols) and isinstance(value,dict)}
+            if not payload:
+                raise ValueError('No requested symbol snapshots')
+        except (ValueError,TypeError) as exc:
+            raise SourceUnavailable('INVALID_ALPACA_SNAPSHOTS') from exc
+        return payload,{'fetched_at':stamp,'sha256':digest,'source':'ALPACA_'+feed,
+                        'scope':'LAST_TRADE_LEVEL1_QUOTE_NOT_FULL_DEPTH',
+                        'response_shape':response_shape,
+                        'requested_symbols':len(set(symbols)),
+                        'returned_symbols':len(payload)}
+
+    def snapshots_for_symbols(self, symbols, *, refresh=False, batch_size=200, max_workers=4):
+        """Fetch current snapshots in bounded batches; return partial coverage explicitly."""
+        clean=tuple(sorted({str(x).upper() for x in symbols}))
+        if not clean or len(clean)>10000:
+            raise SourceUnavailable('INVALID_SNAPSHOT_UNIVERSE_SIZE')
+        if type(batch_size) is not int or not 1<=batch_size<=500:
+            raise SourceUnavailable('INVALID_SNAPSHOT_BATCH_SIZE')
+        batches=[clean[i:i+batch_size] for i in range(0,len(clean),batch_size)]
+        merged,receipts,errors={},[],[]
+        with ThreadPoolExecutor(max_workers=max(1,min(int(max_workers),8))) as pool:
+            futures={pool.submit(self.snapshots,refresh=refresh,symbols=batch): (i,batch)
+                     for i,batch in enumerate(batches)}
+            for future in as_completed(futures):
+                index,batch=futures[future]
+                try:
+                    values,receipt=future.result()
+                    merged.update(values)
+                    receipts.append(receipt)
+                    missing=sorted(set(batch)-set(values))
+                    if missing:
+                        errors.append({'batch':index,'code':'SYMBOL_SNAPSHOT_MISSING',
+                                       'missing_count':len(missing),'missing_sample':missing[:10]})
+                except SourceUnavailable as exc:
+                    errors.append({'batch':index,'code':exc.code,'symbol_count':len(batch)})
+        if not merged:
+            raise SourceUnavailable('ALL_ALPACA_SNAPSHOT_BATCHES_FAILED')
+        receipts.sort(key=lambda x:x.get('sha256',''))
+        return merged,receipts,errors
 
     def cboe_vix(self, *, refresh=False):
         body, stamp,digest=self.request(self.CBOE_VIX,ttl=7200,refresh=refresh)

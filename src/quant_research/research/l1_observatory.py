@@ -41,6 +41,18 @@ _REQUIRED_CLOCK = {'date', 'decision_cutoff_utc'}
 _REQUIRED_UNIVERSE = {'date', 'security_id', 'is_member', 'available_at'}
 
 
+def aware_utc(values: pd.Series, name: str) -> pd.Series:
+    """Require actual timezone information rather than assuming naive values are UTC."""
+    for value in values:
+        try:
+            stamp = pd.Timestamp(value)
+        except (TypeError, ValueError):
+            raise ValueError(f'{name} must contain timezone-aware timestamps') from None
+        if pd.isna(stamp) or stamp.tzinfo is None or stamp.utcoffset() is None:
+            raise ValueError(f'{name} must contain timezone-aware timestamps')
+    return pd.to_datetime(values, utc=True, errors='raise')
+
+
 def _sessions(data: pd.DataFrame, name: str, required: set[str]) -> pd.DataFrame:
     if not isinstance(data, pd.DataFrame) or required - set(data.columns):
         raise ValueError(f'{name} missing fields: {sorted(required - set(getattr(data, "columns", [])))}')
@@ -49,7 +61,7 @@ def _sessions(data: pd.DataFrame, name: str, required: set[str]) -> pd.DataFrame
     if out.date.dt.tz is not None or out.date.isna().any() or (out.date != out.date.dt.normalize()).any():
         raise ValueError(f'{name} dates must be timezone-naive sessions')
     if 'available_at' in out:
-        out['available_at'] = pd.to_datetime(out['available_at'], utc=True)
+        out['available_at'] = aware_utc(out['available_at'], f'{name} available_at')
     return out
 
 
@@ -73,7 +85,7 @@ def compute_l1_observations(
         raise ValueError('Invalid breadth minimums')
     b = _sessions(bars, 'bars', _REQUIRED_BARS)
     c = _sessions(cutoffs, 'cutoffs', _REQUIRED_CLOCK)
-    c['decision_cutoff_utc'] = pd.to_datetime(c['decision_cutoff_utc'], utc=True)
+    c['decision_cutoff_utc'] = aware_utc(c['decision_cutoff_utc'], 'decision cutoff')
     if c.date.duplicated().any() or c.decision_cutoff_utc.isna().any():
         raise ValueError('One valid cutoff is required per session')
     if b.duplicated(['date', 'security_id']).any():

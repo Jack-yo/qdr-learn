@@ -203,8 +203,43 @@ def _score(value):
     return round(float(np.clip(50+15*value,0,100)),1) if pd.notna(value) else None
 
 
-def _domain_catalog(features,extras,errors):
+def _domain_catalog(features,extras,errors,close=None):
     last=features.iloc[-1]
+
+    def input_coverage(field, value):
+        if close is None:
+            return (1 if pd.notna(value) else 0, 1, [])
+        if field in {"overnight", "intraday", "close_location"}:
+            available = 1 if pd.notna(value) else 0
+            return available, 1, ["SPY"] if available else []
+        requirements = {
+            "spy_return_5": (("SPY",), 5),
+            "spy_return_20": (("SPY",), 20),
+            "breadth_proxy_rsp_spy_5": (("RSP", "SPY"), 5),
+            "small_cap_relative_5": (("IWM", "SPY"), 5),
+            "credit_proxy_hyg_lqd_5": (("HYG", "LQD"), 5),
+            "duration_proxy_5": (("TLT", "SHY"), 5),
+            "sector_dispersion_1": (SECTORS, 1),
+            "sector_up_share_1": (SECTORS, 1),
+            "drawdown20": (("SPY",), 19),
+            "rv5": (("SPY",), 5),
+            "rv20": (("SPY",), 20),
+            "vol_ratio": (("SPY",), 20),
+            "downside_rv20": (("SPY",), 20),
+        }
+        symbols, lookback = requirements.get(field, (("SPY",), 0))
+        valid = []
+        for symbol in symbols:
+            if symbol not in close:
+                continue
+            series = pd.to_numeric(close[symbol], errors="coerce")
+            if len(series) <= lookback:
+                continue
+            current = series.iloc[-1]
+            prior = series.iloc[-1-lookback] if lookback else current
+            if pd.notna(current) and pd.notna(prior) and prior > 0:
+                valid.append(symbol)
+        return len(valid), len(symbols), valid
     fields={
      'price':[('5日SPY涨跌','spy_return_5'),('20日SPY涨跌','spy_return_20'),('隔夜变化','overnight'),('日内变化','intraday')],
      'breadth':[('等权ETF强弱代理','breadth_proxy_rsp_spy_5'),('板块上涨占比代理','sector_up_share_1')],
@@ -217,18 +252,25 @@ def _domain_catalog(features,extras,errors):
     for k, rows in fields.items():
         for label,field in rows:
             val=last.get(field)
+            coverage_n,expected_n,input_symbols=input_coverage(field,val)
+            feature_status = ("MISSING" if pd.isna(val) else
+                              "PARTIAL" if coverage_n < expected_n else "OBSERVED")
             domain_items[k].append({'id':field,'label':label,
                 'value':round(float(val),6) if pd.notna(val) else None,
-                'source':'ALPACA_ETF_PROXY','status':'OBSERVED' if pd.notna(val) else 'MISSING'})
+                'source':'ALPACA_ETF_PROXY','status':feature_status,
+                'coverage_n':coverage_n,'expected_n':expected_n,
+                'metadata':{'input_symbols':input_symbols,
+                            'coverage_scope':'CORE_ETF_INPUTS_NOT_FULL_MARKET'}})
     # On-demand sourced contemporary metrics; without historical receipt evidence, NOT historical PIT.
     for domain,items in extras.items():
         domain_items[domain].extend(items)
     out=[]
     for domain,name in DOMAIN_NAMES.items():
         items=domain_items[domain]
-        available=sum(1 for f in items if f.get('status')=='OBSERVED')
+        available=sum(1 for f in items if f.get('status') in ('OBSERVED','PARTIAL'))
+        fully_observed=all(f.get('status')=='OBSERVED' for f in items)
         if not available:status='MISSING'
-        elif domain in ('price','volatility','cross_asset','path') and available==len(items) and len(items)>1:status='OBSERVED'
+        elif domain in ('price','volatility','cross_asset','path') and available==len(items) and fully_observed and len(items)>1:status='OBSERVED'
         else:status='PARTIAL'
         reasons=[]
         if domain=='breadth':reasons.append('ETF代理非PIT全市场股票广度')
@@ -260,7 +302,7 @@ def analyze_market(bars, *, receipts, extras=None, errors=None, asof_limit=None,
     last=features.iloc[-1]
     if not all(pd.notna(last.get(x)) for x in ('momentum_z','pressure_z','decay_z')):
         raise SourceUnavailable('INSUFFICIENT_CORE_FEATURES')
-    domain_items=_domain_catalog(features,extras,errors)
+    domain_items=_domain_catalog(features,extras,errors,close=close)
     by_domain={d['id']:d for d in domain_items}
     anomaly_names={'spy_return_5':'SPY 五日走势','breadth_proxy_rsp_spy_5':'等权ETF相对强度',
         'credit_proxy_hyg_lqd_5':'信用ETF相对强度','vol_ratio':'短期波动压力',
@@ -369,6 +411,8 @@ def current_l1_v2(root, *, refresh=False, sources=None, now=None):
         errors.update({'funding':'FRED_API_KEY_NOT_CONFIGURED','cross_asset':'FRED_API_KEY_NOT_CONFIGURED'})
     result=analyze_market(raw,receipts=receipts,extras=extras,errors=errors,asof_limit=limit)
     result['latest_quotes']=snapshot_prices
+    result['expected_asof_session']=limit
+    result['data_freshness']='CURRENT_COMPLETED_SESSION' if result['asof_session']==limit else 'STALE_COMPLETED_SESSION'
     return result
 
 

@@ -10,12 +10,13 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import re
+from dataclasses import asdict, replace
 import pandas as pd
 import numpy as np
-from quant_research.research.l1_observatory import compute_l1_observations,scan_l1_anomalies
+from quant_research.research.l1_observatory import compute_l1_observations,scan_l1_anomalies,aware_utc
 from quant_research.research.l1_features import add_l1_features,domain_status,REGISTRY,scan_all_l1_anomalies
 from quant_research.research.l1_models import (L1Protocol,run_l1_oos,score_l1_oos,
-    forecast_l1_research,HORIZONS)
+    forecast_l1_research,compare_l1_ablation,HORIZONS)
 
 _DIGEST=re.compile('[a-f0-9]{64}\\Z')
 
@@ -53,14 +54,60 @@ def _serializable(frame):
     return x
 
 
+def feature_coverage_report(audit):
+    """Summarize observed records without asserting provider or PIT qualification."""
+    records=[]
+    for feature, domain in REGISTRY.items():
+        rows=audit.loc[audit.feature.eq(feature)].sort_values('date')
+        observed=rows.loc[rows.status.eq('OBSERVED')]
+        n=len(rows)
+        sources=sorted(set(observed.source.dropna().astype(str)))
+        records.append({'feature_id':feature,'domain':domain,
+            'source':', '.join(sources) if sources else None,'frequency':'daily',
+            'start_date':observed.date.min() if len(observed) else None,
+            'end_date':observed.date.max() if len(observed) else None,
+            'available_at':observed.available_at.max() if len(observed) else None,
+            'coverage_ratio':len(observed)/n if n else 0.0,
+            'missing_rate':(n-len(observed))/n if n else 1.0,
+            'PIT_status':'NOT_INDEPENDENTLY_VERIFIED','research_eligible':False,
+            'blocked_reason':'SOURCE_AND_HISTORICAL_PIT_NOT_INDEPENDENTLY_VERIFIED' if len(observed) else 'NO_OBSERVED_VALUES'})
+    return pd.DataFrame(records)
+
+
+def validate_research_calendar(cutoffs):
+    """Require consecutive XNYS sessions and actual close-to-entry cutoffs."""
+    from quant_research.clock import TradingClock
+    if {'date','decision_cutoff_utc'}-set(cutoffs) or cutoffs.empty:
+        raise ValueError('L1_CALENDAR_MISSING')
+    dates=pd.to_datetime(cutoffs.date,errors='raise')
+    if (dates.isna().any() or dates.dt.tz is not None or not dates.eq(dates.dt.normalize()).all()
+            or dates.duplicated().any() or not dates.is_monotonic_increasing):
+        raise ValueError('L1_CALENDAR_INVALID')
+    clock=TradingClock()
+    sessions=pd.DatetimeIndex([clock.session(str(day.date())) for day in dates])
+    expected=clock.calendar.sessions_in_range(sessions[0],sessions[-1])
+    if not sessions.equals(expected):
+        raise ValueError('L1_CALENDAR_INCOMPLETE')
+    times=aware_utc(cutoffs.decision_cutoff_utc,'decision cutoff')
+    now=pd.Timestamp.now(tz='UTC')
+    for day,cutoff in zip(sessions,times):
+        position=clock.calendar.sessions.get_loc(day)
+        if position+1>=len(clock.calendar.sessions):
+            raise ValueError('L1_CALENDAR_NEXT_SESSION_MISSING')
+        next_open=clock.calendar.session_open(clock.calendar.sessions[position+1])
+        if not pd.Timestamp(clock.close(day))<=cutoff<next_open or cutoff>now:
+            raise ValueError('L1_CUTOFF_OUTSIDE_SESSION_WINDOW')
+
+
 def build_l1_research(*,bars,cutoffs,output,universe=None,optional=None,raw_measurements=None,
-                      protocol:L1Protocol=L1Protocol(),evaluation_start=None):
+                      protocol:L1Protocol=L1Protocol(),evaluation_start=None,run_ablation=False):
     """Implement all three research experiments; fail closed if no valid data."""
     paths={'bars':Path(bars),'cutoffs':Path(cutoffs)}
     if universe:paths['universe']=Path(universe)
     if optional:paths['optional']=Path(optional)
     if raw_measurements:paths['raw_measurements']=Path(raw_measurements)
     raw={k:_read(v) for k,v in paths.items()}
+    validate_research_calendar(raw['cutoffs'])
     obs,coverage=compute_l1_observations(raw['bars'],raw['cutoffs'],raw.get('universe'))
     additional=raw.get('optional')
     if 'raw_measurements' in raw:
@@ -68,10 +115,26 @@ def build_l1_research(*,bars,cutoffs,output,universe=None,optional=None,raw_meas
         measured=raw_packets_to_optional(raw['raw_measurements'],raw['cutoffs'],obs)
         if additional is not None:additional=pd.concat([additional,measured],ignore_index=True)
         else:additional=measured
-    feat,audit=add_l1_features(obs,raw['bars'],raw['cutoffs'],additional)
+    feat,audit=add_l1_features(obs,raw['bars'],raw['cutoffs'],additional,universe=raw.get('universe'))
     anomalies=scan_all_l1_anomalies(feat)
     oos=run_l1_oos(raw['bars'],feat,raw['cutoffs'],protocol,evaluation_start=evaluation_start)
     metrics=score_l1_oos(oos,protocol)
+    annual=[]
+    if not oos.empty:
+        for year, rows in oos.groupby(pd.to_datetime(oos.date).dt.year):
+            yearly=score_l1_oos(rows,protocol)
+            yearly.insert(0,'year',int(year))
+            annual.append(yearly)
+    annual_metrics=pd.concat(annual,ignore_index=True) if annual else pd.DataFrame(columns=['year','horizon','samples'])
+    if run_ablation:
+        if not protocol.include_extended:
+            raise ValueError('Ablation requires the extended feature protocol')
+        base=run_l1_oos(raw['bars'],feat,raw['cutoffs'],replace(protocol,include_extended=False),
+                        evaluation_start=evaluation_start)
+        ablation=compare_l1_ablation(base,oos,protocol)
+    else:
+        base=None
+        ablation=None
     # Fitting at the most recent as-of is RETROSPECTIVE_RESEARCH_ONLY,
     # explicitly not a frozen real-time forecast.
     inferred=forecast_l1_research(raw['bars'],feat,raw['cutoffs'],protocol)
@@ -79,8 +142,12 @@ def build_l1_research(*,bars,cutoffs,output,universe=None,optional=None,raw_meas
     if root.exists():raise FileExistsError('Research output exists; no archive overwrite')
     root.mkdir(parents=True,exist_ok=False)
     outputs={'observations.csv':obs,'features.csv':feat,'coverage.csv':coverage,
+             'feature_coverage.csv':feature_coverage_report(audit),
              'feature_audit.csv':audit,'anomalies.csv':anomalies,
-             'oos_predictions.csv':oos,'oos_metrics.csv':metrics}
+             'oos_predictions.csv':oos,'oos_metrics.csv':metrics,'oos_metrics_by_year.csv':annual_metrics}
+    if run_ablation:
+        outputs['ablation_base_predictions.csv']=base
+        outputs['ablation_metrics.csv']=ablation
     hashes={}
     for name,frame in outputs.items():
         path=root/name; _serializable(frame).to_csv(path,index=False)
@@ -93,6 +160,8 @@ def build_l1_research(*,bars,cutoffs,output,universe=None,optional=None,raw_meas
         'asof_session':str(pd.Timestamp(feat.date.max()).date()),
         'model_version':inferred['model_version'],
         'registered_dimensions':12,'registered_features':len(REGISTRY),
+        'protocol':asdict(protocol),'evaluation_start':str(evaluation_start) if evaluation_start else None,
+        'ablation_requested':bool(run_ablation),
         'observed_rows':len(obs),'oos_rows':len(oos),'oos_horizons':sorted(set(oos.horizon.astype(int))) if len(oos) else [],
         'source_snapshot_sha256':sha256(_json({k:sha256(v.read_bytes()).hexdigest() for k,v in paths.items()}).encode()).hexdigest(),
         'inputs_sha256':{k:sha256(v.read_bytes()).hexdigest() for k,v in paths.items()},
@@ -139,7 +208,19 @@ def _recent_audit(root,asof=None):
 
 
 def observations_for_api(root,asof=None):
-    folder,m,day,feat,audit=_recent_audit(root,asof)
+    try:
+        folder,m,day,feat,audit=_recent_audit(root,asof)
+    except L1Blocked as exc:
+        if exc.code!='L1_NO_RESEARCH_ARCHIVE':
+            raise
+        from quant_research.workflow.l1_current_observation import current_observation_for_api
+        from quant_research.policy import PolicyError, SYMBOLS
+        root=Path(root).resolve()
+        try:
+            return current_observation_for_api(root/'data/real_v21.duckdb',asof=asof,
+                                               raw_root=root/'data/raw',symbols=SYMBOLS)
+        except (PolicyError,ValueError,OSError) as error:
+            raise L1Blocked(getattr(error,'code','L1_CURRENT_OBSERVATION_UNAVAILABLE')) from error
     row=feat.loc[feat.date.eq(day)].iloc[0]
     domains=domain_status(feat,audit,asof=day)
     relevant=audit.loc[audit.date.eq(day)].set_index('feature')
@@ -185,8 +266,17 @@ def validation_for_api(root):
     rows=[]
     for v in metrics.to_dict(orient='records'):
         rows.append({k:(None if isinstance(x,float) and not np.isfinite(x) else x) for k,x in v.items()})
+    yearly=[]
+    if 'oos_metrics_by_year.csv' in m.get('outputs_sha256',{}):
+        for v in pd.read_csv(folder/'oos_metrics_by_year.csv').to_dict(orient='records'):
+            yearly.append({k:(None if isinstance(x,float) and not np.isfinite(x) else x) for k,x in v.items()})
+    ablation=[]
+    if 'ablation_metrics.csv' in m.get('outputs_sha256',{}):
+        for v in pd.read_csv(folder/'ablation_metrics.csv').to_dict(orient='records'):
+            ablation.append({k:(None if isinstance(x,float) and not np.isfinite(x) else x) for k,x in v.items()})
     return {'status':'RETROSPECTIVE_RESEARCH_ONLY','model_version':m['model_version'],
-            'dataset_pit_attested':False,'model_admitted':False,'metrics':rows}
+            'dataset_pit_attested':False,'model_admitted':False,'metrics':rows,
+            'yearly_metrics':yearly,'ablation_metrics':ablation}
 
 
 def replay_for_api(root,asof,horizon):
@@ -197,6 +287,10 @@ def replay_for_api(root,asof,horizon):
     f=rows.loc[pd.to_datetime(rows.date).eq(day)&rows.horizon.eq(int(horizon))]
     if len(f)!=1:return {'status':'NO_OOS_PREDICTION','asof_session':str(day.date()),'horizon':int(horizon),'prediction':None}
     v=f.iloc[0]
+    required=('e03_expected_return','target_return','e01_rv_model','target_forward_rv')
+    if any(not np.isfinite(pd.to_numeric(v.get(key),errors='coerce')) for key in required):
+        return {'status':'INSUFFICIENT_OUTCOME_DATA','asof_session':str(day.date()),
+                'horizon':int(horizon),'prediction':None}
     return {'status':'RETROSPECTIVE_RESEARCH_ONLY','asof_session':str(day.date()),'horizon':int(horizon),
             'prediction':{'expected_return':float(v.e03_expected_return),
                           'actual_return':float(v.target_return),
@@ -210,6 +304,8 @@ def market_overview_for_api(root,horizon,asof=None):
     observation=observations_for_api(root,asof)
     observation['forecast']=None
     observation['horizon']=int(horizon)
+    if observation['status']=='CURRENT_VINTAGE_RETROSPECTIVE_OBSERVATION':
+        return observation
     from quant_research.workflow.l1_forward import latest_forward_for_api
     sealed=latest_forward_for_api(root,observation['asof_session'],int(horizon))
     if sealed is not None:
@@ -229,13 +325,15 @@ def main(argv=None):
     p.add_argument('--evaluation-start')
     p.add_argument('--minimum-training-sessions',type=int,default=252)
     p.add_argument('--calibration-sessions',type=int,default=84)
-    p.add_argument('--refit-every',type=int,default=21)
+    p.add_argument('--refit-every',type=int,default=1,
+                   help='Evaluate every Nth session; default 1 evaluates each eligible session')
+    p.add_argument('--ablation',action='store_true',help='Compare base and extended features on matched sessions')
     args=p.parse_args(argv)
     protocol=L1Protocol(min_train_sessions=args.minimum_training_sessions,
         calibration_sessions=args.calibration_sessions,refit_every=args.refit_every)
     result=build_l1_research(bars=args.bars,cutoffs=args.cutoffs,universe=args.universe,
         optional=args.optional,raw_measurements=args.raw_measurements,output=args.output,protocol=protocol,
-        evaluation_start=args.evaluation_start)
+        evaluation_start=args.evaluation_start,run_ablation=args.ablation)
     print(_json({'status':result['status'],'observed_rows':result['observed_rows'],
         'oos_rows':result['oos_rows'],'predictive_evidence_admitted':False}))
 
