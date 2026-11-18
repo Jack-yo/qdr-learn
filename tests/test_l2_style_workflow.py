@@ -77,3 +77,41 @@ def test_workflow_reports_missing_asof_symbol_without_fabricating_price(monkeypa
     cyc = next(x for x in payload["latest"] if x["style_id"] == "cyc_def")
     assert cyc["observation_status"] == "BLOCKED_INCOMPLETE_5D_WINDOW"
     assert cyc["relative_return_5d"] is None
+
+
+def test_rotation_workflow_exposes_read_only_history_and_observation_states(monkeypatch):
+    monkeypatch.setattr(l2_styles, "load_real_bundle", lambda *a, **k: _bundle())
+    payload = l2_styles.calculate_rotation(Path("."))
+    assert payload["schema"] == "qdr.l2.rotation.v1"
+    assert payload["status"] == "OBSERVATION_ONLY"
+    assert payload["source_snapshot_sha256"] == "a" * 64
+    assert len(payload["latest"]) == 7
+    assert payload["history"]
+    assert payload["historical_decision_eligible"] is False
+    assert payload["real_orders_enabled"] is False
+    assert payload["forecast_available"] is False
+    assert all(row["research_status"] == "OBSERVATION_ONLY" for row in payload["latest"])
+    assert all(row["decision_eligible"] is False for row in payload["history"])
+    assert all(row["transitioned_on_session"] for row in payload["transitions"])
+
+
+def test_unavailable_after_cutoff_price_is_blocked_not_used_as_future_evidence(monkeypatch):
+    bundle = _bundle()
+    future = pd.Timestamp("2025-06-01T00:00:00Z")
+    latest = pd.Timestamp(bundle.metadata["asof_date_et"])
+    bundle.prices.loc[
+        bundle.prices.symbol.eq("XLY") & pd.to_datetime(bundle.prices.date).eq(latest),
+        "available_at",
+    ] = future
+    monkeypatch.setattr(l2_styles, "load_real_bundle", lambda *a, **k: bundle)
+    overview = l2_styles.calculate(Path("."))
+    assert overview["coverage"]["symbols_with_asof_price"] == 13
+    xly = next(row for row in overview["coverage"]["symbols"] if row["symbol"] == "XLY")
+    assert xly["asof_present"] is True
+    assert xly["asof_available_by_cutoff"] is False
+    cyc = next(row for row in overview["latest"] if row["style_id"] == "cyc_def")
+    assert cyc["observation_status"] == "BLOCKED_INCOMPLETE_5D_WINDOW"
+    rotation = l2_styles.calculate_rotation(Path("."))
+    cyc_state = next(row for row in rotation["latest"] if row["style_id"] == "cyc_def")
+    assert cyc_state["rotation_state"] == "UNKNOWN"
+    assert cyc_state["transitioned_on_session"] is False
