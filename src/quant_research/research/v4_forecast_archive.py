@@ -245,6 +245,9 @@ def latest_forward_research(root, *, limit=5):
                               'l2_style_admission_asof_session':(
                                   receipt.get('admission_asof_session')
                                   if receipt else None),
+                              'l2_style_admission_frozen_at_utc':(
+                                  receipt.get('admission_frozen_at_utc')
+                                  if receipt else None),
                               'l2_style_context_modes':(
                                   receipt.get('context_modes') if receipt else []),
                               'l2_style_current_forward_session':(
