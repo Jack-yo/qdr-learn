@@ -21,11 +21,6 @@ from .data.bundle import load_real_bundle
 PRIVATE_OUTPUTS = {"pytest-tmp", "ops_backups", "ops_restore"}
 
 
-class LocalConsoleServer(ThreadingHTTPServer):
-    """Absorb the browser's concurrent asset and API requests during startup."""
-    request_queue_size = 64
-
-
 def allowed_artifact(root, target):
     """Legacy/synthetic and unmanifested artifacts are never served by the product."""
     try:
@@ -339,7 +334,8 @@ def handler(console):
                         '/assets/v4_ui_fidelity.js',
                         '/assets/v4_ui_market_v2.js', '/assets/v4_ui_market_v2.css',
                          '/assets/v4_ui_market_v3.js', '/assets/v4_ui_market_v3.css',
-                         '/assets/v4_ui_light.css', '/assets/v4_ui_theme.js'}:
+                         '/assets/v4_ui_light.css', '/assets/v4_ui_warehouse.js', '/assets/v4_ui_warehouse.css', '/assets/v4_ui_theme.js',
+                         '/assets/v4_ui_market_v4.js', '/assets/v4_ui_market_v4.css'}:
                 asset = Path(__file__).with_name('assets') / path.rsplit('/',1)[1]
                 content_type = 'text/css; charset=utf-8' if path.endswith('.css') else 'text/javascript; charset=utf-8'
                 return self.send(200, asset.read_bytes(), content_type)
@@ -688,8 +684,14 @@ def handler(console):
                     return self.send(400, {'schema':'qdr.l1.official.v1',
                                            'status':'BLOCKED','code':'INVALID_QUERY'})
                 try:
-                    return self.send(200, scan_official_l1(console.root,
-                        refresh=q.get('refresh', ['0'])[0] == '1'))
+                    data=scan_official_l1(console.root,
+                        refresh=q.get('refresh', ['0'])[0] == '1')
+                    try:
+                        from .workflow.l1_market_ingest import persist_public_scan
+                        data["persistence"]=persist_public_scan(console.root,data,scan_kind="official")
+                    except Exception as exc:
+                        data["persistence"]={"status":"FAILED","code":type(exc).__name__}
+                    return self.send(200,data)
                 except (ValueError, OSError, TypeError):
                     return self.send(409, {'schema':'qdr.l1.official.v1',
                                            'status':'BLOCKED','code':'OFFICIAL_DATA_INVALID'})
@@ -700,8 +702,14 @@ def handler(console):
                     return self.send(400,{'schema':'qdr.l1.extended.v1',
                                           'status':'BLOCKED','code':'INVALID_QUERY'})
                 try:
-                    return self.send(200, scan_extended_public(console.root,
-                        refresh=q.get('refresh',['0'])[0]=='1'))
+                    data=scan_extended_public(console.root,
+                        refresh=q.get('refresh',['0'])[0]=='1')
+                    try:
+                        from .workflow.l1_market_ingest import persist_public_scan
+                        data["persistence"]=persist_public_scan(console.root,data,scan_kind="extended")
+                    except Exception as exc:
+                        data["persistence"]={"status":"FAILED","code":type(exc).__name__}
+                    return self.send(200,data)
                 except (ValueError,OSError,TypeError,KeyError):
                     return self.send(409,{'schema':'qdr.l1.extended.v1',
                                           'status':'BLOCKED','code':'EXTENDED_PUBLIC_DATA_INVALID'})
@@ -715,11 +723,31 @@ def handler(console):
                     return self.send(400,{'schema':'qdr.l1.v2','status':'BLOCKED','code':'INVALID_QUERY'})
                 try:
                     data=current_l1_v2(console.root,refresh=params.get('refresh',['0'])[0]=='1')
+                    try:
+                        from .workflow.l1_market_ingest import persist_l1_v2
+                        data["persistence"]=persist_l1_v2(console.root,data)
+                    except Exception as exc:
+                        data["persistence"]={"status":"FAILED","code":type(exc).__name__}
                     return self.send(200,data)
                 except SourceUnavailable as exc:
                     return self.send(409,{'schema':'qdr.l1.v2','status':'BLOCKED','code':exc.code})
                 except (ValueError, OSError, KeyError, TypeError):
                     return self.send(409,{'schema':'qdr.l1.v2','status':'BLOCKED','code':'L1_V2_DATA_INVALID'})
+            if path == '/api/v1/l1/market-data/coverage':
+                from .workflow.l1_market_ingest import market_data_snapshot
+                from datetime import date as date_cls
+                query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+                if set(query)-{'asof'} or any(len(v)!=1 for v in query.values()):
+                    return self.send(400,{'schema':'qdr.l1.market_data_snapshot.v1',
+                                          'status':'BLOCKED','code':'INVALID_QUERY'})
+                asof=query.get('asof',[None])[0]
+                try:
+                    if asof is not None and date_cls.fromisoformat(asof).isoformat()!=asof:
+                        raise ValueError("Invalid asof")
+                    return self.send(200,market_data_snapshot(console.root,asof=asof))
+                except (ValueError,OSError,KeyError,TypeError):
+                    return self.send(409,{'schema':'qdr.l1.market_data_snapshot.v1',
+                                          'status':'BLOCKED','code':'MARKET_DATA_SNAPSHOT_INVALID'})
             if path.startswith('/api/v1/l1/'):
                 from .workflow.l1_runtime import (
                     L1Blocked, market_overview_for_api, observations_for_api,
@@ -913,6 +941,48 @@ def handler(console):
                     return self.send(409, exc.payload())
                 except (sqlite3.Error, ValueError, KeyError, OSError):
                     return self.send(409, {'status': 'BLOCKED', 'code': 'CLOSE_SNAPSHOT_INVALID'})
+            if path.startswith('/api/v1/warehouse'):
+                from .data.warehouse_observability import (
+                    overview as warehouse_overview, dataset_detail as warehouse_dataset_detail,
+                    preview_dataset as warehouse_preview_dataset, maintenance_runs as warehouse_runs,
+                )
+                query=parse_qs(urlsplit(self.path).query,keep_blank_values=True)
+                try:
+                    if any(len(values)!=1 for values in query.values()):
+                        raise ValueError('Repeated warehouse query parameters')
+                    params={key:values[0] for key,values in query.items()}
+                    if path == '/api/v1/warehouse/overview':
+                        if params: raise ValueError('Unexpected warehouse overview parameter')
+                        return self.send(200,warehouse_overview(console.root))
+                    if path == '/api/v1/warehouse/runs':
+                        if set(params)-{'limit'}: raise ValueError('Unexpected maintenance run parameter')
+                        return self.send(200,warehouse_runs(console.root,limit=int(params.get('limit','20'))))
+                    prefix='/api/v1/warehouse/datasets/'
+                    if path.startswith(prefix):
+                        parts=path[len(prefix):].split('/')
+                        if not parts[0] or len(parts)>2 or (len(parts)==2 and parts[1]!='preview'):
+                            return self.send(404,{'status':'NOT_FOUND','code':'WAREHOUSE_ROUTE_NOT_FOUND'})
+                        dataset_id=parts[0]
+                        if len(parts)==1:
+                            if params: raise ValueError('Dataset detail does not accept query parameters')
+                            return self.send(200,warehouse_dataset_detail(console.root,dataset_id))
+                        allowed={'q','start','end','symbol','dimension','limit','offset'}
+                        if set(params)-allowed: raise ValueError('Unexpected preview parameter')
+                        return self.send(200,warehouse_preview_dataset(
+                            console.root,dataset_id,q=params.get('q',''),
+                            start=params.get('start') or None,end=params.get('end') or None,
+                            symbol=params.get('symbol') or None,dimension=params.get('dimension') or None,
+                            limit=int(params.get('limit','25')),offset=int(params.get('offset','0'))))
+                    return self.send(404,{'status':'NOT_FOUND','code':'WAREHOUSE_ROUTE_NOT_FOUND'})
+                except PolicyError as exc:
+                    return self.send(409,exc.payload())
+                except KeyError:
+                    return self.send(404,{'status':'NOT_FOUND','code':'WAREHOUSE_DATASET_NOT_FOUND'})
+                except (ValueError,TypeError):
+                    return self.send(400,{'status':'BLOCKED','code':'WAREHOUSE_QUERY_INVALID'})
+                except Exception as exc:
+                    return self.send(503,{'status':'BLOCKED','code':'WAREHOUSE_READ_FAILED',
+                                          'error_type':type(exc).__name__})
             if path.startswith('/api/v1/data/catalog'):
                 from .data.catalog import catalog_artifact
                 names={'/api/v1/data/catalog':'catalog.json','/api/v1/data/catalog/datasets.csv':'datasets.csv',
@@ -1021,15 +1091,11 @@ def main(argv=None):
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument('--source',choices=['alpaca','yahoo'],default='alpaca')
     parser.add_argument('--db',type=Path)
-    parser.add_argument('--env-file',type=Path,help='Optional local Alpaca credentials file')
     args = parser.parse_args(argv)
-    if args.env_file:
-        from .cli import load_local_credentials
-        load_local_credentials(args.env_file)
     root = Path.cwd()
     if not (root / "configs/sources.yaml").is_file():
         parser.error("Start from project root")
-    server = LocalConsoleServer(("127.0.0.1", args.port), handler(Console(root,args.source,args.db)))
+    server = ThreadingHTTPServer(("127.0.0.1", args.port), handler(Console(root,args.source,args.db)))
     print(f"Real-data console: http://127.0.0.1:{server.server_port} (Ctrl+C stops)", flush=True)
     try: server.serve_forever()
     except KeyboardInterrupt: pass

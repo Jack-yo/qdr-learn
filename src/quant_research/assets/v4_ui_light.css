@@ -644,3 +644,18 @@ label{color:#576d83}
 .lv3-monitor-health{border-color:#dce5ef;color:#425971}
 .lv3-monitor-health-list>div{background:#fff;border-color:#dce5ef}
 .lv3-monitor-health-list small{color:#7589a1}
+
+
+/* Module-level async states: a failed data request must not blank the workspace. */
+.v4-module-state{display:flex;align-items:center;justify-content:space-between;gap:14px;
+  min-width:0;margin:10px 0;padding:12px 14px;border:1px solid #dfe7f0;border-radius:10px;background:#fff}
+.v4-module-state>div{display:flex;flex-direction:column;gap:4px;min-width:0}
+.v4-module-state b{font-size:12px;color:#2d4057}
+.v4-module-state small{font-size:11px;line-height:1.5;color:#73849a;overflow-wrap:anywhere}
+.v4-module-state.is-error{border-color:#f0d7d5;background:#fffafa}
+.v4-module-state.is-error b{color:#a33c3c}
+.v4-module-state.is-loading{justify-content:flex-start;background:#f9fbfe}
+.v4-module-spinner{width:15px;height:15px;flex:0 0 15px;border:2px solid #dbe5f0;border-top-color:#4e86bd;border-radius:50%;animation:v4-module-spin .8s linear infinite}
+@keyframes v4-module-spin{to{transform:rotate(360deg)}}
+.wh-module-loading,.wh-module-error{margin:12px 0}
+@media(prefers-reduced-motion:reduce){.v4-module-spinner{animation:none}}

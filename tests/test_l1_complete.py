@@ -14,7 +14,8 @@ from quant_research.workflow.l1_runtime import (build_l1_research,market_overvie
 
 
 def fixture(n=390):
-    dates=pd.bdate_range('2022-01-03',periods=n)
+    import exchange_calendars as xcals
+    dates=xcals.get_calendar('XNYS',start='2022-01-03',end='2025-12-31').sessions[:n]
     rng=np.random.default_rng(44)
     daily=rng.normal(.0005,.012,n)
     daily[::11]=rng.normal(0,.025,len(daily[::11]))
@@ -34,14 +35,51 @@ def fixture(n=390):
 
 
 def test_first_touch_labels_and_intrabar_ambiguity():
+    from quant_research.research.l1_models import first_touch_event
     bar=pd.DataFrame([{'open':100,'high':101,'low':99,'close':100},
                       {'open':100,'high':103,'low':97,'close':101},
                       {'open':101,'high':101.5,'low':100,'close':101}])
     assert first_touch_label(bar,0,2,.02,.02)=='AMBIGUOUS'
+    assert first_touch_event(bar,0,2,.02,.02)==('AMBIGUOUS',1)
     bar.loc[1,'low']=99
     assert first_touch_label(bar,0,2,.02,.02)=='UP'
     bar.loc[1,'high']=101
     assert first_touch_label(bar,0,2,.02,.02)=='NEITHER'
+
+
+def test_ewma_benchmark_is_recursive_daily_return_variance():
+    from quant_research.research.l1_models import _ewma_rv
+    values=pd.Series([.01,.02,0.0])
+    expected=252*(.94*(.94*.01**2+.06*.02**2)+.06*0.0)
+    assert _ewma_rv(values)==pytest.approx(expected**.5)
+
+
+def test_distribution_scores_use_realized_returns_and_label_uncalibrated_probabilities():
+    row={'horizon':1,'target_return':.02,'target_forward_rv':.2,
+         'e01_rv_model':.2,'e01_rv_baseline':.3,'e01_rv_ewma':.25,
+         'e03_quantiles':[-.02,-.01,0,.01,.03],
+         'e03_baseline_quantiles':[-.03,-.02,0,.02,.04],
+         'e03_expected_return':.01,'e03_baseline_mean':0,
+         'e03_p_up_unverified':.75,'e03_baseline_p_up':.5,
+         'e03_p_downside_unverified':.1,'e03_baseline_p_downside':.2,
+         'e02_probs':None,'target_first_touch':'NEITHER'}
+    score=score_l1_oos(pd.DataFrame([row])).iloc[0]
+    assert score.e03_up_brier_unverified==pytest.approx(.25**2)
+    assert score.e03_up_baseline_brier==pytest.approx(.5**2)
+    assert score.e03_mean_mse==pytest.approx(.01**2)
+    assert score.e03_quantile_hit_rates['q90']==1.0
+    assert score.e03_probability_status=='NOT_CALIBRATED_RESEARCH_ONLY'
+    row['e02_probs']={'UP':.7,'DOWN':.2,'NEITHER':.1}
+    row['e02_baseline']={'UP':.3,'DOWN':.3,'NEITHER':.4}
+    row['target_first_touch']='DOWN'
+    event=score_l1_oos(pd.DataFrame([row])).iloc[0]
+    assert event.e02_event_counts['UP']['false_positives']==1
+    assert event.e02_event_counts['DOWN']['false_negatives']==1
+    assert event.e02_log_loss==pytest.approx(-np.log(.2))
+    row['e02_probs']={'UP':.1,'DOWN':.8,'NEITHER':.1}
+    row['target_first_touch_step']=2
+    event=score_l1_oos(pd.DataFrame([row])).iloc[0]
+    assert event.e02_correct_event_mean_lead_sessions==2
 
 
 def test_l1_feature_registry_and_optional_lateness():
@@ -63,6 +101,89 @@ def test_l1_feature_registry_and_optional_lateness():
     assert out.iloc[-1].vix_30d==25
 
 
+def test_naive_availability_and_cutoff_are_rejected():
+    bars,clock=fixture(30)
+    bad=bars.copy()
+    bad.loc[bad.index[0],'available_at']='2022-01-03 21:00:00'
+    with pytest.raises(ValueError,match='timezone-aware'):
+        compute_l1_observations(bad,clock)
+    bad_clock=clock.copy()
+    bad_clock.loc[bad_clock.index[0],'decision_cutoff_utc']='2022-01-03 22:00:00'
+    with pytest.raises(ValueError,match='timezone-aware'):
+        compute_l1_observations(bars,bad_clock)
+
+
+def test_research_calendar_rejects_holidays_gaps_and_late_cutoffs():
+    from quant_research.workflow.l1_runtime import validate_research_calendar
+    _,clock=fixture(30)
+    validate_research_calendar(clock)
+    with pytest.raises(ValueError,match='INCOMPLETE'):
+        validate_research_calendar(clock.drop(index=clock.index[5]))
+    invalid=clock.copy()
+    invalid.loc[invalid.index[0],'date']=pd.Timestamp('2022-01-01')
+    with pytest.raises(ValueError):
+        validate_research_calendar(invalid)
+    late=clock.copy()
+    late.loc[late.index[0],'decision_cutoff_utc']='2022-01-04T15:00:00Z'
+    with pytest.raises(ValueError,match='CUTOFF_OUTSIDE'):
+        validate_research_calendar(late)
+
+
+def test_stock_dispersion_uses_daily_members_and_requires_consecutive_bars():
+    bars, clock = fixture(30)
+    stocks = []
+    membership = []
+    for i in range(30):
+        symbol = f'STOCK{i}'
+        for j, day in enumerate(clock.date):
+            close = 100 * (1 + i * .0001) ** j
+            stocks.append({'date': day, 'symbol': symbol, 'security_id': symbol,
+                           'open': close, 'high': close, 'low': close, 'close': close,
+                           'volume': 1000, 'available_at': (day + pd.Timedelta(hours=21)).isoformat()+'Z'})
+            membership.append({'date': day, 'security_id': symbol, 'is_member': True,
+                               'available_at': (day + pd.Timedelta(hours=20)).isoformat()+'Z'})
+    bars = pd.concat([bars, pd.DataFrame(stocks)], ignore_index=True)
+    universe = pd.DataFrame(membership)
+    base, _ = compute_l1_observations(bars, clock, universe)
+    features, _ = add_l1_features(base, bars, clock, universe=universe)
+    assert features.stock_dispersion_1.iloc[-1] == pytest.approx(np.std(np.arange(30)*.0001))
+    without_universe, _ = add_l1_features(base, bars, clock)
+    assert without_universe.stock_dispersion_1.isna().all()
+
+
+def test_sector_five_day_dispersion_does_not_require_twenty_days():
+    bars, clock = fixture(10)
+    base, _ = compute_l1_observations(bars, clock)
+    features, _ = add_l1_features(base, bars, clock)
+    assert features.sector_dispersion_5.iloc[:5].isna().all()
+    assert features.sector_dispersion_5.iloc[5:].notna().all()
+    assert features.sector_corr_20.isna().all()
+
+
+def test_zero_previous_volatility_does_not_create_infinite_observation():
+    bars,clock=fixture(30)
+    base,_=compute_l1_observations(bars,clock)
+    base.loc[24,'market_vol_20']=0.0
+    base.loc[29,'market_vol_20']=.2
+    features,audit=add_l1_features(base,bars,clock)
+    assert pd.isna(features.loc[29,'market_vol_change_5'])
+    assert audit.loc[(audit.date==clock.date.iloc[29]) & (audit.feature=='market_vol_change_5'),'status'].iloc[0]=='MISSING'
+
+
+def test_single_snapshot_audit_never_claims_history_or_model(tmp_path, monkeypatch):
+    from quant_research.workflow import l1_snapshot_audit
+    bars, clock = fixture(1)
+    day = str(clock.date.iloc[0].date())
+    snapshot = {'rows': bars.to_dict('records'), 'frozen_at_utc': clock.decision_cutoff_utc.iloc[0],
+                'source': 'TEST', 'feed': 'TEST', 'source_snapshot_sha256': 'a'*64}
+    monkeypatch.setattr(l1_snapshot_audit, 'read_snapshot', lambda root, asof: snapshot)
+    result = l1_snapshot_audit.audit_snapshot(tmp_path, day, tmp_path/'audit')
+    assert result['sessions'] == 1 and result['historical_pit_verified'] is False
+    assert result['model_admitted'] is False
+    coverage = pd.read_csv(tmp_path/'audit'/'feature_coverage.csv')
+    assert len(coverage) == len(REGISTRY) and not coverage.research_eligible.any()
+
+
 def test_l1_models_purge_forecast_and_metric_contract():
     bars,clock=fixture()
     base,_=compute_l1_observations(bars,clock)
@@ -80,8 +201,33 @@ def test_l1_models_purge_forecast_and_metric_contract():
     metrics=score_l1_oos(oos,protocol)
     assert len(metrics)==3 and metrics.research_only.all()
     assert not metrics.model_admitted.any()
+    assert metrics.e03_probability_status.eq('NOT_CALIBRATED_RESEARCH_ONLY').all()
+    assert metrics.e03_quantile_hit_rates.map(lambda value: set(value)=={'q10','q25','q50','q75','q90'}).all()
+    assert metrics.e03_up_brier_unverified.between(0,1).all()
     f=forecast_l1_research(bars,features,clock,protocol)
     assert f['trade_eligible'] is False and len(f['horizons'])==3
+
+
+def test_default_oos_evaluates_each_eligible_session():
+    bars,clock=fixture(115)
+    base,_=compute_l1_observations(bars,clock)
+    features,_=add_l1_features(base,bars,clock)
+    protocol=L1Protocol(min_train_sessions=80,calibration_sessions=25)
+    result=run_l1_oos(bars,features,clock,protocol,evaluation_start=clock.date.iloc[-8])
+    h1=result.loc[result.horizon.eq(1),'date']
+    assert list(h1)==list(clock.date.iloc[-8:-1])
+
+
+def test_ablation_rejects_unmatched_samples_and_labels():
+    from quant_research.research.l1_models import compare_l1_ablation
+    base=pd.DataFrame([{'date':pd.Timestamp('2023-01-03'),'horizon':1,
+                        'target_return':.01,'target_forward_rv':.2,'target_first_touch':'UP'}])
+    different=base.copy();different.loc[0,'target_return']=.02
+    with pytest.raises(ValueError,match='labels do not match'):
+        compare_l1_ablation(base,different,L1Protocol())
+    different=base.copy();different.loc[0,'date']=pd.Timestamp('2023-01-04')
+    with pytest.raises(ValueError,match='samples do not match'):
+        compare_l1_ablation(base,different,L1Protocol())
 
 
 def test_archive_api_and_tamper_block(tmp_path):
@@ -91,18 +237,38 @@ def test_archive_api_and_tamper_block(tmp_path):
     out=tmp_path/'outputs'/'l1_research'/'synthetic-01'
     proto=L1Protocol(min_train_sessions=80,calibration_sessions=25,refit_every=60)
     manifest=build_l1_research(bars=bars_file,cutoffs=clock_file,output=out,
-                               protocol=proto,evaluation_start='2023-01-03')
+                               protocol=proto,evaluation_start='2023-01-03',run_ablation=True)
     assert manifest['status']=='RETROSPECTIVE_RESEARCH_ONLY'
+    coverage=pd.read_csv(out/'feature_coverage.csv')
+    assert len(coverage)==len(REGISTRY)
+    assert not coverage.research_eligible.any()
+    assert set(coverage.PIT_status)=={'NOT_INDEPENDENTLY_VERIFIED'}
+    yearly=pd.read_csv(out/'oos_metrics_by_year.csv')
+    assert set(yearly.horizon)=={1,3,5} and yearly.samples.gt(0).all()
     response=market_overview_for_api(tmp_path,3)
     assert response['schema']=='qdr.l1.market.v1' and response['forecast'] is None
     assert len(response['domains'])==12 and response['status']=='OBSERVATION_ONLY'
     assert len(response['features'])==len(REGISTRY)
     assert all(x['research_only'] for x in response['features'])
-    assert validation_for_api(tmp_path)['model_admitted'] is False
+    validation=validation_for_api(tmp_path)
+    assert validation['model_admitted'] is False and len(validation['yearly_metrics'])==len(yearly)
+    assert len(validation['ablation_metrics'])==3 and manifest['ablation_requested'] is True
     assert replay_for_api(tmp_path,clock.date.iloc[-1],3)['status']=='NO_OOS_PREDICTION'
     (out/'features.csv').write_text('bad',encoding='utf8')
     with pytest.raises(L1Blocked,match='HASH_MISMATCH'):
         market_overview_for_api(tmp_path,3)
+
+
+def test_replay_blocks_missing_outcome_instead_of_returning_nan(tmp_path, monkeypatch):
+    from quant_research.workflow import l1_runtime
+    day=pd.Timestamp('2024-01-03')
+    pd.DataFrame([{'date':day,'horizon':3,'e03_expected_return':.01,
+                   'target_return':None,'e01_rv_model':.2,
+                   'target_forward_rv':.3,'target_first_touch':'NEITHER'}]).to_csv(
+                       tmp_path/'oos_predictions.csv',index=False)
+    monkeypatch.setattr(l1_runtime,'_recent_audit',lambda root,asof: (tmp_path,{},day,None,None))
+    result=l1_runtime.replay_for_api(tmp_path,str(day.date()),3)
+    assert result['status']=='INSUFFICIENT_OUTCOME_DATA' and result['prediction'] is None
 
 
 def test_optional_raw_math_and_event_cutoff():
@@ -155,10 +321,28 @@ def test_forward_freeze_is_research_only_and_tamper_evident(tmp_path):
     (identities[0]/'forecast.json').write_text('{}',encoding='utf8')
     with pytest.raises(ValueError,match='INVALID'):
         read_l1_frozen(tmp_path,date,identities[0].name)
+    from hashlib import sha256
+    manifest_path=identities[0]/'manifest.json'
+    manifest=json.loads(manifest_path.read_text(encoding='utf8'))
+    manifest['forecast_sha256']=sha256(b'{}').hexdigest()
+    manifest_path.write_text(json.dumps(manifest),encoding='utf8')
+    with pytest.raises(ValueError,match='IDENTITY_MISMATCH'):
+        read_l1_frozen(tmp_path,date,identities[0].name)
     with pytest.raises(ValueError,match='OUTSIDE_REAL_FORWARD_FREEZE_WINDOW'):
         freeze_l1_research(bars=bars,observations=obs,cutoffs=clock,
            output_root=tmp_path,source_snapshot_sha256='a'*64,asof=date,
            now_utc=instant-pd.Timedelta(hours=2),clock=Clock(),protocol=protocol)
+    late_clock=clock.copy()
+    late_clock.loc[late_clock.index[-1], 'decision_cutoff_utc']=(instant+pd.Timedelta(minutes=30)).isoformat()
+    with pytest.raises(ValueError,match='ASOF_CUTOFF_OUTSIDE_FREEZE_WINDOW'):
+        freeze_l1_research(bars=bars,observations=obs,cutoffs=late_clock,
+           output_root=tmp_path,source_snapshot_sha256='a'*64,asof=date,
+           now_utc=instant,clock=Clock(),protocol=protocol)
+    late_clock.loc[late_clock.index[-1], 'decision_cutoff_utc']=(instant-pd.Timedelta(minutes=10)).isoformat()
+    delayed=freeze_l1_research(bars=bars,observations=obs,cutoffs=late_clock,
+        output_root=tmp_path,source_snapshot_sha256='a'*64,asof=date,
+        now_utc=instant,clock=Clock(),protocol=protocol)
+    assert pd.Timestamp(delayed['knowledge_cutoff_utc'])==instant-pd.Timedelta(minutes=10)
 
 
 def test_all_dimensions_anomaly_scan_past_only():

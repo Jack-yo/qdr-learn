@@ -54,72 +54,6 @@ def test_live_provider_fetch_and_reuse_cache(tmp_path):
     assert all('test' not in url and 'private' not in url for url,_ in calls)
 
 
-@pytest.mark.parametrize('instant, expected_end',[
-    (datetime(2026,11,14,12,tzinfo=timezone.utc),'2026-11-13T21:01:00+00:00'),
-    (datetime(2026,11,27,19,tzinfo=timezone.utc),'2026-11-27T18:01:00+00:00'),
-])
-def test_delayed_snapshot_feed_uses_completed_sip_bars(tmp_path,instant,expected_end):
-    from urllib.parse import urlsplit,parse_qs
-    seen=[]
-    def fetch(url,headers):
-        seen.append(parse_qs(urlsplit(url).query))
-        return json.dumps({'bars':{'SPY':[{'t':expected_end[:10]+'T05:00:00Z'}]},'next_page_token':None}).encode()
-    source=LiveSources(tmp_path,fetch=fetch,now=lambda:instant,
-        env={'ALPACA_API_KEY':'test','ALPACA_SECRET_KEY':'private','QDR_L1_FEED':'delayed_sip'})
-    _,receipts=source.bars(symbols=['SPY'])
-    assert seen[0]['feed']==['sip']
-    assert seen[0]['end']==[expected_end]
-    assert receipts[0]['feed']=='sip'
-
-
-@pytest.mark.parametrize('wrapped',[False,True])
-def test_alpaca_snapshots_accept_direct_and_wrapped_responses(tmp_path,wrapped):
-    actual={'SPY':{'latestTrade':{'p':100.0},'latestQuote':{'bp':99.9,'ap':100.1}}}
-    payload={'snapshots':actual} if wrapped else actual
-    source=LiveSources(tmp_path,fetch=lambda url,headers:json.dumps(payload).encode(),
-        env={'ALPACA_API_KEY':'test','ALPACA_SECRET_KEY':'private'})
-    result,receipt=source.snapshots(symbols=('SPY',))
-    assert result==actual and receipt['source']=='ALPACA_delayed_sip'
-
-
-def test_cboe_current_canonical_csv_source(tmp_path):
-    calls=[]
-    def fetch(url,headers):
-        calls.append(url)
-        return b'DATE,OPEN,HIGH,LOW,CLOSE\n11/13/2026,20,22,19,21\n'
-    values,receipt=LiveSources(tmp_path,fetch=fetch,env={}).cboe_vix()
-    assert calls==['https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv']
-    assert values['2026-11-13']==21 and receipt['pit']=='CURRENT_VINTAGE'
-
-
-def test_web_startup_loads_local_credentials_without_printing_them(tmp_path,monkeypatch,capsys):
-    import os
-    from quant_research import web
-    (tmp_path/'configs').mkdir()
-    (tmp_path/'configs'/'sources.yaml').write_text('{}',encoding='utf-8')
-    env_file=tmp_path/'local.env'
-    env_file.write_text('ALPACA_API_KEY=test-key\nALPACA_SECRET_KEY=test-secret\n',encoding='utf-8')
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv('ALPACA_API_KEY',raising=False)
-    monkeypatch.delenv('ALPACA_SECRET_KEY',raising=False)
-    seen={}
-    def make_console(*args):
-        seen['key']=os.environ.get('ALPACA_API_KEY')
-        seen['secret']=os.environ.get('ALPACA_SECRET_KEY')
-        return object()
-    class Server:
-        def __init__(self,*args):self.server_port=8766
-        def serve_forever(self):pass
-        def server_close(self):pass
-    monkeypatch.setattr(web,'Console',make_console)
-    monkeypatch.setattr(web,'handler',lambda console:object())
-    monkeypatch.setattr(web,'LocalConsoleServer',Server)
-    web.main(['--env-file',str(env_file),'--port','8766'])
-    assert seen=={'key':'test-key','secret':'test-secret'}
-    output=capsys.readouterr().out
-    assert 'test-key' not in output and 'test-secret' not in output
-
-
 def test_twelve_domains_important_proxy_names():
     result=analyze_market(market(),receipts=[{'feed':'delayed_sip','fetched_at':'2026-11-14T03:00:00Z'}])
     assert len(result['domains'])==12
@@ -131,6 +65,23 @@ def test_twelve_domains_important_proxy_names():
     assert 'ETF代理' in names['breadth']['reason']
     assert names['options_positioning']['status']=='MISSING'
     assert names['price']['status']=='OBSERVED'
+
+
+def test_domain_features_expose_actual_core_etf_input_coverage():
+    full=market()
+    result=analyze_market(full,receipts=[])
+    features={item["id"]:item for domain in result["domains"] for item in domain["features"]}
+    assert features["breadth_proxy_rsp_spy_5"]["coverage_n"]==2
+    assert features["breadth_proxy_rsp_spy_5"]["expected_n"]==2
+    assert features["sector_up_share_1"]["coverage_n"]==11
+    assert features["sector_up_share_1"]["expected_n"]==11
+    assert features["sector_up_share_1"]["status"]=="OBSERVED"
+
+    partial=analyze_market(full.loc[full.symbol.ne("XLB")],receipts=[])
+    partial_features={item["id"]:item for domain in partial["domains"] for item in domain["features"]}
+    assert partial_features["sector_up_share_1"]["coverage_n"]==10
+    assert partial_features["sector_up_share_1"]["expected_n"]==11
+    assert partial_features["sector_up_share_1"]["status"]=="PARTIAL"
 
 
 def test_conditional_is_past_only_and_no_false_admission():

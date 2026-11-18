@@ -3,7 +3,7 @@
 All figures in fixtures are artificial; tests do not attest live vendor data.
 """
 from datetime import datetime, date, timedelta, timezone
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 import json
 
 import pytest
@@ -14,6 +14,7 @@ from quant_research.data.l1_public_extended import (
     parse_bls_calendar, parse_cftc_contract, parse_cboe_equities_volume,
     sample_stock_breadth, scan_extended_public,
     parse_ici_weekly_etf_issuance, parse_finra_consolidated_short_volume,
+    parse_fomc_calendar, parse_fred_observations,
 )
 
 CLOCK = datetime(2026, 11, 15, 12, 0, tzinfo=timezone.utc)
@@ -103,12 +104,29 @@ def fake_source(tmp_path,broken=None,with_stocks=True):
         if broken and broken in url:
             raise SourceUnavailable("HTTP_503")
         p=urlparse(url)
+        if p.path.endswith("/v2/assets"):
+            return json.dumps([
+                {"symbol":f"BRD{i:03d}","class":"us_equity","status":"active",
+                 "tradable":True,"exchange":"NYSE"} for i in range(40)
+            ]).encode()
+        if p.path.endswith("/stocks/snapshots"):
+            symbols=parse_qs(p.query).get("symbols",[""])[0].split(",")
+            snapshots={}
+            for i,symbol in enumerate(symbols):
+                snapshots[symbol]={
+                    "dailyBar":{"t":"2026-11-13T21:00:00Z",
+                                "c":101 if i%2==0 else 99,"v":1000},
+                    "prevDailyBar":{"t":"2026-11-12T21:00:00Z","c":100},
+                }
+            return json.dumps({"snapshots":snapshots}).encode()
         if p.path.endswith("_daily_options"):
             return CBOE
         if p.path.endswith("/fsi.csv"):
             return FSI
         if p.path.endswith("/bls.ics"):
             return BLS
+        if p.path.endswith("/fomccalendars.htm"):
+            return FOMC_HTML
         if p.path.endswith("/72hh-3qpy.json"):
             return _commodity("088691" if "088691" in url else "067651")
         if p.path.endswith("/gpe5-46if.json"):
@@ -199,13 +217,14 @@ def test_extended_scan_and_short_lived_cache(tmp_path):
     assert values["cftc_gold_net_pct_oi"]["value"]==10.0
     assert values["stock_sample_advance_share"]["value"]==100.0
     assert values["cboe_trf_notional_share"]["value"]==40.0
-    assert len(a["calendar_events"])==2
+    assert len(a["calendar_events"])==6
+    assert values["days_to_fomc"]["value"]==25
     assert values["ici_weekly_etf_net_issuance_bn_usd"]["value"]==49.83
     assert values["ici_weekly_etf_net_issuance_bn_usd"]["published_date"]=="2026-11-10"
     assert round(values["finra_spy_short_volume_pct"]["value"],2)==56.67
-    assert a["features"]==b["features"] and len(calls)==10
+    assert a["features"]==b["features"] and len(calls)==13
     cache=list((tmp_path/"data"/"cache"/"l1_on_demand").glob("*.json"))
-    assert len(cache)==10 and sum(x.stat().st_size for x in cache)<32_000_000
+    assert len(cache)==13 and sum(x.stat().st_size for x in cache)<32_000_000
 
 
 def test_isolated_feed_failure_and_no_alpaca_credentials(tmp_path):
@@ -230,3 +249,325 @@ def test_unknown_destination_is_refused(tmp_path):
     src,_=fake_source(tmp_path)
     with pytest.raises(SourceUnavailable,match="UNAPPROVED_SOURCE"):
         src.request("https://example.org/bad.json")
+
+
+def test_spy_level1_quote_spread_is_timestamped_and_persisted_as_microstructure():
+    class FakeLive:
+        env={}
+        def assets(self, refresh=False):
+            return ([{"symbol":"SPY"},{"symbol":"AAPL"}],
+                    {"sha256":"4"*64,"fetched_at":"2026-11-17T22:30:00+00:00"})
+        def snapshots_for_symbols(self, symbols, refresh=False, batch_size=200, max_workers=4):
+            return ({
+                "SPY":{
+                    "dailyBar":{"t":"2026-11-17T21:00:00Z","c":600,"v":1000},
+                    "prevDailyBar":{"t":"2026-11-16T21:00:00Z","c":599},
+                    "latestQuote":{"bp":599.9,"ap":600.1,"t":"2026-11-17T22:25:00Z"},
+                },
+                "AAPL":{
+                    "dailyBar":{"t":"2026-11-17T21:00:00Z","c":200,"v":1000},
+                    "prevDailyBar":{"t":"2026-11-16T21:00:00Z","c":199},
+                },
+            },[{"sha256":"5"*64,"fetched_at":"2026-11-17T22:30:00+00:00",
+                "source":"ALPACA_delayed_sip"}],[])
+        def request(self,*args,**kwargs):
+            raise SourceUnavailable("OFFLINE_FIXTURE")
+        def bars(self,*args,**kwargs):
+            raise SourceUnavailable("OFFLINE_FIXTURE")
+
+    result=scan_extended_public(
+        "/tmp/qdr-l1-quote-fixture",sources=FakeLive(),
+        now=datetime(2026,11,17,22,30,tzinfo=timezone.utc))
+    quote=next(x for x in result["features"] if x["id"]=="spy_level1_spread_bps")
+    assert quote["domain"]=="microstructure"
+    assert quote["value"]==pytest.approx((0.2/600.0)*10000,abs=0.001)
+    assert quote["unit"]=="bps"
+    assert quote["pit"]=="LEVEL1_QUOTE_NOT_FULL_DEPTH"
+    assert quote["observed_date"]=="2026-11-17"
+    assert quote["metadata"]["quote_timestamp"]=="2026-11-17T22:25:00+00:00"
+    assert quote["metadata"]["quote_age_seconds"]==300.0
+    assert result["source_health"]["market_breadth"]["status"]=="OBSERVED"
+
+
+def test_broad_market_breadth_uses_full_active_asset_snapshot_coverage():
+    from quant_research.data.l1_public_extended import ExtendedPublicSources
+
+    class FakeLive:
+        def assets(self, refresh=False):
+            assets=[{"symbol":f"STK{i:03d}"} for i in range(40)]
+            return assets,{"sha256":"a"*64,"fetched_at":"2026-11-17T22:30:00+00:00"}
+
+        def snapshots_for_symbols(self, symbols, refresh=False, batch_size=200, max_workers=4):
+            snapshots={}
+            for i,symbol in enumerate(symbols):
+                daily={"t":"2026-11-17T04:00:00Z","c":101 if i<20 else 99,"v":1000}
+                previous={"t":"2026-11-16T04:00:00Z","c":100}
+                snapshots[symbol]={"dailyBar":daily,"prevDailyBar":previous}
+            receipts=[{"sha256":"b"*64,"fetched_at":"2026-11-17T22:30:00+00:00"}]
+            return snapshots,receipts,[]
+
+    provider=ExtendedPublicSources(FakeLive())
+    values,receipt=provider.market_breadth("2026-11-17",
+        now=__import__("datetime").datetime.fromisoformat("2026-11-17T22:30:00+00:00"))
+    row=values["2026-11-17"]
+    assert row["coverage_n"]==40 and row["expected_n"]==40
+    assert row["advances"]==20 and row["declines"]==20
+    assert row["advance_share"]==50
+    assert row["observation_mode"]=="COMPLETED_DAILY_BAR"
+    assert receipt["pit"]=="CURRENT_ACTIVE_ASSET_UNIVERSE_NOT_HISTORICAL_PIT"
+    assert len(receipt["sha256"])==64
+
+
+def test_broad_market_breadth_does_not_call_a_partial_snapshot_full_coverage():
+    from quant_research.data.l1_public_extended import ExtendedPublicSources
+
+    class FakeLive:
+        def assets(self, refresh=False):
+            assets=[{"symbol":f"STK{i:03d}"} for i in range(100)]
+            return assets,{"sha256":"c"*64,"fetched_at":"2026-11-17T22:30:00+00:00"}
+
+        def snapshots_for_symbols(self, symbols, refresh=False, batch_size=200, max_workers=4):
+            snapshots={}
+            for i,symbol in enumerate(symbols[:60]):
+                snapshots[symbol]={"dailyBar":{"t":"2026-11-17T04:00:00Z","c":101,"v":100},
+                                   "prevDailyBar":{"t":"2026-11-16T04:00:00Z","c":100}}
+            return snapshots,[{"sha256":"d"*64,"fetched_at":"2026-11-17T22:30:00+00:00"}],[{"code":"HTTP_403"}]
+
+    provider=ExtendedPublicSources(FakeLive())
+    values,receipt=provider.market_breadth("2026-11-17",
+        now=__import__("datetime").datetime.fromisoformat("2026-11-17T22:30:00+00:00"))
+    row=values["2026-11-17"]
+    assert row["coverage_n"]==60 and row["expected_n"]==100
+    assert row["market_snapshot_coverage_pct"]==60
+    assert row["batch_error_count"]==1
+
+
+def test_broad_market_breadth_never_uses_older_more_populated_session():
+    from quant_research.data.l1_public_extended import ExtendedPublicSources
+
+    class FakeLive:
+        def assets(self, refresh=False):
+            assets=[{"symbol":f"STK{i:03d}"} for i in range(100)]
+            return assets,{"sha256":"2"*64,"fetched_at":"2026-11-17T22:30:00+00:00"}
+
+        def snapshots_for_symbols(self, symbols, refresh=False, batch_size=200, max_workers=4):
+            snapshots={}
+            # Older session has 90% coverage, but the newest session has only 10%.
+            for symbol in symbols[:90]:
+                snapshots[symbol]={
+                    "dailyBar":{"t":"2026-11-16T21:00:00Z","c":101,"v":100},
+                    "prevDailyBar":{"t":"2026-11-13T21:00:00Z","c":100},
+                }
+            for symbol in symbols[90:100]:
+                snapshots[symbol]={
+                    "dailyBar":{"t":"2026-11-17T21:00:00Z","c":102,"v":100},
+                    "prevDailyBar":{"t":"2026-11-16T21:00:00Z","c":101},
+                }
+            return snapshots,[{"sha256":"3"*64,"fetched_at":"2026-11-17T22:30:00+00:00"}],[]
+
+    provider=ExtendedPublicSources(FakeLive())
+    values,receipt=provider.market_breadth(
+        "2026-11-17",
+        now=__import__("datetime").datetime.fromisoformat("2026-11-17T22:30:00+00:00"))
+    row=values["2026-11-17"]
+    assert row["observed_date"]=="2026-11-17"
+    assert row["coverage_n"]==10 and row["expected_n"]==100
+    assert row["market_snapshot_coverage_pct"]==10
+    assert row["observation_mode"]=="COMPLETED_DAILY_BAR"
+    assert row["session_observation_counts"]=={
+        "2026-11-16":90,"2026-11-17":10}
+    assert receipt["coverage"]==0.1
+
+
+def test_alpaca_asset_directory_and_batched_snapshots_are_bounded(tmp_path):
+    calls=[]
+    def fetch(url,headers):
+        calls.append(url)
+        p=urlparse(url)
+        if p.path.endswith("/v2/assets"):
+            assets=[{"symbol":f"SYM{i:03d}","class":"us_equity","status":"active",
+                     "tradable":True,"exchange":"NYSE"} for i in range(205)]
+            assets.extend([
+                {"symbol":"INACTIVE","class":"us_equity","status":"inactive","tradable":True,"exchange":"NYSE"},
+                {"symbol":"OTC1","class":"us_equity","status":"active","tradable":True,"exchange":"OTC"},
+            ])
+            return json.dumps(assets).encode()
+        if p.path.endswith("/stocks/snapshots"):
+            symbols=parse_qs(p.query)["symbols"][0].split(",")
+            return json.dumps({"snapshots":{x:{"dailyBar":{"t":"2026-11-13T21:00:00Z","c":100,"v":1},
+                "prevDailyBar":{"t":"2026-11-12T21:00:00Z","c":99}} for x in symbols}}).encode()
+        raise AssertionError(url)
+    source=LiveSources(tmp_path,fetch=fetch,
+        env={"ALPACA_API_KEY":"fixture","ALPACA_SECRET_KEY":"fixture"},
+        now=lambda:CLOCK)
+    assets,asset_receipt=source.assets()
+    snapshots,receipts,errors=source.snapshots_for_symbols(
+        [x["symbol"] for x in assets],batch_size=100)
+    assert len(assets)==205
+    assert asset_receipt["asset_count"]==205
+    assert len(snapshots)==205
+    assert len(receipts)==3 and errors==[]
+    assert len(calls)==4
+
+def test_broad_market_breadth_preserves_asset_receipt_when_all_snapshot_batches_fail():
+    from quant_research.data.l1_public_extended import ExtendedPublicSources
+
+    class FakeLive:
+        def assets(self, refresh=False):
+            assets=[{"symbol":f"STK{i:03d}"} for i in range(120)]
+            return assets,{"sha256":"e"*64,"fetched_at":"2026-11-17T22:30:00+00:00"}
+
+        def snapshots_for_symbols(self, symbols, refresh=False, batch_size=200, max_workers=4):
+            raise SourceUnavailable("ALL_ALPACA_SNAPSHOT_BATCHES_FAILED")
+
+    provider=ExtendedPublicSources(FakeLive())
+    values,receipt=provider.market_breadth("2026-11-17",
+        now=__import__("datetime").datetime.fromisoformat("2026-11-17T22:30:00+00:00"))
+    row=values["2026-11-17"]
+    assert row["coverage_n"]==0 and row["expected_n"]==120
+    assert row["observation_mode"]=="NO_SNAPSHOT_DATA"
+    assert row["snapshot_error_code"]=="ALL_ALPACA_SNAPSHOT_BATCHES_FAILED"
+    assert receipt["input_receipts"]==["e"*64]
+    assert receipt["coverage"]==0
+
+
+def test_broad_market_breadth_retains_low_nonzero_coverage_as_partial_evidence():
+    from quant_research.data.l1_public_extended import ExtendedPublicSources
+
+    class FakeLive:
+        def assets(self, refresh=False):
+            assets=[{"symbol":f"STK{i:03d}"} for i in range(100)]
+            return assets,{"sha256":"f"*64,"fetched_at":"2026-11-17T22:30:00+00:00"}
+
+        def snapshots_for_symbols(self, symbols, refresh=False, batch_size=200, max_workers=4):
+            snapshots={}
+            for symbol in symbols[:20]:
+                snapshots[symbol]={
+                    "dailyBar":{"t":"2026-11-17T04:00:00Z","c":101,"v":100},
+                    "prevDailyBar":{"t":"2026-11-16T04:00:00Z","c":100},
+                }
+            return snapshots,[{"sha256":"1"*64,"fetched_at":"2026-11-17T22:30:00+00:00"}],[]
+
+    provider=ExtendedPublicSources(FakeLive())
+    values,_=provider.market_breadth("2026-11-17",
+        now=__import__("datetime").datetime.fromisoformat("2026-11-17T22:30:00+00:00"))
+    row=values["2026-11-17"]
+    assert row["coverage_n"]==20 and row["expected_n"]==100
+    assert row["market_snapshot_coverage_pct"]==20
+    assert row["advances"]==20
+
+FOMC_HTML = ("""<html><body>
+<h3>2026 FOMC Meetings</h3>
+<p>January</p><p>27-28</p>
+<p>March</p><p>17-18*</p>
+<p>December</p><p>8-9*</p>
+<h3>2027 FOMC Meetings</h3>
+<p>January</p><p>26-27</p>
+<p>March</p><p>16-17</p>
+<p>November</p><p>16-17</p>
+<p>Note: A two-day meeting is scheduled for January 25-26, 2028.</p>
+<p>Last Update: November 12, 2026</p>
+</body></html>""").encode()
+
+
+def test_fomc_calendar_parser_preserves_page_update_vintage():
+    events=parse_fomc_calendar(FOMC_HTML)
+    by_id={x["event_id"]:x for x in events}
+    assert "FOMC|2026-12-08" in by_id
+    assert "FOMC|2027-01-26" in by_id
+    assert "FOMC|2028-01-25" not in by_id
+    assert by_id["FOMC|2026-12-08"]["schedule_known_at"] == datetime(
+        2026,11,12,23,59,59,tzinfo=timezone.utc)
+
+
+def test_scan_extended_public_emits_fomc_feature_and_event(monkeypatch,tmp_path):
+    import quant_research.data.l1_public_extended as module
+
+    event={
+        "event_id":"FOMC|2026-12-08","name":"FOMC Meeting 2026-12-08",
+        "event_type":"FOMC",
+        "dt":datetime(2026,12,8,23,59,59,tzinfo=timezone.utc),
+        "schedule_known_at":datetime(2026,11,12,23,59,59,tzinfo=timezone.utc),
+        "published_date":"2026-11-12",
+    }
+    receipt={
+        "source":"FED_FOMC_CALENDAR","fetched_at":"2026-11-17T22:30:00+00:00",
+        "sha256":"a"*64,"pit":"CURRENT_PUBLISHED_SCHEDULE_NOT_HISTORICAL_PIT",
+        "published_date":"2026-11-12",
+    }
+
+    class FakeProvider:
+        def __init__(self,live): pass
+        def fomc_calendar(self,refresh=False): return [event],receipt
+        def fred_cross_asset(self,*args,**kwargs): raise SourceUnavailable("OFFLINE")
+        def cboe_options(self,*args,**kwargs): raise SourceUnavailable("OFFLINE")
+        def ofr_fsi(self,*args,**kwargs): raise SourceUnavailable("OFFLINE")
+        def bls_calendar(self,*args,**kwargs): raise SourceUnavailable("OFFLINE")
+        def cftc_nasdaq(self,*args,**kwargs): raise SourceUnavailable("OFFLINE")
+        def cftc_commodity(self,*args,**kwargs): raise SourceUnavailable("OFFLINE")
+        def cboe_equity_volume(self,*args,**kwargs): raise SourceUnavailable("OFFLINE")
+        def stock_breadth(self,*args,**kwargs): raise SourceUnavailable("OFFLINE")
+        def market_breadth(self,*args,**kwargs): raise SourceUnavailable("OFFLINE")
+        def ici_weekly_etf(self,*args,**kwargs): raise SourceUnavailable("OFFLINE")
+        def finra_short_volume(self,*args,**kwargs): raise SourceUnavailable("OFFLINE")
+
+    monkeypatch.setattr(module,"ExtendedPublicSources",FakeProvider)
+    result=module.scan_extended_public(tmp_path,sources=object(),
+        now=datetime(2026,11,17,22,30,tzinfo=timezone.utc))
+    fomc=next(x for x in result["features"] if x["id"]=="days_to_fomc")
+    assert fomc["value"]==21
+    assert fomc["pit"]=="CURRENT_PUBLISHED_EVENT_SCHEDULE_NOT_HISTORICAL_PIT"
+    assert result["source_health"]["fomc_calendar"]["status"]=="OBSERVED"
+    assert result["calendar_events"][0]["schedule_known_at"]=="2026-11-12T23:59:59+00:00"
+
+def test_fred_observation_parser_ignores_missing_values_and_preserves_vintage():
+    body=json.dumps({"observations":[
+        {"date":"2026-11-16","value":"2.10","realtime_start":"2026-11-17",
+         "realtime_end":"9999-12-31"},
+        {"date":"2026-11-17","value":".","realtime_start":"2026-11-17",
+         "realtime_end":"9999-12-31"},
+    ]}).encode()
+    rows=parse_fred_observations(body,"T10YIE")
+    assert len(rows)==1
+    assert rows[0]["date"]=="2026-11-16"
+    assert rows[0]["value"]==2.10
+    assert rows[0]["realtime_start"]=="2026-11-17"
+
+
+def test_fred_cross_asset_fetches_asof_vintage_and_computes_broad_usd_proxy():
+    import hashlib
+    from quant_research.data.l1_public_extended import ExtendedPublicSources,FRED_SERIES
+
+    days=["2026-11-10","2026-11-11","2026-11-12","2026-11-13","2026-11-16","2026-11-17"]
+    class FakeLive:
+        env={"FRED_API_KEY":"x"*32}
+        def request(self,endpoint,params,ttl=1800,refresh=False,feed=""):
+            assert endpoint=="https://api.stlouisfed.org/fred/series/observations"
+            assert params["realtime_start"]=="2026-11-17"
+            assert params["realtime_end"]=="2026-11-17"
+            series=params["series_id"]
+            if series=="DFII10":
+                values=[{"date":"2026-11-17","value":"1.75"}]
+            elif series=="T10YIE":
+                values=[{"date":"2026-11-17","value":"2.35"}]
+            elif series=="BAMLH0A0HYM2":
+                values=[{"date":"2026-11-17","value":"3.05"}]
+            else:
+                values=[{"date":day,"value":str(100+i*0.2)}
+                        for i,day in enumerate(days)]
+            body=json.dumps({"observations":[
+                {**x,"realtime_start":"2026-11-17","realtime_end":"9999-12-31"}
+                for x in values
+            ]}).encode()
+            return body,"2026-11-17T22:30:00+00:00",hashlib.sha256(series.encode()).hexdigest()
+
+    values,receipt=ExtendedPublicSources(FakeLive()).fred_cross_asset("2026-11-17")
+    row=values["2026-11-17"]
+    assert row["real_yield_10y"]["value"]==1.75
+    assert row["breakeven_10y"]["value"]==2.35
+    assert row["hy_oas"]["value"]==305.0
+    assert row["dxy_return_5"]["value"]==pytest.approx(1.0)
+    assert row["dxy_return_5"]["proxy"]=="DTWEXBGS_BROAD_TRADE_WEIGHTED_USD_NOT_DXY"
+    assert receipt["coverage_n"]==4
+    assert receipt["pit"]=="ALFRED_ASOF_CURRENT_SESSION_NOT_FULL_HISTORICAL_ARCHIVE"
+    assert len(receipt["input_receipts"])==4

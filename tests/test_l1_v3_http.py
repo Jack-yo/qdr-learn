@@ -7,11 +7,7 @@ import json
 
 import pytest
 
-from quant_research.web import Console,handler,LocalConsoleServer
-
-
-def test_console_accept_queue_covers_concurrent_page_requests():
-    assert LocalConsoleServer.request_queue_size>=32
+from quant_research.web import Console,handler
 
 
 def test_all_v3_browser_get_routes_are_read_only(tmp_path,monkeypatch):
@@ -30,6 +26,7 @@ def test_all_v3_browser_get_routes_are_read_only(tmp_path,monkeypatch):
             ("/api/v1/l1/v3/status","qdr.l1.v3.pipeline.status"),
             ("/api/v1/l1/v3/outcomes","qdr.l1.v3.outcomes"),
             ("/api/v1/l1/v3/history","qdr.l1.v3.history"),
+            ("/api/v1/l1/market-data/coverage","qdr.l1.market_data_snapshot.v1"),
         ]:
             with urlopen(url+endpoint,timeout=4) as response:
                 assert response.status==200

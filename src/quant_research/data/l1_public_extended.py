@@ -12,6 +12,7 @@ import csv
 import io
 import json
 import math
+from hashlib import sha256
 import re
 from collections import defaultdict
 from html.parser import HTMLParser
@@ -26,6 +27,14 @@ from quant_research.data.l1_official_sources import _date, _finite
 CBOE_PREFIX = "https://cdn.cboe.com/data/us/options/market_statistics/daily/"
 OFR_FSI = "https://www.financialresearch.gov/financial-stress-index/data/fsi.csv"
 BLS_CALENDAR = "https://www.bls.gov/schedule/news_release/bls.ics"
+FOMC_CALENDAR = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+FRED_OBSERVATIONS = "https://api.stlouisfed.org/fred/series/observations"
+FRED_SERIES = {
+    "real_yield_10y":("DFII10","%"),
+    "breakeven_10y":("T10YIE","%"),
+    "hy_oas":("BAMLH0A0HYM2","bps"),
+    "usd_broad":("DTWEXBGS","index"),
+}
 CFTC_TFF = "https://publicreporting.cftc.gov/resource/gpe5-46if.json"
 CFTC_DISAGG = "https://publicreporting.cftc.gov/resource/72hh-3qpy.json"
 CBOE_VOLUME_PREFIX = "https://cdn.cboe.com/resources/us/equities/market-statistics/historical-market-volume/"
@@ -252,6 +261,76 @@ class _HTMLToText(HTMLParser):
         self.fragments.append(text)
 
 
+def parse_fomc_calendar(body):
+    """Parse official FOMC meeting dates and the page-level published update date."""
+    try:
+        parser=_HTMLToText()
+        parser.feed(body.decode("utf-8-sig"))
+        text=" ".join(" ".join(parser.fragments).split())
+        updated=re.search(r"Last Update:\s*([A-Z][a-z]+\s+\d{1,2},\s+\d{4})",text)
+        if updated is None:
+            raise SourceUnavailable("FOMC_CALENDAR_LAST_UPDATE_MISSING")
+        published=datetime.strptime(updated.group(1),"%B %d, %Y").date()
+        known_at=datetime(published.year,published.month,published.day,23,59,59,
+                          tzinfo=timezone.utc)
+        sections=list(re.finditer(r"\b(20\d{2})\s+FOMC Meetings\b",text))
+        events={}
+        months={name:index for index,name in enumerate(
+            ("January","February","March","April","May","June","July","August",
+             "September","October","November","December"),1)}
+        meeting_pattern=re.compile(
+            r"\b(January|February|March|April|May|June|July|August|September|October|November|December)"
+            r"\s+(\d{1,2})\s*-\s*(\d{1,2})\b",re.IGNORECASE)
+        for index,section in enumerate(sections):
+            year=int(section.group(1))
+            end=sections[index+1].start() if index+1<len(sections) else len(text)
+            block=re.split(r"\bNote:",text[section.end():end],maxsplit=1)[0]
+            for match in meeting_pattern.finditer(block):
+                month=months[match.group(1).title()]
+                day=int(match.group(2))
+                meeting=datetime(year,month,day,23,59,59,tzinfo=timezone.utc)
+                event_id="FOMC|"+meeting.date().isoformat()
+                events[event_id]={
+                    "event_id":event_id,"name":"FOMC Meeting "+meeting.date().isoformat(),
+                    "event_type":"FOMC","dt":meeting,"schedule_known_at":known_at,
+                    "published_date":published.isoformat(),
+                }
+        if not events:
+            raise SourceUnavailable("FOMC_CALENDAR_NO_DATED_MEETINGS")
+        return sorted(events.values(),key=lambda item:item["dt"])
+    except (UnicodeDecodeError,ValueError,TypeError,OverflowError) as exc:
+        raise SourceUnavailable("FOMC_CALENDAR_INVALID_HTML") from exc
+
+
+def parse_fred_observations(body, series_id):
+    """Parse a bounded FRED observations response without substituting missing dots."""
+    try:
+        payload=json.loads(body)
+        rows=payload.get("observations") if isinstance(payload,dict) else None
+        if not isinstance(rows,list):
+            raise SourceUnavailable("FRED_OBSERVATIONS_MISSING")
+        values={}
+        for row in rows:
+            day=_date(row.get("date"))
+            raw=row.get("value")
+            if raw in (None,"","."):
+                continue
+            value=_finite(raw,-1_000_000,1_000_000)
+            realtime_start=_date(row.get("realtime_start") or day)
+            realtime_end=_date(row.get("realtime_end") or realtime_start)
+            if day in values:
+                raise SourceUnavailable("FRED_DUPLICATE_OBSERVATION_DATE")
+            values[day]={
+                "series_id":series_id,"date":day,"value":value,
+                "realtime_start":realtime_start,"realtime_end":realtime_end,
+            }
+        if not values:
+            raise SourceUnavailable("FRED_NO_NUMERIC_OBSERVATIONS")
+        return sorted(values.values(),key=lambda item:item["date"])
+    except (UnicodeDecodeError,ValueError,TypeError,KeyError) as exc:
+        raise SourceUnavailable("FRED_INVALID_OBSERVATIONS") from exc
+
+
 def parse_ici_weekly_etf_issuance(body):
     """Extract only the explicit current ICI reported release, no HTML table guess."""
     try:
@@ -402,6 +481,85 @@ class ExtendedPublicSources:
         body,stamp,digest=self.live.request(BLS_CALENDAR,ttl=14400,refresh=refresh)
         return parse_bls_calendar(body),self.receipt("BLS_RELEASE_CALENDAR",stamp,digest)
 
+    def fomc_calendar(self,*,refresh=False):
+        body,stamp,digest=self.live.request(FOMC_CALENDAR,ttl=14400,refresh=refresh)
+        events=parse_fomc_calendar(body)
+        receipt=self.receipt("FED_FOMC_CALENDAR",stamp,digest)
+        receipt["pit"]="CURRENT_PUBLISHED_SCHEDULE_NOT_HISTORICAL_PIT"
+        receipt["published_date"]=events[0]["published_date"]
+        return events,receipt
+
+    def fred_cross_asset(self,limit,*,refresh=False):
+        env=getattr(self.live,"env",{})
+        api_key=env.get("FRED_API_KEY") if hasattr(env,"get") else None
+        if not api_key:
+            raise SourceUnavailable("MISSING_FRED_API_KEY")
+        if not re.fullmatch(r"[A-Za-z0-9]{32}",str(api_key)):
+            raise SourceUnavailable("INVALID_FRED_API_KEY")
+        def load(item):
+            field,(series_id,unit)=item
+            params={"series_id":series_id,"api_key":api_key,"file_type":"json",
+                    "realtime_start":limit,"realtime_end":limit,
+                    "sort_order":"desc","limit":"12"}
+            body,stamp,digest=self.live.request(
+                FRED_OBSERVATIONS,params,ttl=21600,refresh=refresh)
+            observations=parse_fred_observations(body,series_id)
+            eligible=[x for x in observations
+                      if x["date"]<=limit and x["realtime_start"]<=limit]
+            if not eligible:
+                raise SourceUnavailable("FRED_NO_ASOF_OBSERVATION_"+series_id)
+            return field,unit,eligible,stamp,digest
+        loaded={}; failures=[]
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures={pool.submit(load,item):item[0] for item in FRED_SERIES.items()}
+            for future,field in [(future,field) for future,field in futures.items()]:
+                try:
+                    loaded[field]=future.result()
+                except SourceUnavailable as exc:
+                    failures.append({"series":FRED_SERIES[field][0],"code":exc.code})
+        if not loaded:
+            raise SourceUnavailable(failures[0]["code"] if failures else "FRED_NO_SERIES")
+        values={}; receipts=[]; effective_dates=[]
+        for field,(loaded_field,unit,observations,stamp,digest) in loaded.items():
+            receipts.append(digest)
+            latest=observations[-1]
+            effective_dates.append(latest["date"])
+            scale=100.0 if field=="hy_oas" else 1.0
+            if field!="usd_broad":
+                values[field]={
+                    "value":latest["value"]*scale,"unit":unit,
+                    "observed_date":latest["date"],
+                    "realtime_start":latest["realtime_start"],
+                    "series_id":latest["series_id"],
+                }
+            else:
+                if len(observations)>=6:
+                    first=observations[-6]["value"]
+                    last=observations[-1]["value"]
+                    if first>0:
+                        values["dxy_return_5"]={
+                            "value":(last/first-1)*100.0,"unit":"%",
+                            "observed_date":latest["date"],
+                            "realtime_start":latest["realtime_start"],
+                            "series_id":latest["series_id"],
+                            "proxy":"DTWEXBGS_BROAD_TRADE_WEIGHTED_USD_NOT_DXY",
+                        }
+        if not values:
+            raise SourceUnavailable("FRED_NO_FEATURE_VALUES")
+        derived=sha256(json.dumps({"asof":limit,"inputs":sorted(receipts),
+            "series":sorted(x[0] for x in FRED_SERIES.values())},
+            sort_keys=True,separators=(",",":")).encode()).hexdigest()
+        fetched=max(x[3] for x in loaded.values())
+        receipt={
+            "source":"FRED_ALFRED_ASOF_CURRENT_SESSION",
+            "fetched_at":fetched,"sha256":derived,
+            "pit":"ALFRED_ASOF_CURRENT_SESSION_NOT_FULL_HISTORICAL_ARCHIVE",
+            "input_receipts":receipts,"effective_date":min(effective_dates),
+            "coverage_n":len(values),"expected_n":4,
+            "batch_error_count":len(failures),"failures":failures,
+        }
+        return {limit:values},receipt
+
     def cftc_nasdaq(self,*,refresh=False):
         query={"cftc_contract_market_code":"20974A",
                "$select":"cftc_contract_market_code,report_date_as_yyyy_mm_dd,"
@@ -453,6 +611,172 @@ class ExtendedPublicSources:
         raise SourceUnavailable("FINRA_SHORT_VOLUME_UNAVAILABLE_"+failures[-1]
                                 if failures else "FINRA_NO_REPORT")
 
+    def market_breadth(self,limit,*,refresh=False,now=None):
+        """Broad current active/tradable non-OTC US-equity breadth from Alpaca snapshots.
+
+        This is a current vendor universe, not historical PIT membership. Snapshot
+        coverage and batch failures are returned with every metric.
+        """
+        stamp=now or datetime.now(timezone.utc)
+        if stamp.tzinfo is None:
+            raise ValueError("market breadth clock must be timezone-aware")
+        stamp=stamp.astimezone(timezone.utc)
+        assets,asset_receipt=self.live.assets(refresh=refresh)
+        symbols=[x["symbol"] for x in assets]
+        def missing_snapshot_result(code, *, snapshot_receipts=(), batch_errors=(),
+                                    observation_mode="NO_SNAPSHOT_DATA"):
+            input_hashes=[asset_receipt["sha256"]]+[x["sha256"] for x in snapshot_receipts]
+            derived=sha256(json.dumps({"asof":None,"inputs":sorted(input_hashes),
+                "universe":"ALPACA_ACTIVE_TRADABLE_NON_OTC_CURRENT_DIRECTORY_V1",
+                "snapshot_error":code},sort_keys=True,separators=(",",":")).encode()).hexdigest()
+            fetched=max([asset_receipt["fetched_at"]]+[x["fetched_at"] for x in snapshot_receipts])
+            expected=len(assets)
+            errors=list(batch_errors)
+            if code:
+                errors.append({"code":code})
+            result={
+                "advances":None,"declines":None,"unchanged":None,
+                "advance_share":None,"up_volume_share":None,
+                "downside_sync_share":None,"stock_dispersion_1":None,
+                "market_snapshot_coverage_pct":0.0,
+                "coverage_n":0,"expected_n":expected,
+                "observation_mode":observation_mode,"observed_date":None,
+                "batch_count":len(snapshot_receipts),
+                "batch_error_count":max(1,len(errors)),
+                "feed_sources":sorted({x.get("source","UNKNOWN") for x in snapshot_receipts}),
+                "batch_errors":errors[:10],
+                "spy_level1_spread_bps":None,
+                "spy_quote_timestamp":None,
+                "spy_quote_age_seconds":None,
+                "spy_quote_coverage_n":0,
+                "spy_quote_expected_n":1,
+                "asset_receipt_sha256":asset_receipt["sha256"],
+                "snapshot_receipt_sha256":[x["sha256"] for x in snapshot_receipts],
+                "snapshot_error_code":code,
+            }
+            receipt={
+                "source":"ALPACA_ACTIVE_US_EQUITY_SNAPSHOT_BREADTH",
+                "fetched_at":fetched,"sha256":derived,
+                "pit":"CURRENT_ACTIVE_ASSET_UNIVERSE_NOT_HISTORICAL_PIT",
+                "coverage_n":0,"expected_n":expected,"coverage":0.0,
+                "observation_mode":observation_mode,
+                "batch_error_count":result["batch_error_count"],
+                "feed_sources":result["feed_sources"],
+                "input_receipts":input_hashes,
+                "snapshot_error_code":code,
+            }
+            return {limit:result},receipt
+
+        try:
+            snapshots,snapshot_receipts,batch_errors=self.live.snapshots_for_symbols(
+                symbols,refresh=refresh,batch_size=200,max_workers=4)
+        except SourceUnavailable as exc:
+            return missing_snapshot_result(exc.code)
+        by_day=defaultdict(list)
+        for symbol,record in snapshots.items():
+            daily=record.get("dailyBar") or record.get("daily_bar") or {}
+            previous=record.get("prevDailyBar") or record.get("prev_daily_bar") or {}
+            try:
+                day=_date(daily.get("t"))
+                close=_finite(daily.get("c"),0)
+                prev_close=_finite(previous.get("c"),0)
+                volume=_finite(daily.get("v"),0)
+                if close<=0 or prev_close<=0 or volume<0:
+                    continue
+                by_day[day].append((symbol,close/prev_close-1,volume))
+            except (SourceUnavailable,ValueError,TypeError,KeyError):
+                continue
+        if not by_day:
+            return missing_snapshot_result("ALPACA_BROAD_SNAPSHOT_HAS_NO_VALID_DAILY_BARS",
+                snapshot_receipts=snapshot_receipts,batch_errors=batch_errors,
+                observation_mode="NO_VALID_DAILY_BARS")
+        # Freshness takes precedence over breadth: never fall back to an older,
+        # more populated session when even one newer session is present.
+        # The resulting low coverage is meaningful evidence, not a reason to backdate.
+        latest_day=max(by_day)
+        rows=by_day[latest_day]
+        session_observation_counts={
+            day:len(by_day[day]) for day in sorted(by_day)[-5:]
+        }
+        # Alpaca snapshots also carry a Level-1 latestQuote. Keep SPY's quote
+        # separate from daily-bar breadth; it is not full depth or a real-time guarantee.
+        spy_quote = None
+        quote_record = snapshots.get("SPY") or {}
+        quote = quote_record.get("latestQuote") or quote_record.get("latest_quote") or {}
+        if isinstance(quote,dict):
+            try:
+                bid = _finite(quote.get("bp",quote.get("bidPrice",quote.get("bid_price"))),0.000001)
+                ask = _finite(quote.get("ap",quote.get("askPrice",quote.get("ask_price"))),0.000001)
+                quote_time = datetime.fromisoformat(
+                    str(quote.get("t") or quote.get("timestamp")).replace("Z","+00:00"))
+                if quote_time.tzinfo is None or quote_time.utcoffset() is None:
+                    raise ValueError("quote timestamp must include timezone")
+                quote_time = quote_time.astimezone(timezone.utc)
+                quote_age = (stamp-quote_time).total_seconds()
+                if ask >= bid and 0 <= quote_age <= 86400:
+                    mid = (ask+bid)/2
+                    spy_quote = {
+                        "spread_bps":(ask-bid)/mid*10000 if mid>0 else None,
+                        "timestamp":quote_time.isoformat(),
+                        "age_seconds":round(quote_age,1),
+                    }
+            except (SourceUnavailable,ValueError,TypeError,OverflowError):
+                spy_quote = None
+        expected=len(assets)
+        covered=len(rows)
+        coverage=covered/expected if expected else 0.0
+        # Keep low-but-nonzero coverage as PARTIAL evidence; never discard the
+        # asset-directory receipt or relabel a small sample as full-market coverage.
+        returns=[x[1] for x in rows]
+        volumes=[x[2] for x in rows]
+        advances=sum(1 for x in returns if x>0)
+        declines=sum(1 for x in returns if x<0)
+        unchanged=sum(1 for x in returns if x==0)
+        total_volume=sum(volumes)
+        up_volume=sum(vol for (_,ret,vol) in rows if ret>0)
+        mean=sum(returns)/len(returns)
+        dispersion=math.sqrt(sum((x-mean)**2 for x in returns)/len(returns))*100
+        input_hashes=[asset_receipt["sha256"]]+[x["sha256"] for x in snapshot_receipts]
+        derived=sha256(json.dumps({"asof":latest_day,"inputs":sorted(input_hashes),
+            "universe":"ALPACA_ACTIVE_TRADABLE_NON_OTC_CURRENT_DIRECTORY_V1"},
+            sort_keys=True,separators=(",",":")).encode()).hexdigest()
+        fetched=max([asset_receipt["fetched_at"]]+[x["fetched_at"] for x in snapshot_receipts])
+        from quant_research.clock import TradingClock
+        clock=TradingClock()
+        latest_session=clock.session(limit)
+        completed=clock.close(latest_session)+clock.delay<=stamp
+        mode=("COMPLETED_DAILY_BAR" if latest_day==limit and completed else
+              "INTRADAY_SNAPSHOT" if latest_day>limit else
+              "LATEST_AVAILABLE_DAILY_BAR" if latest_day==limit else "STALE_SNAPSHOT")
+        result={
+            "advances":advances,"declines":declines,"unchanged":unchanged,
+            "advance_share":advances/covered*100,
+            "up_volume_share":up_volume/total_volume*100 if total_volume else None,
+            "downside_sync_share":declines/covered*100,
+            "stock_dispersion_1":dispersion,
+            "market_snapshot_coverage_pct":coverage*100,
+            "coverage_n":covered,"expected_n":expected,
+            "observation_mode":mode,"observed_date":latest_day,
+            "batch_count":len(snapshot_receipts),"batch_error_count":len(batch_errors),
+            "session_observation_counts":session_observation_counts,
+            "spy_level1_spread_bps":spy_quote["spread_bps"] if spy_quote else None,
+            "spy_quote_timestamp":spy_quote["timestamp"] if spy_quote else None,
+            "spy_quote_age_seconds":spy_quote["age_seconds"] if spy_quote else None,
+            "spy_quote_coverage_n":1 if spy_quote else 0,
+            "spy_quote_expected_n":1,
+            "feed_sources":sorted({x.get("source","UNKNOWN") for x in snapshot_receipts}),
+            "batch_errors":batch_errors[:10],
+            "asset_receipt_sha256":asset_receipt["sha256"],
+            "snapshot_receipt_sha256":[x["sha256"] for x in snapshot_receipts],
+        }
+        receipt={"source":"ALPACA_ACTIVE_US_EQUITY_SNAPSHOT_BREADTH",
+            "fetched_at":fetched,"sha256":derived,
+            "pit":"CURRENT_ACTIVE_ASSET_UNIVERSE_NOT_HISTORICAL_PIT",
+            "coverage_n":covered,"expected_n":expected,"coverage":coverage,
+            "observation_mode":mode,"batch_error_count":len(batch_errors),
+            "feed_sources":result["feed_sources"],"input_receipts":input_hashes}
+        return {limit:result},receipt
+
     def stock_breadth(self,limit,*,refresh=False):
         raw,receipts=self.live.bars(days=55,refresh=refresh,symbols=EQUITY_SAMPLE)
         output=sample_stock_breadth(raw,limit)
@@ -478,11 +802,14 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
         "cboe_options":lambda:provider.cboe_options(limit,refresh=refresh),
         "ofr_fsi":lambda:provider.ofr_fsi(refresh=refresh),
         "bls_calendar":lambda:provider.bls_calendar(refresh=refresh),
+        "fomc_calendar":lambda:provider.fomc_calendar(refresh=refresh),
+        "fred_cross_asset":lambda:provider.fred_cross_asset(limit,refresh=refresh),
         "cftc_nasdaq":lambda:provider.cftc_nasdaq(refresh=refresh),
         "cftc_gold":lambda:provider.cftc_commodity("gold",refresh=refresh),
         "cftc_wti":lambda:provider.cftc_commodity("wti",refresh=refresh),
         "cboe_equity_volume":lambda:provider.cboe_equity_volume(limit,refresh=refresh),
         "stock_sample":lambda:provider.stock_breadth(limit,refresh=refresh),
+        "market_breadth":lambda:provider.market_breadth(limit,refresh=refresh,now=stamp),
         "ici_etf":lambda:provider.ici_weekly_etf(refresh=refresh),
         "finra_short_volume":lambda:provider.finra_short_volume(limit,refresh=refresh),
     }
@@ -496,12 +823,39 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
                     if not isinstance(values,list):
                         raise SourceUnavailable("BLS_BAD_EVENT_PAYLOAD")
                     upcoming=[x for x in values if stamp<=x["dt"]<=stamp+timedelta(days=14)]
-                    calendar_events=[{"name":x["name"],"start_utc":x["dt"].isoformat()}
-                                     for x in upcoming[:25]]
+                    calendar_events.extend([{
+                        "event_id":str(x["name"])+"|"+x["dt"].isoformat(),
+                        "name":x["name"],
+                        "event_type":("CPI" if "consumer price index" in str(x["name"]).lower()
+                                      else "NFP" if "employment situation" in str(x["name"]).lower()
+                                      else "BLS"),
+                        "start_utc":x["dt"].isoformat(),
+                        "schedule_known_at":receipt["fetched_at"],
+                        "source":receipt["source"],
+                        "receipt_sha256":receipt["sha256"],
+                    } for x in upcoming[:25]])
                     day=limit
                     values={
                         day:{"bls_scheduled_next_7d":sum(1 for x in values if stamp<=x["dt"]<=stamp+timedelta(days=7))}
                     }
+                elif name=="fomc_calendar":
+                    if not isinstance(values,list):
+                        raise SourceUnavailable("FOMC_BAD_EVENT_PAYLOAD")
+                    upcoming=[x for x in values if stamp<x["dt"]<=stamp+timedelta(days=520)]
+                    if not upcoming:
+                        raise SourceUnavailable("FOMC_NO_UPCOMING_MEETINGS")
+                    calendar_events.extend([{
+                        "event_id":x["event_id"],"name":x["name"],
+                        "event_type":"FOMC","start_utc":x["dt"].isoformat(),
+                        "schedule_known_at":x["schedule_known_at"].isoformat(),
+                        "source":receipt["source"],"receipt_sha256":receipt["sha256"],
+                    } for x in upcoming])
+                    next_meeting=min(upcoming,key=lambda x:x["dt"])
+                    values={limit:{
+                        "days_to_fomc":(next_meeting["dt"].date()-
+                                        datetime.fromisoformat(limit).date()).days,
+                        "next_meeting_date":next_meeting["dt"].date().isoformat(),
+                    }}
                 eligible=[(d,v) for d,v in values.items() if d<=limit]
                 if name=="ici_etf":
                     # Use source article's publication day, not its Wednesday week-end,
@@ -523,12 +877,25 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
                 if lag>max_lag:
                     raise SourceUnavailable("STALE_OBSERVATION")
                 health[name]={"status":"OBSERVED","source":receipt["source"],
-                              "effective_date":day,"fetched_at":receipt["fetched_at"]}
-                def add(domain,fid,label,val,unit,scope="CURRENT_OBSERVATION_NOT_PIT"):
+                              "effective_date":day,"fetched_at":receipt["fetched_at"],
+                              "receipt_sha256":receipt["sha256"],"pit":receipt["pit"],
+                              "coverage_n":receipt.get("coverage_n"),
+                              "expected_n":receipt.get("expected_n"),
+                              "observation_mode":receipt.get("observation_mode"),
+                              "feed_sources":receipt.get("feed_sources"),
+                              "batch_error_count":receipt.get("batch_error_count"),
+                              "input_receipts":receipt.get("input_receipts")}
+                def add(domain,fid,label,val,unit,scope="CURRENT_OBSERVATION_NOT_PIT",
+                        *,status="OBSERVED",observed_day=None,coverage_n=None,
+                        expected_n=None,metadata=None):
                     features.append({"domain":domain,"id":fid,"label":label,
-                        "value":round(_finite(val),5),"unit":unit,"status":"OBSERVED",
-                        "source":receipt["source"],"observed_date":day,
-                        "fetched_at":receipt["fetched_at"],"pit":scope})
+                        "value":None if val is None else round(_finite(val),5),"unit":unit,
+                        "status":status,"source":receipt["source"],
+                        "observed_date":observed_day or day,
+                        "fetched_at":receipt["fetched_at"],"pit":scope,
+                        "receipt_sha256":receipt["sha256"],
+                        "coverage_n":coverage_n,"expected_n":expected_n,
+                        "metadata":metadata or {}})
                 if name=="cboe_options":
                     for field,title in (("cboe_pcr_total","全市场期权成交 Put/Call"),
                                         ("cboe_pcr_index","指数期权成交 Put/Call"),
@@ -546,6 +913,39 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
                     add("events","bls_scheduled_next_7d",
                         "未来7天 BLS 已排程经济发布",value["bls_scheduled_next_7d"],"项",
                         "CURRENT_PUBLISHED_EVENT_SCHEDULE_NOT_HISTORICAL_PIT")
+                elif name=="fomc_calendar":
+                    add("events","days_to_fomc","距离下一次 FOMC 会议天数",
+                        value["days_to_fomc"],"days",
+                        "CURRENT_PUBLISHED_EVENT_SCHEDULE_NOT_HISTORICAL_PIT",
+                        metadata={"next_meeting_date":value["next_meeting_date"],
+                                  "published_date":receipt.get("published_date")})
+                elif name=="fred_cross_asset":
+                    feature_labels={
+                        "real_yield_10y":("10年实际国债收益率","%"),
+                        "breakeven_10y":("10年通胀盈亏平衡率","%"),
+                        "hy_oas":("美国高收益债 OAS","bps"),
+                        "dxy_return_5":("广义贸易加权美元指数五日收益（DXY代理）","%"),
+                    }
+                    health[name]["status"]=(
+                        "PARTIAL" if receipt.get("batch_error_count") or
+                        receipt.get("coverage_n",0)<receipt.get("expected_n",0)
+                        else "OBSERVED")
+                    health[name]["effective_date"]=receipt.get("effective_date")
+                    for field,(label,unit) in feature_labels.items():
+                        if field not in value:
+                            continue
+                        item=value[field]
+                        age=(datetime.fromisoformat(limit).date()-
+                             datetime.fromisoformat(item["observed_date"]).date()).days
+                        if age<0 or age>7:
+                            health[name]["status"]="PARTIAL"
+                            continue
+                        add("cross_asset",field,label,item["value"],unit,
+                            "ALFRED_ASOF_CURRENT_SESSION_NOT_FULL_HISTORICAL_ARCHIVE",
+                            status="PARTIAL",observed_day=item["observed_date"],
+                            metadata={"series_id":item["series_id"],
+                                      "realtime_start":item["realtime_start"],
+                                      "proxy":item.get("proxy")})
                 elif name in ("cftc_nasdaq","cftc_gold","cftc_wti"):
                     title={"cftc_nasdaq":"Nasdaq-100 杠杆基金净仓 / OI",
                            "cftc_gold":"黄金管理资金净仓 / OI",
@@ -581,8 +981,56 @@ def scan_extended_public(root,*,sources=None,now=None,refresh=False):
                     ):
                         add("breadth",field,title,value[field],unit,
                             "FIXED_30_LARGE_CAP_STOCK_SAMPLE_NOT_FULL_MARKET_PIT")
+                elif name=="market_breadth":
+                    coverage_n=value["coverage_n"];expected_n=value["expected_n"]
+                    status=("OBSERVED" if coverage_n/expected_n>=0.98 and
+                             not value["batch_error_count"] and
+                             value["observation_mode"]!="STALE_SNAPSHOT" else "PARTIAL")
+                    if coverage_n == 0:
+                        status="MISSING"
+                    health[name]["status"]=status
+                    health[name]["code"]=value.get("snapshot_error_code")
+                    health[name]["effective_date"]=value.get("observed_date")
+                    scope="CURRENT_ACTIVE_TRADABLE_ALPACA_UNIVERSE_NOT_HISTORICAL_PIT"
+                    meta={"observation_mode":value["observation_mode"],
+                          "coverage_pct":round(value["market_snapshot_coverage_pct"],3),
+                          "batch_count":value["batch_count"],
+                          "batch_error_count":value["batch_error_count"],
+                          "feed_sources":value["feed_sources"],
+                          "input_receipts":[value["asset_receipt_sha256"]]+value["snapshot_receipt_sha256"]}
+                    observed_day=value["observed_date"]
+                    for domain,field,title,unit in (
+                        ("breadth","advances","全市场活跃可交易证券上涨家数","只"),
+                        ("breadth","declines","全市场活跃可交易证券下跌家数","只"),
+                        ("breadth","unchanged","全市场活跃可交易证券平盘家数","只"),
+                        ("breadth","advance_share","全市场活跃可交易证券上涨占比","%"),
+                        ("breadth","up_volume_share","全市场活跃可交易证券上涨成交量占比","%"),
+                        ("breadth","market_snapshot_coverage_pct","全市场快照覆盖率","%"),
+                        ("correlation","downside_sync_share","全市场活跃可交易证券同步下跌占比","%"),
+                        ("correlation","stock_dispersion_1","全市场活跃可交易证券日收益离散度","%"),
+                    ):
+                        if value[field] is None:
+                            continue
+                        add(domain,field,title,value[field],unit,scope,status=status,
+                            observed_day=observed_day,coverage_n=coverage_n,
+                            expected_n=expected_n,metadata=meta)
+                    if value.get("spy_level1_spread_bps") is not None:
+                        add("microstructure","spy_level1_spread_bps",
+                            "SPY Level-1 报价买卖价差",
+                            value["spy_level1_spread_bps"],"bps",
+                            "LEVEL1_QUOTE_NOT_FULL_DEPTH",
+                            observed_day=(value.get("spy_quote_timestamp") or "")[:10] or observed_day,
+                            coverage_n=value.get("spy_quote_coverage_n",0),
+                            expected_n=value.get("spy_quote_expected_n",1),
+                            metadata={
+                                "quote_timestamp":value.get("spy_quote_timestamp"),
+                                "quote_age_seconds":value.get("spy_quote_age_seconds"),
+                                "feed_sources":value.get("feed_sources"),
+                                "scope":"ALPACA_LEVEL1_LATEST_QUOTE_NOT_FULL_DEPTH",
+                            })
             except (SourceUnavailable,ValueError,KeyError,TypeError,OverflowError) as exc:
-                health[name]={"status":"MISSING","code":getattr(exc,"code",type(exc).__name__)}
+                health[name]={"status":"MISSING","code":getattr(exc,"code",type(exc).__name__),
+                              "fetched_at":stamp.isoformat()}
     return {"schema":"qdr.l1.extended.v1","asof_session":limit,
             "status":"OBSERVATION_ONLY" if features else "NO_AVAILABLE_PUBLIC_FEED",
             "historical_pit_verified":False,"not_in_model_scores":True,
