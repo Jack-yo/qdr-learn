@@ -43,3 +43,45 @@ def test_l2_style_overview_api_is_read_only_and_validates_query(tmp_path, monkey
         server.shutdown()
         server.server_close()
         thread.join()
+
+
+def test_l2_rotation_api_exposes_read_only_asof_replay(tmp_path, monkeypatch):
+    from quant_research.workflow import l2_styles
+
+    called = []
+    def stub(root, **kwargs):
+        called.append(kwargs)
+        return {
+            "schema": "qdr.l2.rotation.v1",
+            "status": "OBSERVATION_ONLY",
+            "asof_session": kwargs["asof"],
+            "historical_decision_eligible": False,
+            "real_orders_enabled": False,
+            "latest": [{"style_id": "size", "rotation_state": "UNKNOWN",
+                        "block_reason": "MISSING_20D_SOURCE_AVAILABILITY"}],
+            "history": [], "transitions": [],
+        }
+
+    monkeypatch.setattr(l2_styles, "calculate_rotation", stub)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler(Console(tmp_path)))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        with urlopen(base + "/api/v1/l2/styles/rotation?asof=2025-04-09") as response:
+            result = json.load(response)
+            assert response.status == 200
+        assert result["schema"] == "qdr.l2.rotation.v1"
+        assert result["latest"][0]["rotation_state"] == "UNKNOWN"
+        assert result["real_orders_enabled"] is False
+        assert called[0]["asof"] == "2025-04-09"
+        for query in ("?unknown=1", "?start=not-a-date",
+                      "?asof=2025-04-09&asof=2025-04-10"):
+            with pytest.raises(HTTPError) as error:
+                urlopen(base + "/api/v1/l2/styles/rotation" + query)
+            assert error.value.code == 400
+        assert len(called) == 1
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
