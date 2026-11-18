@@ -199,6 +199,10 @@ def four_layer_status(root: Path, *, asof: str | None = None,
         blockers.append("L3_SESSION_NOT_CURRENT")
     if not l4_record:
         blockers.append("L4_RISK_REVIEW_MISSING")
+    elif l4_record.get("status") not in {
+        "RESEARCH_PLANS_ONLY", "NO_RESEARCH_CANDIDATES"
+    }:
+        blockers.append("L4_RISK_REVIEW_INVALID")
     elif l4_record.get("session_date_et") != target_asof:
         blockers.append("L4_SESSION_NOT_CURRENT")
     if (
