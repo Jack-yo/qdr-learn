@@ -9,6 +9,9 @@ import pandas as pd
 
 from quant_research.clock import TradingClock
 from quant_research.data.bundle import load_real_bundle
+from quant_research.research.l2_rotation import (
+    ROTATION_PROTOCOL_VERSION, rotation_states_v1,
+)
 from quant_research.research.l2_style_rotation import (
     REQUIRED_SYMBOLS,
     registry_payload,
@@ -19,7 +22,8 @@ from quant_research.research.l2_style_rotation import (
 def calculate(root: Path, *, asof: str | None = None,
               cutoff: datetime | None = None,
               start: str = "2017-01-03",
-              source: str = "yahoo") -> dict:
+              source: str = "yahoo",
+              include_rotation: bool = False) -> dict:
     """Read verified existing prices and calculate observations; never ingests data."""
     root = Path(root)
     if source.lower() != "yahoo":
@@ -47,18 +51,35 @@ def calculate(root: Path, *, asof: str | None = None,
     available.index = pd.to_datetime(available.index)
     close = close.reindex(index=sessions, columns=REQUIRED_SYMBOLS)
     available = available.reindex(index=sessions, columns=REQUIRED_SYMBOLS)
+    available = available.apply(pd.to_datetime, utc=True, errors="coerce")
+    cutoff_timestamp = pd.Timestamp(metadata["knowledge_cutoff_utc"])
+    if cutoff_timestamp.tzinfo is None:
+        raise ValueError("L2_REQUIRES_TIMEZONE_AWARE_CUTOFF")
+    cutoff_timestamp = cutoff_timestamp.tz_convert("UTC")
+    # Ignore prices with missing or post-cutoff source availability.
+    eligible = available.notna() & available.le(cutoff_timestamp)
+    close = close.where(eligible)
+    available = available.where(eligible)
     observations = style_observations_v1(close, available)
 
     symbol_coverage = []
     for symbol in REQUIRED_SYMBOLS:
         group = prices_long.loc[prices_long.symbol.eq(symbol)]
         latest = group.loc[pd.to_datetime(group.date).eq(pd.Timestamp(end))]
+        at_cutoff = bool(
+            len(latest) and pd.to_datetime(
+                latest.available_at, utc=True, errors="coerce"
+            ).notna().all() and pd.to_datetime(
+                latest.available_at, utc=True, errors="coerce"
+            ).le(cutoff_timestamp).all()
+        )
         symbol_coverage.append({
             "symbol": symbol,
             "rows": int(len(group)),
             "first_session": str(pd.to_datetime(group.date).min().date()) if len(group) else None,
             "last_session": str(pd.to_datetime(group.date).max().date()) if len(group) else None,
             "asof_present": bool(len(latest)),
+            "asof_available_by_cutoff": at_cutoff,
             "available_at": (
                 pd.to_datetime(latest.available_at, utc=True).max().isoformat()
                 if len(latest) else None
@@ -85,7 +106,7 @@ def calculate(root: Path, *, asof: str | None = None,
     records = lambda frame: json.loads(
         frame.to_json(orient="records", date_format="iso")
     )
-    return {
+    payload = {
         **registry_payload(),
         "status": "OBSERVATION_ONLY",
         "asof_session": end,
@@ -99,7 +120,7 @@ def calculate(root: Path, *, asof: str | None = None,
         "real_orders_enabled": False,
         "coverage": {
             "required_symbols": len(REQUIRED_SYMBOLS),
-            "symbols_with_asof_price": sum(x["asof_present"] for x in symbol_coverage),
+            "symbols_with_asof_price": sum(x["asof_available_by_cutoff"] for x in symbol_coverage),
             "symbols": symbol_coverage,
             "exchange_sessions": len(sessions),
         },
@@ -111,4 +132,48 @@ def calculate(root: Path, *, asof: str | None = None,
             "OBSERVATION_ONLY_NO_FORECAST",
             "NO_DATA_INGESTION_OR_WAREHOUSE_MUTATION",
         ],
+    }
+    if include_rotation:
+        rotation = rotation_states_v1(
+            observations, cutoff_utc=metadata["knowledge_cutoff_utc"]
+        )
+        current = rotation.loc[rotation.date.eq(end)]
+        recent = rotation.groupby("style_id", sort=False).tail(126)
+        transitions = rotation.loc[rotation.transitioned_on_session].tail(50)
+        payload["rotation"] = {
+            "schema": "qdr.l2.rotation.v1",
+            "protocol_version": ROTATION_PROTOCOL_VERSION,
+            "status": "OBSERVATION_ONLY",
+            "asof_session": end,
+            "latest": records(current),
+            "history": records(recent),
+            "transitions": records(transitions),
+            "styles_with_known_state": int(current.rotation_state.ne("UNKNOWN").sum()),
+            "styles_unknown": int(current.rotation_state.eq("UNKNOWN").sum()),
+            "history_scope": "CURRENT_VINTAGE_RESEARCH_ONLY_NOT_HISTORICAL_PIT",
+            "forecast_available": False,
+            "real_orders_enabled": False,
+        }
+    return payload
+
+
+def calculate_rotation(root: Path, *, asof: str | None = None,
+                       cutoff: datetime | None = None,
+                       start: str = "2017-01-03") -> dict:
+    """Expose P2 only, based on the same read-only P1 source snapshot."""
+    overview = calculate(
+        root, asof=asof, cutoff=cutoff, start=start, include_rotation=True
+    )
+    return {
+        "source": overview["source"],
+        "price_basis": overview["price_basis"],
+        "source_snapshot_sha256": overview["source_snapshot_sha256"],
+        "signal_cutoff_utc": overview["signal_cutoff_utc"],
+        "asof_session": overview["asof_session"],
+        "registry_version": overview["registry_version"],
+        "historical_decision_eligible": False,
+        "real_orders_enabled": False,
+        "coverage": overview["coverage"],
+        "limitations": overview["limitations"],
+        **overview["rotation"],
     }
