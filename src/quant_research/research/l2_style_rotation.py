@@ -109,10 +109,32 @@ def _basket_return(daily: pd.DataFrame, symbols: tuple[str, ...]) -> pd.Series:
 
 def _rolling_available(availability: pd.DataFrame, symbols: tuple[str, ...],
                        window: int) -> pd.Series:
+    """Exact UTC maximum over all window+1 closes without rolling datetime aggregation.
+
+    A return window of N sessions consumes N+1 close prices. Missing any
+    constituent availability blocks the complete window. Work with int64 UTC
+    nanoseconds to avoid pandas' unsupported datetime rolling.max and float
+    timestamp precision loss.
+    """
     values = availability.loc[:, list(symbols)]
-    complete = values.notna().all(axis=1)
-    latest = values.max(axis=1).where(complete)
-    return latest.rolling(window + 1, min_periods=window + 1).max()
+    complete = values.notna().all(axis=1).to_numpy(dtype=bool)
+    latest = pd.to_datetime(values.max(axis=1), utc=True)
+    count = window + 1
+    out = np.full(len(values), np.iinfo(np.int64).min, dtype=np.int64)
+    if len(values) >= count:
+        raw = latest.array.asi8
+        maxima = np.lib.stride_tricks.sliding_window_view(
+            np.where(complete, raw, np.iinfo(np.int64).min), count
+        ).max(axis=1)
+        valid = np.convolve(
+            complete.astype(np.int16), np.ones(count, dtype=np.int16),
+            mode="valid"
+        ).eq(count) if hasattr(np.ndarray, "eq") else (
+            np.convolve(complete.astype(np.int16),
+                        np.ones(count, dtype=np.int16), mode="valid") == count
+        )
+        out[count - 1:] = np.where(valid, maxima, np.iinfo(np.int64).min)
+    return pd.Series(pd.to_datetime(out, utc=True), index=values.index)
 
 
 def _rolling_wealth_drawdown(returns: pd.Series, window: int) -> pd.Series:
@@ -137,6 +159,8 @@ def style_observations_v1(prices: pd.DataFrame,
     source_availability = availability.loc[:, REQUIRED_SYMBOLS].apply(
         pd.to_datetime, utc=True, errors="coerce"
     )
+    # A price without its first-known timestamp is not an eligible observation.
+    close = close.where(source_availability.notna())
     returns = _daily_returns(close)
 
     records: list[pd.DataFrame] = []
