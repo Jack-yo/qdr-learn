@@ -930,6 +930,27 @@ def handler(console):
                 except ValueError as exc:
                     return self.send(400,{'status':'BLOCKED','code':'INVALID_L2_STYLE_REQUEST','detail':str(exc)})
                 except Exception as exc:return self.send(503,{'status':'BLOCKED','code':type(exc).__name__})
+            if path == '/api/v1/l2/styles/forecast':
+                try:
+                    query=parse_qs(urlsplit(self.path).query)
+                    if set(query)-{'asof','horizon','start'} or any(len(v)!=1 for v in query.values()):
+                        raise ValueError('Invalid L2 forecast query')
+                    asof=query.get('asof',[None])[0]
+                    start=query.get('start',['2017-01-03'])[0]
+                    horizon=int(query['horizon'][0]) if 'horizon' in query else None
+                    if asof is not None and date.fromisoformat(asof).isoformat()!=asof:
+                        raise ValueError('Invalid L2 forecast asof date')
+                    if date.fromisoformat(start).isoformat()!=start:
+                        raise ValueError('Invalid L2 forecast start date')
+                    from .workflow.l2_forecast import calculate_forecast
+                    return self.send(200,calculate_forecast(
+                        console.root,asof=asof,horizon=horizon,start=start))
+                except FileNotFoundError as exc:
+                    return self.send(409,{'status':'BLOCKED','code':str(exc)})
+                except PolicyError as exc:return self.send(409,exc.payload())
+                except ValueError as exc:
+                    return self.send(400,{'status':'BLOCKED','code':'INVALID_L2_FORECAST_REQUEST','detail':str(exc)})
+                except Exception as exc:return self.send(503,{'status':'BLOCKED','code':type(exc).__name__})
             if path in {'/api/v1/styles','/api/v1/styles/export.csv'}:
                 try:
                     query=parse_qs(urlsplit(self.path).query)
