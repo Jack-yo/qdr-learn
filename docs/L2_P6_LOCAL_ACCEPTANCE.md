@@ -225,8 +225,17 @@ explicitly unbound to formal L2 qualification.
 - fail on a forged/mismatched receipt.
 
 `run_managed_forward` and the L3 OOS study independently re-run the binding
-audit. The receipt is checked again after model fitting so a bundle change
-during fit causes:
+audit. When v2 history contains PIT replay, independent L3 OOS evaluation must
+start strictly after the fixed L2 admission became real. The effective
+admission date is the later of the P5 validation as-of session and the New York
+calendar date of its actual freeze timestamp. Earlier evaluation fails with:
+
+```text
+V4_L3_OOS_MUST_START_AFTER_L2_ADMISSION
+```
+
+The receipt is checked again after model fitting so a bundle change during fit
+causes:
 
 ```text
 MODEL_INPUT_CHANGED_DURING_FIT_NO_ARCHIVE_WRITE
@@ -246,9 +255,16 @@ archive identity.
 l2_style_binding_verified
 l2_style_historical_pit_attested
 l2_style_binding_context_sha256
+l2_style_admission_validation_identity
+l2_style_admission_asof_session
+l2_style_context_modes
+l2_style_current_forward_session
 ```
 
-Legacy archives remain false/null for these fields.
+Four-layer readiness requires that the L3 receipt's admission identity equals
+the current L2 P5 validation identity and that the target session is the
+`CURRENT_FROZEN_FORWARD` row. Legacy v1 archives remain readable but do not
+satisfy these v2 readiness gates.
 
 ## 8. V4 daily style stage
 
