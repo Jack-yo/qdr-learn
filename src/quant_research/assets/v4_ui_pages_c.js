@@ -78,14 +78,13 @@ pages.risk=async()=>{
       '$'+n(x.equity,2),n(x.positions,0),n(x.new_modeled_fills,0)])):
      empty('暂无足够连续交易日数据','只有已经冻结并真实观察的未来交易日可以形成模拟账本曲线。'),
    '数据源时间序列 · 非券商绩效');
- const evidence=card('数据与模型证据',
+ const evidence='<details class="workspace-details"><summary>数据与模型证据</summary>'+card('证据',
    row('模拟账户',riskStatus(account?.status||'NOT_READY'))+
    row('逐日流水',riskStatus(timeline?.status||'NOT_READY'))+
    row('前向模拟数据资格',riskStatus(readiness?.stages?.forward_shadow?.status||'BLOCKED'))+
    row('持仓集中度计算',riskStatus(risk?.status||'NOT_READY'))+
-   row('真实券商订单',badge('不支持','amber'))+
-   note('风险预警应持续复核市场环境、个股止损、行业敞口与策略模型失效，不允许把预测精度伪装为真实交易回报。'),
-   'L4 · 证据检查');
+   note('技术状态仅用于诊断；风险决策仍以持仓、敞口和规则触发为主。'),
+   '按需查看')+'</details>';
  return {title:'持仓与风控',html:nav+cards+
    '<div class="grid cols2" style="margin-top:15px">'+limits+'</div>'+
    '<div class="grid cols2" style="margin-top:15px">'+positionCard+alertCard+'</div>'+
@@ -100,8 +99,8 @@ pages.data=async()=>{
    V.moduleLoading('研究资格矩阵')};
  }
  if(!response.ok){
-  return {title:'研究准入与资格',html:
-   heading('研究准入与资格','判断现有数据和研究证据能否进入历史模型、严格回测、前向研究与模拟组合',
+  return {title:'研究准入',html:
+   heading('研究准入','判断当前数据、模型和回测证据能否进入正式研究流程。',
     link('/studio#warehouse','查看数据仓库'))+
    V.moduleError('研究资格矩阵',response.error,'/api/v1/research/readiness')};
  }
