@@ -21,6 +21,7 @@ from quant_research.workflow.l2_l3_binding import (
     materialize_l2_style_history,
     validate_l2_style_binding_receipt,
 )
+from quant_research.workflow.l2_downstream import build_l2_l3_context_builder
 from quant_research.workflow.v4_study_cli import _checked_inputs
 
 
@@ -81,11 +82,39 @@ def create_l2_bound_v4_bundle(
     if "market_style" not in frames:
         raise ValueError("L2_BOUND_MARKET_STYLE_INPUT_MISSING")
 
-    bound_style = materialize_l2_style_history(root, frames["market_style"])
+    market_dates = pd.to_datetime(
+        frames["market_style"]["date"], errors="raise"
+    )
+    if (
+        market_dates.empty or market_dates.dt.tz is not None
+        or not market_dates.eq(market_dates.dt.normalize()).all()
+    ):
+        raise ValueError("L2_BOUND_MARKET_STYLE_SESSION_INVALID")
+    current_session = market_dates.max().date().isoformat()
+    context_builder, admission = build_l2_l3_context_builder(
+        root, current_session=current_session
+    )
+    bound_style = materialize_l2_style_history(
+        root,
+        frames["market_style"],
+        downstream_builder=context_builder,
+    )
     _same_base_market_evidence(frames["market_style"], bound_style)
     receipt = validate_l2_style_binding_receipt(
-        build_l2_style_history_binding(root, bound_style)
+        build_l2_style_history_binding(
+            root,
+            bound_style,
+            downstream_builder=context_builder,
+        )
     )
+    if (
+        receipt.get("admission_validation_identity")
+            != admission.get("identity")
+        or receipt.get("admission_asof_session")
+            != admission.get("asof_session")
+        or receipt.get("current_forward_session") != current_session
+    ):
+        raise ValueError("L2_BOUND_ADMISSION_RECEIPT_SCOPE_MISMATCH")
     source_manifest_path = source_folder / "manifest.json"
     source_manifest_sha = _digest(source_manifest_path)
 
