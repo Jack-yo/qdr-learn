@@ -92,14 +92,18 @@ def test_premarket_and_post_entry_window_both_fail_before_archive():
             _check(now=datetime.fromisoformat(stamp))
 
 
-def test_all_three_horizons_and_on_time_metadata_required():
+def test_all_three_horizons_and_staged_candidate_metadata_required():
     source,_=_inputs()
     source['labels']=source['labels'].iloc[:2]
     with pytest.raises(ValueError,match='MISSING_ALL_CURRENT_HORIZON'):
         _check(frames=source)
     source,_=_inputs()
     source['candidate_meta'].loc[0,'available_at']='2026-11-10T21:16:00Z'
-    with pytest.raises(ValueError,match='NOT_KNOWN_AS_OF_T'):
+    output=_check(frames=source)
+    assert output['layer_signal_time']=='2026-11-10T21:16:00+00:00'
+    source,_=_inputs()
+    source['candidate_meta'].loc[0,'available_at']='2026-11-10T22:01:00Z'
+    with pytest.raises(ValueError,match='LAYER_INPUT_NOT_YET_AVAILABLE'):
         _check(frames=source)
 
 
