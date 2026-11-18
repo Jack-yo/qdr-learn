@@ -64,6 +64,7 @@ def _receipt():
         "context_modes": ["CURRENT_FROZEN_FORWARD"],
         "admission_asof_session": "2026-01-30",
         "admission_validation_identity": "6" * 64,
+        "admission_frozen_at_utc": "2026-01-31T01:00:00Z",
         "current_forward_session": "2026-01-30",
         "historical_replay_rows": 0,
         "current_forward_rows": 1,
