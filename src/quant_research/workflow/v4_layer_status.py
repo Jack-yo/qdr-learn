@@ -163,6 +163,10 @@ def four_layer_status(root: Path, *, asof: str | None = None,
             l3_record.get("l2_style_admission_asof_session")
             if l3_record else None
         ),
+        "style_admission_frozen_at_utc": (
+            l3_record.get("l2_style_admission_frozen_at_utc")
+            if l3_record else None
+        ),
         "style_context_modes": (
             l3_record.get("l2_style_context_modes") or []
             if l3_record else []
