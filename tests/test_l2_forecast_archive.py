@@ -1,8 +1,10 @@
 """Immutable P4 forecast archive tests."""
 import json
 
+import pandas as pd
 import pytest
 
+from quant_research.clock import TradingClock
 from quant_research.research.l2_forecast import HORIZONS, MODEL_VERSION, STYLE_IDS
 from quant_research.research.l2_forecast_archive import (
     freeze_forecast_snapshot_v1, load_frozen_forecast_v1,
@@ -34,40 +36,70 @@ def _payload():
     }
 
 
+def _forward_time():
+    window=TradingClock().window("2025-04-09",1)
+    return pd.Timestamp(window.signal_time)+pd.Timedelta(minutes=1)
+
+
+def _late_time():
+    window=TradingClock().window("2025-04-09",1)
+    return pd.Timestamp(window.entry_time)+pd.Timedelta(minutes=1)
+
+
 def test_freeze_is_idempotent_for_same_identity(tmp_path):
     payload=_payload()
-    first=freeze_forecast_snapshot_v1(tmp_path,payload)
-    second=freeze_forecast_snapshot_v1(tmp_path,payload)
+    first=freeze_forecast_snapshot_v1(tmp_path,payload,now_utc=_forward_time())
+    second=freeze_forecast_snapshot_v1(tmp_path,payload,now_utc=_forward_time())
     assert first["identity"]==second["identity"]
+    assert first["status"]=="FROZEN_L2_FORWARD_RESEARCH_ONLY"
+    assert first["prospective_before_next_open"] is True
     loaded=load_frozen_forecast_v1(tmp_path,"2025-04-09",MODEL_VERSION)
     assert loaded["identity"]==first["identity"]
     assert loaded["eligible_units"]==21
+    assert loaded["prospective_before_next_open"] is True
     assert loaded["real_orders_enabled"] is False
+
+
+def test_late_freeze_is_retrospective_and_cannot_be_upgraded(tmp_path):
+    payload=_payload()
+    frozen=freeze_forecast_snapshot_v1(tmp_path,payload,now_utc=_late_time())
+    assert frozen["status"]=="FROZEN_L2_RETROSPECTIVE_ASOF_ONLY"
+    assert frozen["prospective_before_next_open"] is False
+    loaded=load_frozen_forecast_v1(tmp_path,"2025-04-09",MODEL_VERSION)
+    assert loaded["prospective_before_next_open"] is False
+
+    path=tmp_path/"outputs/l2_style_forecasts/2025-04-09"/MODEL_VERSION/"manifest.json"
+    data=json.loads(path.read_text(encoding="utf-8"))
+    data["status"]="FROZEN_L2_FORWARD_RESEARCH_ONLY"
+    data["prospective_before_next_open"]=True
+    path.write_text(json.dumps(data),encoding="utf-8")
+    with pytest.raises(ValueError,match="SCOPE_TIME_MISMATCH"):
+        load_frozen_forecast_v1(tmp_path,"2025-04-09",MODEL_VERSION)
 
 
 def test_same_session_model_cannot_be_overwritten_with_different_prediction(tmp_path):
     payload=_payload()
-    freeze_forecast_snapshot_v1(tmp_path,payload)
+    freeze_forecast_snapshot_v1(tmp_path,payload,now_utc=_forward_time())
     changed=_payload()
     changed["forecasts"][0]["predicted_relative_return"]=0.5
     with pytest.raises(FileExistsError,match="DIFFERENT_IDENTITY"):
-        freeze_forecast_snapshot_v1(tmp_path,changed)
+        freeze_forecast_snapshot_v1(tmp_path,changed,now_utc=_forward_time())
 
 
 def test_archive_rejects_incomplete_or_execution_eligible_rows(tmp_path):
     payload=_payload()
     payload["forecasts"]=payload["forecasts"][:-1]
     with pytest.raises(ValueError,match="21 explicit"):
-        freeze_forecast_snapshot_v1(tmp_path,payload)
+        freeze_forecast_snapshot_v1(tmp_path,payload,now_utc=_forward_time())
     payload=_payload()
     payload["forecasts"][0]["decision_eligible"]=True
     with pytest.raises(ValueError,match="execution eligible"):
-        freeze_forecast_snapshot_v1(tmp_path,payload)
+        freeze_forecast_snapshot_v1(tmp_path,payload,now_utc=_forward_time())
 
 
 def test_archive_detects_manifest_tampering(tmp_path):
     payload=_payload()
-    freeze_forecast_snapshot_v1(tmp_path,payload)
+    freeze_forecast_snapshot_v1(tmp_path,payload,now_utc=_forward_time())
     path=tmp_path/"outputs/l2_style_forecasts/2025-04-09"/MODEL_VERSION/"manifest.json"
     data=json.loads(path.read_text(encoding="utf-8"))
     data["eligible_units"]=20
