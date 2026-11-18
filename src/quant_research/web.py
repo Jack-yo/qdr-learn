@@ -953,6 +953,19 @@ def handler(console):
                 except ValueError as exc:
                     return self.send(400,{'status':'BLOCKED','code':'INVALID_L2_FORECAST_REQUEST','detail':str(exc)})
                 except Exception as exc:return self.send(503,{'status':'BLOCKED','code':type(exc).__name__})
+            if path == '/api/v1/l2/styles/validation':
+                try:
+                    query=parse_qs(urlsplit(self.path).query)
+                    if set(query)-{'asof'} or any(len(v)!=1 for v in query.values()):
+                        raise ValueError('Invalid L2 validation query')
+                    asof=query.get('asof',[None])[0]
+                    if asof is not None and date.fromisoformat(asof).isoformat()!=asof:
+                        raise ValueError('Invalid L2 validation asof date')
+                    from .workflow.l2_validation import read_latest_validation
+                    return self.send(200,read_latest_validation(console.root,asof=asof))
+                except ValueError as exc:
+                    return self.send(400,{'status':'BLOCKED','code':'INVALID_L2_VALIDATION_REQUEST','detail':str(exc)})
+                except Exception as exc:return self.send(503,{'status':'BLOCKED','code':type(exc).__name__})
             if path in {'/api/v1/styles','/api/v1/styles/export.csv'}:
                 try:
                     query=parse_qs(urlsplit(self.path).query)
