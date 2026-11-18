@@ -76,6 +76,7 @@ def test_p5_build_uses_fixed_oos_span_and_preserves_21_units(tmp_path, monkeypat
             "style_id": style,
             "horizon": horizon,
             "forward_relative_return": 0.001,
+            "label_available_at": pd.Timestamp("2025-12-31T22:00:00Z"),
         }
         for day in dates
         for style in STYLE_IDS
@@ -103,7 +104,7 @@ def test_p5_build_uses_fixed_oos_span_and_preserves_21_units(tmp_path, monkeypat
             pd.DataFrame(),
             metadata,
             dates,
-            pd.Timestamp("2025-03-01T22:00:00Z"),
+            pd.Timestamp("2026-01-01T00:00:00Z"),
         ),
     )
     monkeypatch.setattr(
@@ -223,3 +224,122 @@ def test_freeze_validation_writes_only_completed_report(tmp_path, monkeypatch):
     assert frozen["status"] == "FROZEN_P5_RESEARCH_VALIDATION"
     assert frozen["identity"] == "d" * 64
     assert frozen["real_orders_enabled"] is False
+
+
+def test_p5_excludes_labels_and_frozen_snapshots_after_validation_asof(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        l2_validation, "forecast_settings",
+        lambda root: {
+            "label_bundle_id": "accepted-v1",
+            "min_training_sessions": 60,
+            "embargo_sessions": 5,
+            "ridge_alpha": 1.0,
+        },
+    )
+    dates = pd.bdate_range("2025-01-02", periods=140)
+    cutoff = pd.Timestamp("2025-07-01T23:00:00Z")
+    labels = pd.DataFrame([
+        {
+            "date": day,
+            "style_id": style,
+            "horizon": horizon,
+            "forward_relative_return": 0.001,
+            "label_available_at": (
+                cutoff - pd.Timedelta(days=1)
+                if day <= dates[-11]
+                else cutoff + pd.Timedelta(days=10)
+            ),
+        }
+        for day in dates
+        for style in STYLE_IDS
+        for horizon in HORIZONS
+    ])
+    monkeypatch.setattr(
+        l2_validation, "load_label_bundle_v1",
+        lambda *args: (
+            labels,
+            {"labels_sha256": "a" * 64, "source_evidence_sha256": "b" * 64},
+        ),
+    )
+    monkeypatch.setattr(
+        l2_validation, "load_observation_frame",
+        lambda root, asof=None: (
+            pd.DataFrame({"x": [1]}),
+            pd.DataFrame(),
+            {
+                "asof_date_et": str(dates[-1].date()),
+                "snapshot_sha256": "c" * 64,
+                "source": "YAHOO",
+            },
+            dates,
+            cutoff,
+        ),
+    )
+    monkeypatch.setattr(
+        l2_validation, "validation_settings",
+        lambda root: l2_validation.ValidationConfig(
+            oos_evaluation_sessions=126,
+            min_oos_sessions=60,
+        ),
+    )
+    captured = {}
+    def fake_ablation(observations, known_labels, sessions, evaluation_dates, clock, **kwargs):
+        captured["labels"] = known_labels.copy()
+        captured["dates"] = pd.DatetimeIndex(evaluation_dates)
+        full = pd.DataFrame([
+            {
+                "date": captured["dates"][-1],
+                "style_id": style,
+                "horizon": horizon,
+                "forward_relative_return": 0.001,
+                "predicted_relative_return": 0.001,
+                "zero_baseline": 0.0,
+                "mean_baseline": 0.0,
+                "momentum_baseline": 0.0,
+                "variant": "full",
+            }
+            for style in STYLE_IDS for horizon in HORIZONS
+        ])
+        return full, pd.DataFrame()
+    monkeypatch.setattr(l2_validation, "run_ablation_oos_v1", fake_ablation)
+    monkeypatch.setattr(
+        l2_validation, "validate_oos_v1",
+        lambda *args, **kwargs: _oos_validation(),
+    )
+    frozen = pd.DataFrame([
+        {
+            "date": dates[-20],
+            "style_id": "size",
+            "horizon": 1,
+        },
+        {
+            "date": dates[-1] + pd.Timedelta(days=10),
+            "style_id": "size",
+            "horizon": 1,
+        },
+    ])
+    monkeypatch.setattr(
+        l2_validation, "collect_frozen_forecasts_v1",
+        lambda *args: frozen.copy(),
+    )
+    forward_seen = {}
+    monkeypatch.setattr(
+        l2_validation, "score_genuine_forward_v1",
+        lambda frozen_rows, known_labels: (
+            forward_seen.update({
+                "frozen": frozen_rows.copy(),
+                "labels": known_labels.copy(),
+            }) or pd.DataFrame()
+        ),
+    )
+    monkeypatch.setattr(
+        l2_validation, "qualify_models_v1",
+        lambda *args, **kwargs: _qualification(),
+    )
+
+    report = l2_validation.build_validation_report(tmp_path)
+    assert report["status"] == "P5_RESEARCH_VALIDATION"
+    assert captured["labels"]["label_available_at"].le(cutoff).all()
+    assert captured["dates"].max() <= dates[-11]
+    assert pd.to_datetime(forward_seen["frozen"]["date"]).max() <= dates[-1]
+    assert forward_seen["labels"]["label_available_at"].le(cutoff).all()
