@@ -327,6 +327,28 @@ P5 Walk-forward/ablation is not a per-page or per-GET task and should not be
 silently rerun every day. Run/freeze it explicitly when validation evidence is
 being refreshed.
 
+A single explicit EOD command now performs this progression without weakening
+any gate:
+
+```bash
+uv run --locked python -m quant_research.workflow.four_layer_day \
+  --date YYYY-MM-DD \
+  --source-bundle <current_unbound_v4_bundle> \
+  --research-budget 100000
+```
+
+Before L2 admission, the expected successful research status is:
+
+```text
+L2_FORWARD_EVIDENCE_CAPTURED_ADMISSION_PENDING
+```
+
+That means the genuine-forward P4 observation was retained and L3/L4 were not
+touched. After L2 admission, the command derives a date-scoped immutable
+L2-bound bundle, then runs the existing L3/L4 research pipeline. A fully aligned
+day returns `FOUR_LAYER_RESEARCH_DAY_SAVED`, still with all execution flags
+false.
+
 ## 11. P6 exit condition
 
 P6 engineering is accepted only after:
