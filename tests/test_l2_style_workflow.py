@@ -115,3 +115,21 @@ def test_unavailable_after_cutoff_price_is_blocked_not_used_as_future_evidence(m
     cyc_state = next(row for row in rotation["latest"] if row["style_id"] == "cyc_def")
     assert cyc_state["rotation_state"] == "UNKNOWN"
     assert cyc_state["transitioned_on_session"] is False
+
+
+def test_5d_observation_does_not_mask_incomplete_60d_coverage(monkeypatch):
+    bundle = _bundle()
+    early = sorted(bundle.prices.date.unique())[24]
+    partial = DatasetBundle(
+        bundle.prices.loc[pd.to_datetime(bundle.prices.date).le(early)],
+        {**bundle.metadata, "asof_date_et": str(pd.Timestamp(early).date())},
+        {},
+    )
+    monkeypatch.setattr(l2_styles, "load_real_bundle", lambda *a, **k: partial)
+    payload = l2_styles.calculate(Path("."))
+    size = next(row for row in payload["latest"] if row["style_id"] == "size")
+    assert size["relative_return_5d"] is not None
+    assert size["relative_return_20d"] is not None
+    assert size["relative_return_60d"] is None
+    assert size["observation_status"] == "PARTIAL_INCOMPLETE_60D_WINDOW"
+    assert size["missing_reason"] == "MISSING_OR_INCOMPLETE_60D_WINDOW"
