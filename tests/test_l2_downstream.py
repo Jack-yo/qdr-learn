@@ -39,6 +39,7 @@ def _frozen():
         "frozen_at_utc": (
             pd.Timestamp(window.signal_time) + pd.Timedelta(minutes=1)
         ).isoformat(),
+        "prospective_before_next_open": True,
         "forecasts": live["forecasts"],
     }
 
