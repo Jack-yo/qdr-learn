@@ -103,10 +103,18 @@ def test_all_three_horizons_and_on_time_metadata_required():
         _check(frames=source)
 
 
-def test_market_style_must_be_known_by_signal_cutoff():
+def test_market_style_can_move_l3_signal_later_inside_close_to_open_window():
     source,_=_inputs()
     source['market_style'].loc[0,'state_available_at']='2026-11-10T21:16:00Z'
-    with pytest.raises(ValueError,match='MARKET_STYLE_NOT_KNOWN'):
+    output=_check(frames=source)
+    assert output['base_signal_time']=='2026-11-10T21:15:00+00:00'
+    assert output['layer_signal_time']=='2026-11-10T21:16:00+00:00'
+
+
+def test_market_style_not_yet_available_at_preflight_time_is_rejected():
+    source,_=_inputs()
+    source['market_style'].loc[0,'state_available_at']='2026-11-10T22:01:00Z'
+    with pytest.raises(ValueError,match='L3_LAYER_INPUT_NOT_YET_AVAILABLE'):
         _check(frames=source)
 
 
