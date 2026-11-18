@@ -22,7 +22,7 @@ FORECAST_PROTOCOL_VERSION = "qdr-l2-style-forecast-v1"
 MODEL_VERSION = "ridge-standardscaler-alpha1-v1"
 VERIFIED_LABEL_KIND = "VERIFIED_RAW_RELATIVE_RETURN"
 HORIZONS = (1, 3, 5)
-FEATURES = (
+INPUT_FEATURES = (
     "relative_return_5d",
     "relative_return_20d",
     "relative_return_60d",
@@ -32,6 +32,14 @@ FEATURES = (
     "relative_drawdown_20d",
     "relative_drawdown_60d",
 )
+DERIVED_FEATURES = (
+    "cross_style_dispersion_20d",
+    "state_strong_accelerating",
+    "state_strong_decelerating",
+    "state_weak_improving",
+    "state_weak_deteriorating",
+)
+FEATURES = INPUT_FEATURES + DERIVED_FEATURES
 STYLE_IDS = tuple(style.style_id for style in STYLE_REGISTRY)
 
 
@@ -61,11 +69,11 @@ def _normalize_sessions(exchange_sessions) -> pd.DatetimeIndex:
 
 
 def _prepare_observations(observations: pd.DataFrame) -> pd.DataFrame:
-    required = {"date", "style_id", "available_at", *FEATURES}
+    required = {"date", "style_id", "available_at", *INPUT_FEATURES}
     missing = required - set(observations.columns)
     if missing:
         raise ValueError("Missing L2 forecast observation columns: " + ", ".join(sorted(missing)))
-    frame = observations.loc[:, ["date", "style_id", "available_at", *FEATURES]].copy()
+    frame = observations.loc[:, ["date", "style_id", "available_at", *INPUT_FEATURES]].copy()
     frame["date"] = pd.to_datetime(frame["date"], errors="raise").dt.tz_localize(None).dt.normalize()
     frame["available_at"] = pd.to_datetime(frame["available_at"], utc=True, errors="coerce")
     if frame["date"].isna().any() or frame["style_id"].isna().any():
@@ -75,12 +83,26 @@ def _prepare_observations(observations: pd.DataFrame) -> pd.DataFrame:
     unknown = sorted(set(frame.style_id) - set(STYLE_IDS))
     if unknown:
         raise ValueError("Unknown L2 style IDs: " + ",".join(unknown))
-    for feature in FEATURES:
+    for feature in INPUT_FEATURES:
         values = pd.to_numeric(frame[feature], errors="coerce")
         invalid = values.notna() & ~np.isfinite(values)
         if invalid.any():
             raise ValueError("Nonfinite L2 forecast feature: " + feature)
         frame[feature] = values
+    frame["cross_style_dispersion_20d"] = frame.groupby("date")[
+        "relative_return_20d"
+    ].transform(lambda values: values.std(ddof=1) if values.notna().sum() >= 2 else np.nan)
+    known = frame.relative_return_20d.notna() & frame.relative_acceleration_5d.notna()
+    strength = frame.relative_return_20d
+    acceleration = frame.relative_acceleration_5d
+    definitions = {
+        "state_strong_accelerating": (strength > 0) & (acceleration > 0),
+        "state_strong_decelerating": (strength > 0) & (acceleration < 0),
+        "state_weak_improving": (strength < 0) & (acceleration > 0),
+        "state_weak_deteriorating": (strength < 0) & (acceleration < 0),
+    }
+    for feature, mask in definitions.items():
+        frame[feature] = np.where(known, mask.astype(float), np.nan)
     return frame.sort_values(["date", "style_id"], kind="stable").reset_index(drop=True)
 
 
