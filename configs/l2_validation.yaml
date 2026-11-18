@@ -6,4 +6,7 @@ min_positive_subperiod_fraction: 0.67
 min_subperiods: 3
 max_subperiod_relative_mse_loss: 0.10
 min_forward_frozen_sessions_for_admission: 60
+min_forward_relative_mse_gain_vs_best_baseline: 0.0
+min_forward_directional_accuracy: 0.50
 require_all_baselines_beaten: true
+model_admission_enabled: false
