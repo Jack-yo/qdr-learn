@@ -133,11 +133,25 @@ def four_layer_status(root: Path, *, asof: str | None = None,
         "source_snapshot_sha256": (
             l3_record.get("source_snapshot_sha256") if l3_record else None
         ),
-        "style_input_binding_verified": False,
-        "style_input_binding_code": (
-            "L3_STYLE_INPUT_NOT_BOUND_TO_L2_QUALIFICATION_IDENTITY"
+        "style_input_binding_verified": bool(
+            l3_record and l3_record.get("l2_style_binding_verified") is True
         ),
-        "downstream_context_eligible": False,
+        "style_historical_pit_attested": bool(
+            l3_record and l3_record.get("l2_style_historical_pit_attested") is True
+        ),
+        "style_binding_context_sha256": (
+            l3_record.get("l2_style_binding_context_sha256")
+            if l3_record else None
+        ),
+        "style_input_binding_code": (
+            None
+            if l3_record and l3_record.get("l2_style_binding_verified") is True
+            else "L3_STYLE_INPUT_NOT_BOUND_TO_L2_QUALIFICATION_IDENTITY"
+        ),
+        "downstream_context_eligible": bool(
+            l3_record
+            and l3_record.get("l2_style_binding_verified") is True
+        ),
     }
 
     try:
@@ -172,8 +186,22 @@ def four_layer_status(root: Path, *, asof: str | None = None,
         blockers.append("L3_FORWARD_RESEARCH_MISSING")
     if not l3["style_input_binding_verified"]:
         blockers.append("L3_L2_STYLE_BINDING_NOT_VERIFIED")
+    elif not l3["style_historical_pit_attested"]:
+        blockers.append("L3_L2_STYLE_HISTORY_NOT_PIT_ATTESTED")
+    if l3_record and l3_record.get("session_date_et") != target_asof:
+        blockers.append("L3_SESSION_NOT_CURRENT")
     if not l4_record:
         blockers.append("L4_RISK_REVIEW_MISSING")
+    elif l4_record.get("session_date_et") != target_asof:
+        blockers.append("L4_SESSION_NOT_CURRENT")
+    if (
+        l3_record and l4_record
+        and l3_record.get("source_snapshot_sha256")
+        and l4_record.get("source_snapshot_sha256")
+        and l3_record.get("source_snapshot_sha256")
+        != l4_record.get("source_snapshot_sha256")
+    ):
+        blockers.append("L3_L4_SOURCE_SNAPSHOT_MISMATCH")
 
     return {
         "schema": SCHEMA,
