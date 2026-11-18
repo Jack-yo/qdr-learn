@@ -151,6 +151,27 @@ def _verify(path: Path) -> dict:
     return {**data, "identity": identity, "frozen_at_utc": frozen}
 
 
+def load_validation_report_v1(
+    root: Path, asof: str, identity: str
+) -> dict:
+    """Load one exact integrity-checked P5 report by session and identity."""
+    requested = date.fromisoformat(asof)
+    if requested.isoformat() != asof:
+        raise ValueError("Invalid P5 validation session")
+    if not _SHA.fullmatch(str(identity)):
+        raise ValueError("Invalid P5 validation identity")
+    path = (
+        Path(root).resolve()
+        / "outputs/l2_validation" / asof / identity / "manifest.json"
+    )
+    if not path.is_file():
+        raise FileNotFoundError("L2_P5_VALIDATION_REPORT_NOT_FOUND")
+    report = _verify(path)
+    if report.get("asof_session") != asof or report.get("identity") != identity:
+        raise ValueError("P5_VALIDATION_REPORT_SCOPE_MISMATCH")
+    return report
+
+
 def load_latest_validation_v1(root: Path, *, asof: str | None = None) -> dict:
     """Load newest integrity-checked P5 report, optionally for one session."""
     base = Path(root).resolve() / "outputs/l2_validation"
