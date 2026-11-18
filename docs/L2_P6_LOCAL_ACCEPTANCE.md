@@ -219,6 +219,7 @@ The current implementation checks:
 - receipt feature-bundle SHA matches current admitted L2;
 - receipt L2 source-snapshot set contains the current L2 source snapshot;
 - L4 latest nonfuture risk/research-plan review;
+- L4 review points to the exact current L3 forecast archive identity;
 - L3/L4 session freshness;
 - L3/L4 source-snapshot consistency.
 
@@ -244,6 +245,7 @@ L3_SESSION_NOT_CURRENT
 L4_RISK_REVIEW_MISSING
 L4_SESSION_NOT_CURRENT
 L3_L4_SOURCE_SNAPSHOT_MISMATCH
+L4_L3_FORECAST_IDENTITY_MISMATCH
 ```
 
 Do not turn these into warnings merely to obtain a green status.
@@ -259,7 +261,7 @@ P6 engineering is accepted only after:
 5. an L2->L3 binding receipt passes across the actual L3 style-history rows;
 6. V4 preflight re-verifies that receipt;
 7. L3 forecast archive preserves it in identity;
-8. L4 review uses the matching L3 source snapshot;
+8. L4 review uses the matching L3 source snapshot and exact L3 forecast identity;
 9. four-layer API/browser review shows only evidence-supported statuses.
 
 Even when these pass, `complete_four_layer_context=true` is still a research
