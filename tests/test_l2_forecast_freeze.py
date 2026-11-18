@@ -29,7 +29,7 @@ def test_research_ready_forecast_is_explicitly_frozen(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         l2_forecast_freeze, "freeze_forecast_snapshot_v1",
-        lambda root, payload: {
+        lambda root, payload, **kwargs: {
             "status":"FROZEN_L2_RESEARCH_ONLY",
             "session_date_et":"2025-04-09","identity":"a"*64,
             "model_version":"ridge-v1","eligible_units":7,"blocked_units":14,
@@ -40,3 +40,31 @@ def test_research_ready_forecast_is_explicitly_frozen(monkeypatch, tmp_path):
     assert result["status"]=="FROZEN_L2_RESEARCH_ONLY"
     assert result["identity"]=="a"*64
     assert result["real_orders_enabled"] is False
+
+
+def test_prospective_only_blocks_before_signal_without_archive_write(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        l2_forecast_freeze, "calculate_forecast",
+        lambda root, asof=None: {
+            "status": "RESEARCH_ONLY",
+            "asof_session": "2025-04-09",
+            "eligible_units": 21,
+            "blocked_units": 0,
+        },
+    )
+    called = []
+    monkeypatch.setattr(
+        l2_forecast_freeze, "freeze_forecast_snapshot_v1",
+        lambda *args, **kwargs: called.append(True),
+    )
+    result = l2_forecast_freeze.freeze_current_forecast(
+        tmp_path,
+        asof="2025-04-09",
+        prospective_only=True,
+        now_utc="2025-04-09T19:00:00Z",
+    )
+    assert result["status"] == "BLOCKED_NO_ARCHIVE_WRITE"
+    assert result["code"] == "L2_NOT_IN_PROSPECTIVE_FREEZE_WINDOW"
+    assert called == []
