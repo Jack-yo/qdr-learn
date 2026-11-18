@@ -43,8 +43,8 @@ def validate_l2_style_binding_receipt(receipt: dict) -> dict:
     required = {
         "contract_version", "scope", "start_session", "end_session", "rows",
         "style_columns", "context_identity_sha256", "model_versions",
-        "label_bundle_sha256s", "source_snapshot_sha256s",
-        "binding_verified", "historical_pit_attested",
+        "label_bundle_sha256s", "feature_bundle_sha256s",
+        "source_snapshot_sha256s", "binding_verified", "historical_pit_attested",
         "decision_eligible", "real_orders_enabled",
     }
     if not isinstance(receipt, dict) or required - set(receipt):
@@ -77,7 +77,8 @@ def validate_l2_style_binding_receipt(receipt: dict) -> dict:
     if not _SHA.fullmatch(str(receipt["context_identity_sha256"])):
         raise ValueError("L3_L2_STYLE_BINDING_IDENTITY_INVALID")
     for field in (
-        "model_versions", "label_bundle_sha256s", "source_snapshot_sha256s"
+        "model_versions", "label_bundle_sha256s", "feature_bundle_sha256s",
+        "source_snapshot_sha256s"
     ):
         values = receipt[field]
         if not isinstance(values, list) or not values or values != sorted(set(values)):
@@ -86,6 +87,8 @@ def validate_l2_style_binding_receipt(receipt: dict) -> dict:
         raise ValueError("L3_L2_STYLE_BINDING_MODEL_VERSION_INVALID")
     if any(not _SHA.fullmatch(str(x)) for x in receipt["label_bundle_sha256s"]):
         raise ValueError("L3_L2_STYLE_BINDING_LABEL_SHA_INVALID")
+    if any(not _SHA.fullmatch(str(x)) for x in receipt["feature_bundle_sha256s"]):
+        raise ValueError("L3_L2_STYLE_BINDING_FEATURE_SHA_INVALID")
     if any(not _SHA.fullmatch(str(x)) for x in receipt["source_snapshot_sha256s"]):
         raise ValueError("L3_L2_STYLE_BINDING_SOURCE_SHA_INVALID")
     if receipt["binding_verified"] is not True:
@@ -138,6 +141,7 @@ def build_l2_style_history_binding(
     identities = []
     model_versions = set()
     label_shas = set()
+    feature_shas = set()
     source_shas = set()
     all_pit = True
     expected_columns = None
@@ -152,6 +156,10 @@ def build_l2_style_history_binding(
             raise ValueError("L3_L2_VALIDATION_IDENTITY_MISSING:" + session)
         if not _SHA.fullmatch(str(context.get("label_bundle_sha256") or "")):
             raise ValueError("L3_L2_LABEL_BUNDLE_SHA_MISSING:" + session)
+        if not _SHA.fullmatch(str(context.get("feature_bundle_sha256") or "")):
+            raise ValueError("L3_L2_FEATURE_BUNDLE_SHA_MISSING:" + session)
+        if context.get("historical_feature_pit_attested") is not True:
+            raise ValueError("L3_L2_HISTORICAL_FEATURE_PIT_NOT_ATTESTED:" + session)
         if not _SHA.fullmatch(str(context.get("source_snapshot_sha256") or "")):
             raise ValueError("L3_L2_SOURCE_SNAPSHOT_SHA_MISSING:" + session)
         model_version = context.get("model_version")
@@ -196,6 +204,7 @@ def build_l2_style_history_binding(
 
         model_versions.add(model_version)
         label_shas.add(str(context["label_bundle_sha256"]))
+        feature_shas.add(str(context["feature_bundle_sha256"]))
         source_shas.add(str(context["source_snapshot_sha256"]))
         all_pit = all_pit and context.get("historical_decision_eligible") is True
         identities.append({
@@ -204,6 +213,7 @@ def build_l2_style_history_binding(
             "validation_identity": context["validation_identity"],
             "model_version": model_version,
             "label_bundle_sha256": context["label_bundle_sha256"],
+            "feature_bundle_sha256": context["feature_bundle_sha256"],
             "source_snapshot_sha256": context["source_snapshot_sha256"],
             "style_values": {
                 column: column_values[column] for column in columns
@@ -222,6 +232,7 @@ def build_l2_style_history_binding(
         ).hexdigest(),
         "model_versions": sorted(model_versions),
         "label_bundle_sha256s": sorted(label_shas),
+        "feature_bundle_sha256s": sorted(feature_shas),
         "source_snapshot_sha256s": sorted(source_shas),
         "binding_verified": True,
         "historical_pit_attested": bool(all_pit),
