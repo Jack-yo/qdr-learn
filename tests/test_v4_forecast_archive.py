@@ -102,6 +102,7 @@ def _l2_binding_receipt(context_sha="1" * 64, historical_pit=False):
         "context_identity_sha256": context_sha,
         "model_versions": ["ridge-v1"],
         "label_bundle_sha256s": ["2" * 64],
+        "source_snapshot_sha256s": ["4" * 64],
         "binding_verified": True,
         "historical_pit_attested": historical_pit,
         "decision_eligible": False,
