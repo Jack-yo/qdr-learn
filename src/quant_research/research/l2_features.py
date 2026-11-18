@@ -80,6 +80,9 @@ def build_verified_style_features_v1(
         pd.to_datetime, utc=True, errors="coerce"
     )
     verified = action_verified.loc[:, REQUIRED_SYMBOLS].fillna(False).astype(bool)
+    closes.index=sessions
+    known.index=sessions
+    verified.index=sessions
     if (closes.notna() & closes.le(0)).any().any():
         raise ValueError("Verified historical closes must be positive")
 
