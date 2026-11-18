@@ -280,6 +280,8 @@ def four_layer_status(root: Path, *, asof: str | None = None,
         blockers.append("L3_L4_SOURCE_SNAPSHOT_MISMATCH")
     if (
         l3_record and l4_record
+        and l3.get("style_input_binding_verified")
+        and l3.get("style_historical_pit_attested")
         and l4_record.get("source_forecast_identity")
         != l3_record.get("identity")
     ):
