@@ -30,28 +30,28 @@ pages.risk=async()=>{
     x.actual==null?'—':pct(x.actual),
     x.limit==null?'—':pct(x.limit),
     x.affected_securities?e(x.affected_securities.join(', ')):'—']);
- const nav=heading('持仓管理与风控预警',
-   '在已存在的模拟持仓基础上监控仓位、相关性、波动和模型状态；不局限于买入前止损',
-   link('/paper','打开组合账本及逐日复盘'));
+ const nav=heading('持仓与风控',
+   '当前持仓、组合敞口、预警与退出规则。',
+   link('/paper','组合账本'));
  const cards=grid(4,[
-   kpi('模拟组合权益',verified?'$'+n(account.equity,2):'—',
+   kpi('组合权益',verified?'$'+n(account.equity,2):'—',
        verified?'根据已核对的真实价格估值':'缺少合格模拟账本','blue'),
-   kpi('现金余额',verified?'$'+n(account.cash,2):'—',
+   kpi('现金',verified?'$'+n(account.cash,2):'—',
        '未发生实际券商成交','green'),
-   kpi('组合权益持仓占比',riskOK?pct(risk.gross_weight):'—',
+   kpi('权益仓位',riskOK?pct(risk.gross_weight):'—',
        '仓位集中度由实际持仓估算','purple'),
-   kpi('当前风险预警',riskOK?n(alerts.length,0):'—',
+   kpi('风险预警',riskOK?n(alerts.length,0):'—',
        '未核验时不填零','amber')
  ].join(''));
  const limits=grid(2,[
-   card('仓位与退出规则 · 风控政策',
+   card('仓位与退出规则',
      row('单笔计划权益风险',pct(.003))+
      row('单只股票上限',pct(.10))+
      row('组合总仓位上限',pct(.50))+
      row('行业仓位上限',pct(.25))+
      row('初始保护止损','2 × ATR20')+
      row('默认短线持仓','1 / 3 / 5 个交易日')+
-     note('上述为研究基线阈值，具体策略版本的冻结参数须单独核对。实际止损不能保证隔夜跳空风险。'),
+     note('当前显示策略基线与冻结规则；隔夜跳空风险需单独复核。'),
      '静态研究限制'),
    card('组合风险度量',
      riskOK?row('当前持仓集中度',riskStatus(risk.status))+
@@ -62,23 +62,23 @@ pages.risk=async()=>{
        empty('组合风险暂不可计算',requests[1].ok?e(risk?.code||'没有内部对账的持仓估值'):e(requests[1].error?.message)),
      '波动 / 相关性 / 下行风险')
  ].join(''));
- const positionCard=card('当前模拟持仓 · 真实账本',
+ const positionCard=card('当前持仓',
     detail.length?table(['证券ID','数量','最近估值价','估计市值','行业'],detail):
       empty('当前没有具备内部对账的持仓','只有来源真实、身份明确且完成对账的持仓才能列入风险表。'),
     verified?'账本已内部对账 · 非券商订单':'缺少合格持仓');
- const alertCard=card('风险预警 · 规则与解释',
+ const alertCard=card('风险预警',
     riskOK?(alerts.length?table(['触发规则','风险对象','当前风险','约束值','受影响标的'],warningRows):
        empty('当前未触发已核验的规则预警','无超额集中度不等于不存在市场和尾部风险。')):
       empty('尚不能确认预警状态','缺少来源可核对的持仓，不能声称不存在风险。'),
     '个股集中 / 行业集中 / 总仓位');
- const historyCard=card('逐日权益与模拟账本',
+ const historyCard=card('权益轨迹',
    sessions.length>1?svgLine(sessions.filter(x=>x.equity!=null).map(x=>x.equity),'#6bd5bf',160)+
      table(['实际交易日','现金','组合权益','持仓数','本日模拟成交'],
      sessions.slice(-10).map(x=>[date(x.session_date_et),'$'+n(x.cash,2),
       '$'+n(x.equity,2),n(x.positions,0),n(x.new_modeled_fills,0)])):
      empty('暂无足够连续交易日数据','只有已经冻结并真实观察的未来交易日可以形成模拟账本曲线。'),
    '数据源时间序列 · 非券商绩效');
- const evidence=card('来源与模型可靠性',
+ const evidence=card('数据与模型证据',
    row('模拟账户',riskStatus(account?.status||'NOT_READY'))+
    row('逐日流水',riskStatus(timeline?.status||'NOT_READY'))+
    row('前向模拟数据资格',riskStatus(readiness?.stages?.forward_shadow?.status||'BLOCKED'))+
@@ -86,7 +86,7 @@ pages.risk=async()=>{
    row('真实券商订单',badge('不支持','amber'))+
    note('风险预警应持续复核市场环境、个股止损、行业敞口与策略模型失效，不允许把预测精度伪装为真实交易回报。'),
    'L4 · 证据检查');
- return {title:'持仓管理与风控预警',html:nav+cards+
+ return {title:'持仓与风控',html:nav+cards+
    '<div class="grid cols2" style="margin-top:15px">'+limits+'</div>'+
    '<div class="grid cols2" style="margin-top:15px">'+positionCard+alertCard+'</div>'+
    '<div class="grid cols2" style="margin-top:15px">'+historyCard+evidence+'</div>'};
@@ -94,8 +94,8 @@ pages.risk=async()=>{
 pages.data=async()=>{
  const response=await settle('/api/v1/research/readiness');
  if(response.pending){
-  return {title:'研究准入与资格',html:
-   heading('研究准入与资格','判断现有数据和研究证据能否进入历史模型、严格回测、前向研究与模拟组合',
+  return {title:'研究准入',html:
+   heading('研究准入','判断当前数据、模型和回测证据能否进入正式研究流程。',
     link('/studio#warehouse','查看数据仓库')+link('/data','高级数据维护'))+
    V.moduleLoading('研究资格矩阵')};
  }
@@ -134,8 +134,8 @@ pages.data=async()=>{
  const backtest=stages.historical_backtest?.status;
  const forward=stages.forward_shadow?.status;
  const html=
-  heading('研究准入与资格',
-   '只回答“这些数据与证据能不能用于研究”。数据资产、来源、字段、更新和预览统一去数据仓库查看。',
+  heading('研究准入',
+   '集中查看历史模型、严格回测和前向研究的准入状态。',
    link('/studio#warehouse','查看数据仓库')+link('/data','高级数据维护'))+
   '<div class="v4-muted-note" style="margin-bottom:15px">资格检查时间 '+e(readiness.checked_at_utc||'—')+
    ' · 策略：'+e(readiness.policy||'REAL_ONLY')+
@@ -191,6 +191,6 @@ pages.data=async()=>{
     note('本页不再重复展示数据集数量、行情来源、新鲜度或数据预览，避免与数据仓库职责重叠。'),
     '资格判定与数据管理分离')+
   '</div>';
- return {title:'研究准入与资格',html};
+ return {title:'研究准入',html};
 };
 })();
