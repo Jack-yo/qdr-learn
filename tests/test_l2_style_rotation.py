@@ -118,3 +118,23 @@ def test_return_window_availability_includes_the_prior_close_needed_for_first_re
     # A five-session close-to-close return ending at session 89 uses prices
     # from sessions 84 through 89, i.e. six dated price observations.
     assert size.loc[sessions[89], "relative_return_5d_available_at"] == pd.Timestamp("2025-06-01T00:00:00Z")
+
+
+def test_datetime_window_max_supports_exact_utc_nanoseconds():
+    sessions, prices, availability = _inputs()
+    changed = pd.Timestamp("2025-06-01T00:00:00.123456789Z")
+    availability.loc[sessions[84], "IWM"] = changed
+    result = style_observations_v1(prices, availability)
+    size = result.loc[result.style_id.eq("size")].set_index("date")
+    assert size.loc[sessions[89], "relative_return_5d_available_at"] == changed
+
+
+def test_missing_availability_blocks_price_based_metrics_without_guessing():
+    sessions, prices, availability = _inputs()
+    availability.loc[sessions[83], "IWM"] = pd.NaT
+    result = style_observations_v1(prices, availability)
+    size = result.loc[result.style_id.eq("size")].set_index("date")
+    assert pd.isna(size.loc[sessions[83], "daily_relative_return"])
+    assert pd.isna(size.loc[sessions[84], "daily_relative_return"])
+    assert pd.isna(size.loc[sessions[89], "relative_return_5d_available_at"])
+    assert pd.notna(size.loc[sessions[89], "relative_return_5d"])
