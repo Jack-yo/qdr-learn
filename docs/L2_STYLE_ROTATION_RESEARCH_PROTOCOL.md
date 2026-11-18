@@ -213,7 +213,7 @@ Every payload must expose schema/version, as-of session, signal cutoff, per-sour
 - Added `workflow/l2_styles.py`: read-only adapter over the existing verified market bundle; no provider requests, ingestion, or warehouse mutation. V1 currently requires Yahoo split-adjusted price basis and reports the current-vintage/non-total-return limitation.
 - Added `GET /api/v1/l2/styles/overview`.
 - Added focused unit tests for registry, windows, missing basket components, causal-prefix stability, availability propagation, source basis, and API query validation. These tests have been authored but not executed in the local Codex environment yet.
-- Real local symbol coverage and pytest acceptance remain pending. The API is not yet the final L2 UI and has no forecast or rotation-state engine.
+- Real local symbol coverage and pytest acceptance remain pending. The P1 API alone is an observation endpoint; P2 rotation and P3 cockpit are implemented separately below, while forecasting remains unimplemented.
 
 ## 11. Out of scope
 
@@ -234,7 +234,7 @@ Every payload must expose schema/version, as-of session, signal cutoff, per-sour
 - New read-only endpoint `GET /api/v1/l2/styles/rotation?asof=&cutoff=&start=` returns seven latest states, recent 126-session history per style and 50 latest genuine transitions; `asof` is a date-based observation replay, not a historical PIT claim.
 - Synthetic deterministic Python unit tests and HTTP contract tests have been committed for the core quadrant, gap, replay, missingness, and cutoff rules.
 - **Not yet accepted**: full pytest suite, browser behavior, latest live seven-symbol completeness and source entitlement/coverage tests must be executed in the user's local repository environment. No forecast or admission is granted.
-- P3 cockpit and P4–P6 forecasting/integration remain out of scope of this increment.
+- P3 cockpit was subsequently submitted in this L2 branch; P4–P6 forecasting/integration remain incomplete.
 
 ### Required local acceptance before merging to main
 
@@ -244,3 +244,22 @@ python -m pytest -q
 ```
 
 Start the existing local console on the machine with access to the existing real-data DuckDB, then request `/api/v1/l2/styles/overview` and `/api/v1/l2/styles/rotation` (optionally with `asof`). Confirm all fourteen proxies have first/last session and cutoff-qualified freshness, seven latest states are either known or explicitly UNKNOWN with reasons, source hashes match, all payloads remain observation-only, and no data writes/forecasts/broker orders occur.
+
+## 13. P3 cockpit implementation update (2026-11-18)
+
+- New standalone `assets/v4_ui_l2.js` and `v4_ui_l2.css` load *after* the existing V4 fidelity/theme layer on the original `/studio#style` route; no duplicate workspace or standalone navigation created.
+- The L2 page contains data-derived four-quadrant style positions (20-session relative return and five-session acceleration), seven-style ranked observations, selected-style historical curve (breaks at missing data), state duration, transition list, source coverage, calculation basis, and a separate French observation view.
+- One endpoint request `GET /api/v1/l2/styles/overview?rotation=1&asof=YYYY-MM-DD` calculates both P1 and P2 from the same existing read-only snapshot, avoiding duplicate reads on first render. `/api/v1/l2/styles/rotation` remains available as a standalone API.
+- The date selector is an *exploratory current-vintage replay*, not evidence that the downloaded prices were historically available on that date. The UI includes this limitation and keeps `historical_decision_eligible=false`.
+- Nulls and post-cutoff observations are never converted to zero or filled by the page. Incomplete 5-, 20- and 60-session availability now have distinct status/reason strings.
+- Forecast/H1/H3/H5 intentionally has a clearly labelled blocked placeholder pending validated T+1-open-to-T+H-close labels and OOS research.
+- Static tests, Node.js isolated page-runtime fixture, API query tests and source-gated Python calculations have been committed. The **actual committed JS blob** passed an isolated V8 runtime check against data/empty French-response fixtures; a separate Pandas test verified the time-availability rolling window. These checks **do not substitute** for the complete repository test suite or actual browser/database acceptance.
+- Latest main research-readiness navigation text was incorporated into the L2 branch shell to avoid overwriting a contemporaneous change.
+- Local runbook: [L2 P1–P3 acceptance](L2_P1_P3_LOCAL_ACCEPTANCE.md). Merge remains pending full tests, real-source coverage audit, and browser smoke. Do not claim model readiness.
+
+## 14. Remaining work
+
+- **P1–P3 release gate:** execute complete pytest and browser checks against the latest main baseline, validate real symbol coverage, rectify all failures and reconcile any further branch divergence.
+- **P4 target and baselines:** independently verified raw, corporate-action-consistent T+1-open-to-T+H-close relative return labels per style and H1/H3/H5; no model if verification is missing.
+- **P5 forecast validation:** purged and embargoed walk-forward; baseline comparisons; immutable prediction records; independent OOS admission and only then appropriately calibrated probability claims.
+- **P6 integration:** L1 regime and L3/L4 read-only contracts; no brokerage order execution.
