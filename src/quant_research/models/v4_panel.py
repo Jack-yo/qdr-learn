@@ -57,9 +57,16 @@ def prepare_v4_alpha_panel(features: pd.DataFrame, labels: pd.DataFrame,
         pd.to_datetime(frame.factor_available_at,utc=True),
         pd.to_datetime(frame.state_available_at,utc=True)],axis=1).max(axis=1)
     frame['date']=pd.to_datetime(frame.date)
-    frame['signal_time'] = frame.date.map(lambda d:pd.Timestamp(clock.signal(d)))
-    if frame.feature_available_at.gt(frame.signal_time).any():
-        raise ValueError('Historical factor/state observations arrived after signal freeze')
+    # L3 is sequentially downstream from L1/L2. Its research signal cannot be
+    # timestamped before the last required upstream feature actually existed.
+    # The base exchange signal is a floor, not a ceiling.
+    frame['base_signal_time'] = frame.date.map(
+        lambda d:pd.Timestamp(clock.signal(d))
+    )
+    frame['signal_time'] = pd.concat([
+        pd.to_datetime(frame.base_signal_time,utc=True),
+        pd.to_datetime(frame.feature_available_at,utc=True),
+    ],axis=1).max(axis=1)
     outcomes = labels.copy()
     known = outcomes.gross_return.notna() | outcomes.excess_return.notna()
     if outcomes.loc[known,'label_kind'].ne(_RAW_LABEL).any():
@@ -75,9 +82,12 @@ def prepare_v4_alpha_panel(features: pd.DataFrame, labels: pd.DataFrame,
         raise ValueError('No matching legitimate Alpha labels or future forecast rows')
     for (day,horizon), part in joined.groupby(['date','horizon']):
         window=clock.window(day,int(horizon))
-        if not (pd.to_datetime(part.entry_time,utc=True).eq(pd.Timestamp(window.entry_time)).all()
+        entry=pd.Timestamp(window.entry_time)
+        if not (pd.to_datetime(part.entry_time,utc=True).eq(entry).all()
                 and pd.to_datetime(part.exit_time,utc=True).eq(pd.Timestamp(window.exit_time)).all()):
             raise ValueError('Price label execution window differs from exchange clock')
+        if pd.to_datetime(part.signal_time,utc=True).ge(entry).any():
+            raise ValueError('Layered Alpha signal is not available before next-session entry')
     joined['gross_return'] = pd.to_numeric(joined.gross_return,errors='coerce')
     joined['excess_return'] = pd.to_numeric(joined.excess_return,errors='coerce')
     observed = joined.gross_return.notna()
