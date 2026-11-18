@@ -17,12 +17,14 @@ def _forecast():
         "feature_bundle_sha256": "f" * 64,
         "historical_feature_pit_attested": True,
         "source_snapshot_sha256": "b" * 64,
+        "feature_source_evidence_sha256": "9" * 64,
         "forecasts": [
             {
                 "style_id": style,
                 "horizon": horizon,
                 "forecast_status": "RESEARCH_ONLY",
                 "predicted_relative_return": 0.001 * horizon,
+                "signal_time": "2026-01-30T21:15:00Z",
             }
             for style in STYLE_IDS for horizon in HORIZONS
         ],
@@ -127,6 +129,9 @@ def test_only_exact_model_admitted_units_expose_frozen_numeric_context(
     assert eligible[0]["horizon"] == HORIZONS[0]
     assert eligible[0]["admitted_relative_return"] is not None
     assert result["forecast_identity"] == "d" * 64
+    assert result["context_mode"] == "CURRENT_FROZEN_FORWARD"
+    assert result["context_available_at_utc"] == _frozen()["frozen_at_utc"]
+    assert result["admission_validation_identity"] == "e" * 64
     assert not result["decision_eligible"]
     assert not result["real_orders_enabled"]
 
@@ -213,3 +218,39 @@ def test_legacy_p5_without_feature_pit_cannot_feed_l3(monkeypatch,tmp_path):
     result=l2_downstream.build_downstream_context(tmp_path)
     assert result["status"]=="BLOCKED"
     assert result["code"]=="L2_P5_FEATURE_PIT_NOT_ATTESTED"
+
+
+def test_historical_pit_replay_can_cover_dates_after_fixed_l2_admission(
+    monkeypatch, tmp_path
+):
+    historical = _forecast()
+    historical["asof_session"] = "2026-02-02"
+    historical["forecasts"] = [
+        {
+            **row,
+            "signal_time": "2026-02-02T21:15:00Z",
+        }
+        for row in historical["forecasts"]
+    ]
+    monkeypatch.setattr(
+        l2_downstream, "calculate_forecast",
+        lambda *args, **kwargs: historical,
+    )
+    admission = _validation("MODEL_ADMITTED", True)
+    result = l2_downstream.build_historical_replay_context(
+        tmp_path,
+        asof="2026-02-02",
+        admission_validation=admission,
+    )
+    assert result["status"] == "MODEL_ADMITTED_REPLAY_CONTEXT"
+    assert result["context_mode"] == "HISTORICAL_PIT_REPLAY"
+    assert result["admitted_units"] == 21
+    assert result["l3_style_context_available"] is True
+    assert result["admission_asof_session"] == "2026-01-30"
+    assert result["admission_validation_identity"] == "e" * 64
+    assert result["context_available_at_utc"] == "2026-02-02T21:15:00+00:00"
+    assert len(result["forecast_identity"]) == 64
+    assert result["forecast_identity"] != "d" * 64
+    assert result["historical_decision_eligible"] is False
+    assert result["decision_eligible"] is False
+    assert result["real_orders_enabled"] is False
