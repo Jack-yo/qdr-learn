@@ -65,6 +65,7 @@ def create_l2_bound_v4_bundle(
     *,
     source_bundle_id: str,
     output_bundle_id: str,
+    expected_current_session: str | None = None,
 ) -> dict:
     """Materialize admitted L2 style inputs into a new V4 managed bundle."""
     if not _ID.fullmatch(str(source_bundle_id)):
@@ -91,6 +92,14 @@ def create_l2_bound_v4_bundle(
     ):
         raise ValueError("L2_BOUND_MARKET_STYLE_SESSION_INVALID")
     current_session = market_dates.max().date().isoformat()
+    if (
+        expected_current_session is not None
+        and current_session != expected_current_session
+    ):
+        raise ValueError(
+            "L2_BOUND_SOURCE_BUNDLE_CURRENT_SESSION_MISMATCH:"
+            + current_session
+        )
     context_builder, admission = build_l2_l3_context_builder(
         root, current_session=current_session
     )
@@ -141,6 +150,7 @@ def create_l2_bound_v4_bundle(
                 "status": "L2_BOUND_V4_BUNDLE_ALREADY_EXISTS",
                 "source_bundle_id": source_bundle_id,
                 "output_bundle_id": output_bundle_id,
+                "current_session": current_session,
                 "market_style_rows": int(len(_existing_frames["market_style"])),
                 "l2_style_binding_context_sha256":
                     existing_receipt["context_identity_sha256"],
@@ -205,6 +215,7 @@ def create_l2_bound_v4_bundle(
         "status": "L2_BOUND_V4_BUNDLE_CREATED_RESEARCH_ONLY",
         "source_bundle_id": source_bundle_id,
         "output_bundle_id": output_bundle_id,
+        "current_session": current_session,
         "market_style_rows": int(len(bound_style)),
         "l2_style_binding_context_sha256": receipt["context_identity_sha256"],
         "l2_style_historical_pit_attested": receipt["historical_pit_attested"],
