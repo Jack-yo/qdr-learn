@@ -206,11 +206,16 @@ def materialize_l2_style_history(
     for index, day in enumerate(dates):
         session = day.date().isoformat()
         context = downstream_builder(Path(root).resolve(), asof=session)
-        if context.get("status") != "MODEL_ADMITTED_CONTEXT":
+        if context.get("status") not in {
+            "MODEL_ADMITTED_CONTEXT", "MODEL_ADMITTED_REPLAY_CONTEXT"
+        }:
             raise ValueError("L3_L2_CONTEXT_NOT_MODEL_ADMITTED:" + session)
-        frozen_at = pd.Timestamp(context.get("forecast_frozen_at_utc"))
-        if frozen_at.tzinfo is None:
-            raise ValueError("L3_L2_FORECAST_FREEZE_TIME_MISSING:" + session)
+        context_available = pd.Timestamp(
+            context.get("context_available_at_utc")
+            or context.get("forecast_frozen_at_utc")
+        )
+        if context_available.tzinfo is None:
+            raise ValueError("L3_L2_CONTEXT_AVAILABILITY_MISSING:" + session)
         admitted = [
             row for row in context.get("contexts", [])
             if row.get("downstream_context_eligible") is True
@@ -233,7 +238,7 @@ def materialize_l2_style_history(
             raise ValueError("L3_L2_STATE_AVAILABILITY_UNZONED")
         effective = max(
             current_available.tz_convert("UTC"),
-            frozen_at.tz_convert("UTC"),
+            context_available.tz_convert("UTC"),
         )
         entry = pd.Timestamp(clock.window(session, 1).entry_time)
         if effective >= entry:
@@ -308,11 +313,32 @@ def build_l2_style_history_binding(
     source_shas = set()
     all_pit = True
     expected_columns = None
+    context_modes = set()
+    admission_identities = set()
+    admission_sessions = set()
+    current_forward_sessions = []
+    replay_rows = 0
+    forward_rows = 0
     for index, day in enumerate(dates):
         session = day.date().isoformat()
         context = downstream_builder(Path(root).resolve(), asof=session)
-        if context.get("status") != "MODEL_ADMITTED_CONTEXT":
+        if context.get("status") not in {
+            "MODEL_ADMITTED_CONTEXT", "MODEL_ADMITTED_REPLAY_CONTEXT"
+        }:
             raise ValueError("L3_L2_CONTEXT_NOT_MODEL_ADMITTED:" + session)
+        mode=context.get("context_mode")
+        if mode not in _CONTEXT_MODES:
+            raise ValueError("L3_L2_CONTEXT_MODE_MISSING:" + session)
+        admission_identity=context.get("admission_validation_identity")
+        admission_session=context.get("admission_asof_session")
+        if not _SHA.fullmatch(str(admission_identity or "")):
+            raise ValueError("L3_L2_ADMISSION_IDENTITY_MISSING:" + session)
+        try:
+            admission_day=pd.Timestamp(admission_session)
+        except (TypeError,ValueError):
+            raise ValueError("L3_L2_ADMISSION_SESSION_MISSING:" + session) from None
+        if admission_day.tzinfo is not None or admission_day!=admission_day.normalize():
+            raise ValueError("L3_L2_ADMISSION_SESSION_MISSING:" + session)
         if not _SHA.fullmatch(str(context.get("forecast_identity") or "")):
             raise ValueError("L3_L2_FORECAST_IDENTITY_MISSING:" + session)
         if not _SHA.fullmatch(str(context.get("validation_identity") or "")):
@@ -361,17 +387,28 @@ def build_l2_style_history_binding(
         available = pd.Timestamp(row["state_available_at"])
         if available.tzinfo is None:
             raise ValueError("L3_L2_STATE_AVAILABILITY_UNZONED")
-        frozen_at = pd.Timestamp(context.get("forecast_frozen_at_utc"))
-        if frozen_at.tzinfo is None:
-            raise ValueError("L3_L2_FORECAST_FREEZE_TIME_MISSING:" + session)
+        context_available = pd.Timestamp(
+            context.get("context_available_at_utc")
+            or context.get("forecast_frozen_at_utc")
+        )
+        if context_available.tzinfo is None:
+            raise ValueError("L3_L2_CONTEXT_AVAILABILITY_MISSING:" + session)
         window = clock.window(session, 1)
         available = available.tz_convert("UTC")
-        frozen_at = frozen_at.tz_convert("UTC")
-        if available < frozen_at:
-            raise ValueError("L3_L2_STATE_AVAILABLE_BEFORE_L2_FREEZE")
+        context_available = context_available.tz_convert("UTC")
+        if available < context_available:
+            raise ValueError("L3_L2_STATE_AVAILABLE_BEFORE_CONTEXT")
         if available >= pd.Timestamp(window.entry_time):
             raise ValueError("L3_L2_STATE_NOT_AVAILABLE_BEFORE_NEXT_ENTRY")
 
+        context_modes.add(mode)
+        admission_identities.add(str(admission_identity))
+        admission_sessions.add(admission_day.date().isoformat())
+        if mode=="CURRENT_FROZEN_FORWARD":
+            current_forward_sessions.append(session)
+            forward_rows+=1
+        else:
+            replay_rows+=1
         model_versions.add(model_version)
         label_shas.add(str(context["label_bundle_sha256"]))
         feature_shas.add(str(context["feature_bundle_sha256"]))
@@ -384,6 +421,8 @@ def build_l2_style_history_binding(
         all_pit = all_pit and context.get("historical_feature_pit_attested") is True
         identities.append({
             "date": session,
+            "context_mode": mode,
+            "context_available_at_utc": context_available.isoformat(),
             "forecast_identity": context["forecast_identity"],
             "validation_identity": context["validation_identity"],
             "model_version": model_version,
@@ -395,6 +434,18 @@ def build_l2_style_history_binding(
             },
         })
 
+    if len(admission_identities)!=1 or len(admission_sessions)!=1:
+        raise ValueError("L3_L2_ADMISSION_IDENTITY_CHANGED_ACROSS_HISTORY")
+    if len(current_forward_sessions)>1:
+        raise ValueError("L3_L2_MULTIPLE_CURRENT_FORWARD_ROWS")
+    current_forward_session=(
+        current_forward_sessions[0] if current_forward_sessions else None
+    )
+    if (
+        current_forward_session is not None
+        and current_forward_session!=dates.iloc[-1].date().isoformat()
+    ):
+        raise ValueError("L3_L2_CURRENT_FORWARD_ROW_MUST_BE_LAST")
     receipt = {
         "contract_version": CONTRACT_VERSION,
         "scope": _SCOPE,
@@ -405,6 +456,12 @@ def build_l2_style_history_binding(
         "context_identity_sha256": sha256(
             _canonical(identities).encode("utf-8")
         ).hexdigest(),
+        "context_modes": sorted(context_modes),
+        "admission_asof_session": next(iter(admission_sessions)),
+        "admission_validation_identity": next(iter(admission_identities)),
+        "current_forward_session": current_forward_session,
+        "historical_replay_rows": int(replay_rows),
+        "current_forward_rows": int(forward_rows),
         "model_versions": sorted(model_versions),
         "label_bundle_sha256s": sorted(label_shas),
         "feature_bundle_sha256s": sorted(feature_shas),
@@ -422,15 +479,37 @@ def verify_l2_style_history_binding(
     market_style: pd.DataFrame,
     receipt: dict,
     *,
-    downstream_builder=build_downstream_context,
+    downstream_builder=None,
     clock: TradingClock | None = None,
 ) -> dict:
     """Recompute the binding and require byte-equivalent canonical receipt."""
     supplied = validate_l2_style_binding_receipt(receipt)
+    builder=downstream_builder
+    if builder is None:
+        if supplied["contract_version"]==CONTRACT_VERSION:
+            from quant_research.workflow.l2_downstream import (
+                build_l2_l3_context_builder,
+            )
+            current=(
+                supplied.get("current_forward_session")
+                or supplied["end_session"]
+            )
+            builder,admission=build_l2_l3_context_builder(
+                Path(root).resolve(),current_session=current
+            )
+            if (
+                admission.get("identity")
+                    !=supplied.get("admission_validation_identity")
+                or admission.get("asof_session")
+                    !=supplied.get("admission_asof_session")
+            ):
+                raise ValueError("L3_L2_ADMISSION_REPORT_CHANGED")
+        else:
+            builder=build_downstream_context
     actual = build_l2_style_history_binding(
         root,
         market_style,
-        downstream_builder=downstream_builder,
+        downstream_builder=builder,
         clock=clock,
     )
     if _canonical(actual) != _canonical(supplied):
