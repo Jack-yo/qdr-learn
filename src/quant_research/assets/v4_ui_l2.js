@@ -134,6 +134,63 @@ function quality(data){
    '<div class="l2-source-line">数据指纹：'+short(data?.source_snapshot_sha256,24)+' · 分割调整价格（不含完整分红总收益）</div>',
    '缺失不补值 · 失败关闭');
 }
+function forecastResearch(result){
+ const d=result?.ok?result.data:null;
+ if(!d){
+  return problem(result,'H1 / H3 / H5 风格领先预测');
+ }
+ const rows=Array.isArray(d.forecasts)?d.forecasts:[];
+ const missing=Array.isArray(d.missing_evidence)?d.missing_evidence:[];
+ if(d.status==='BLOCKED'&&!rows.length){
+  return card('P4 · H1 / H3 / H5 领先预测',
+    empty('预测研究被数据资格阻断',
+      e(d.code||'缺少合格预测输入')+(missing.length?' · '+missing.map(e).join('；'):''))
+    +note('不会从当前版本 Yahoo 历史临时生成未来标签，也不会把轮动四象限转换成胜率。'),
+    'BLOCKED · '+e(d.code||'EVIDENCE_REQUIRED'));
+ }
+ const byStyle=new Map();
+ rows.forEach(x=>{
+  if(!byStyle.has(x.style_id))byStyle.set(x.style_id,new Map());
+  byStyle.get(x.style_id).set(Number(x.horizon),x);
+ });
+ const cells=(style,horizon)=>{
+  const x=byStyle.get(style)?.get(horizon);
+  if(!x)return '—';
+  if(x.forecast_status!=='RESEARCH_ONLY')return '<span class="l2-forecast-blocked" title="'+e(x.block_reason||'BLOCKED')+'">BLOCKED</span>';
+  return figure(x.predicted_relative_return);
+ };
+ const tableRows=STYLE_KEYS.map(style=>[
+   '<button type="button" class="l2-style-select'+(state.l2Style===style?' current':'')+'" data-l2-style="'+e(style)+'">'+e(itemName(style))+'</button>',
+   cells(style,1),cells(style,3),cells(style,5),
+   e([...HORIZONS].map(h=>byStyle.get(style)?.get(h)?.forecast_status||'MISSING').join(' / '))
+ ]);
+ const selectedRows=[1,3,5].map(h=>byStyle.get(state.l2Style)?.get(h)).filter(Boolean);
+ const detail=selectedRows.length?selectedRows.map(x=>
+   '<div class="l2-forecast-h"><div><b>H'+e(x.horizon)+'</b>'+(
+    x.forecast_status==='RESEARCH_ONLY'?badge('RESEARCH_ONLY','blue'):badge('BLOCKED','amber'))+'</div>'+
+   '<div class="l2-mini-grid">'+
+   '<div class="l2-mini"><span>Ridge 相对收益</span><b>'+figure(x.predicted_relative_return)+'</b></div>'+
+   '<div class="l2-mini"><span>历史均值基准</span><b>'+figure(x.mean_baseline)+'</b></div>'+
+   '<div class="l2-mini"><span>动量基准</span><b>'+figure(x.momentum_baseline)+'</b></div>'+
+   '<div class="l2-mini"><span>训练交易日</span><b>'+figure(x.train_sessions,'integer')+'</b></div>'+
+   '</div>'+(x.block_reason?note('阻断原因：'+x.block_reason):'')+'</div>'
+ ).join(''):empty('当前风格没有预测记录','该风格/期限可能因历史时点、标签或训练样本不足被阻断。');
+ return '<div class="l2-main-grid">'+
+  card('七风格 · 未来相对收益研究',
+   table(['风格','H1','H3','H5','资格'],tableRows)+
+   note('数值是相对基准的研究预测收益，不是绝对收益、胜率或交易目标。'),
+   '模型 '+e(d.model_version||'—')+' · '+e(d.status||'—'))+
+  card(itemName(state.l2Style)+' · P4 预测依据',detail,
+   '标签包 '+e(d.label_bundle_id||'—')+' · 合格单元 '+e(d.eligible_units??0)+' / '+e((d.eligible_units??0)+(d.blocked_units??0)))+
+  '</div>'+
+  card('P4 研究边界',
+    '<div class="l2-protocol"><p><b>标签：</b>T+1 开盘 → T+H 收盘的风格相对收益，必须来自公司行为一致、来源可验证的标签包。</p>'+
+    '<p><b>训练：</b>每个 style × horizon 独立 StandardScaler + Ridge；训练标签必须在信号前已知，并执行至少 5 个交易日 embargo。</p>'+
+    '<p><b>基准：</b>Zero、历史扩展均值、当前 5D 动量外推。P5 必须证明 OOS 增量，P4 本身不授予模型准入。</p>'+
+    '<p><b>当前资格：</b>'+e(d.status||'BLOCKED')+'；historical_decision_eligible=false，real_orders_enabled=false。</p></div>',
+    '没有概率校准 · 没有模型准入 · 没有订单');
+}
+
 function french(result){
  const d=result?.ok?result.data:null,items=Array.isArray(d?.latest)?d.latest:[];
  return card('Fama–French 因子 · 独立观测',
@@ -163,7 +220,8 @@ pages.style=async()=>{
  data?.status==='OBSERVATION_ONLY'?'blue':'amber')+'</span></div>';
  const tabs='<div class="l2-tabs" role="group" aria-label="L2 研究视图">'+[
  linkTab('overview','风格总览'),linkTab('rotation','轮动与转折'),
- linkTab('evidence','计算证据'),linkTab('french','French 因子')].join('')+'</div>';
+ linkTab('forecast','领先预测'),linkTab('evidence','计算证据'),
+ linkTab('french','French 因子')].join('')+'</div>';
  const summary=strip([
  ['20D 相对强势',leaders.length?e(itemName(leaders[0].style_id)):'—',leaders.length?'已发生的相对收益领先':'数据不可用'],
  ['弱势改善',rot?n(improving,0):'—','七类风格中的有效状态'],
@@ -182,6 +240,10 @@ pages.style=async()=>{
     htmlStatus(x.rotation_state),figure(x.consecutive_sessions,'integer'),htmlStatus(x.previous_state)])):
     empty('轮动状态不可用','请检查源数据窗口和截止时间。'))+'</div>'+
     '<div class="l2-main-grid">'+details(data,rot)+transitions(rot)+'</div>';
+ }else if(state.l2Tab==='forecast'){
+  const forecastArgs=state.l2AsOf?'?asof='+encodeURIComponent(state.l2AsOf):'';
+  const forecast=await settle('/api/v1/l2/styles/forecast'+forecastArgs);
+  body=forecastResearch(forecast);
  }else if(state.l2Tab==='evidence'){
   body='<div class="l2-main-grid">'+quality(data)+details(data,rot)+'</div>'+
     card('计算口径与验证边界','<div class="l2-protocol">'+
