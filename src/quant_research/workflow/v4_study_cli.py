@@ -90,12 +90,24 @@ def run_managed_alpha_study(root: Path, *, bundle_id: str, run_id: str,
             admission_day=pd.Timestamp(
                 binding_receipt['admission_asof_session']
             )
+            admission_frozen=pd.Timestamp(
+                binding_receipt['admission_frozen_at_utc']
+            )
             requested_start=pd.Timestamp(evaluation_start)
             if (
                 requested_start.tzinfo is not None
                 or admission_day.tzinfo is not None
-                or requested_start<=admission_day
+                or admission_frozen.tzinfo is None
             ):
+                raise ValueError(
+                    'V4_L3_OOS_ADMISSION_TIME_INVALID'
+                )
+            frozen_day=(
+                admission_frozen.tz_convert('America/New_York')
+                .tz_localize(None).normalize()
+            )
+            admission_effective_day=max(admission_day,frozen_day)
+            if requested_start<=admission_effective_day:
                 raise ValueError(
                     'V4_L3_OOS_MUST_START_AFTER_L2_ADMISSION'
                 )
