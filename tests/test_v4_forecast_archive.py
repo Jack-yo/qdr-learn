@@ -165,3 +165,66 @@ def test_l2_binding_receipt_cannot_claim_execution_in_l3_archive(tmp_path):
             tmp_path, _forecast(), protocol_sha256="b" * 64,
             input_contract=contract,
         )
+
+
+def _l2_binding_receipt_v2(admission_identity="6" * 64):
+    return {
+        "contract_version": "qdr-l2-l3-style-binding-v2",
+        "scope": "PIT_REPLAY_HISTORY_PLUS_CURRENT_FORWARD",
+        "start_session": "2025-01-02",
+        "end_session": "2025-01-02",
+        "rows": 1,
+        "style_columns": ["style_l2_size_h3"],
+        "context_identity_sha256": "1" * 64,
+        "context_modes": ["CURRENT_FROZEN_FORWARD"],
+        "admission_asof_session": "2025-01-02",
+        "admission_validation_identity": admission_identity,
+        "admission_frozen_at_utc": "2025-01-03T01:00:00Z",
+        "current_forward_session": "2025-01-02",
+        "historical_replay_rows": 0,
+        "current_forward_rows": 1,
+        "model_versions": ["ridge-v1"],
+        "label_bundle_sha256s": ["2" * 64],
+        "feature_bundle_sha256s": ["5" * 64],
+        "source_snapshot_sha256s": ["4" * 64],
+        "binding_verified": True,
+        "historical_pit_attested": True,
+        "decision_eligible": False,
+        "real_orders_enabled": False,
+    }
+
+
+def test_v2_l2_admission_identity_is_persisted_and_changes_l3_archive_identity(
+    tmp_path,
+):
+    base = {
+        "artifacts_sha256": {
+            "factors.parquet": "c" * 64,
+            "labels.parquet": "d" * 64,
+            "market_style.parquet": "e" * 64,
+        },
+        "factor_names": ["alpha"],
+        "source_symbols": ["AAA"],
+        "l2_style_context_receipt": _l2_binding_receipt_v2(),
+    }
+    first = freeze_research_forecast(
+        tmp_path, _forecast(), protocol_sha256="b" * 64,
+        input_contract=base,
+    )
+    changed = {
+        **base,
+        "l2_style_context_receipt": _l2_binding_receipt_v2("7" * 64),
+    }
+    second = freeze_research_forecast(
+        tmp_path, _forecast(), protocol_sha256="b" * 64,
+        input_contract=changed,
+    )
+    assert first["manifest"]["identity"] != second["manifest"]["identity"]
+    records = latest_forward_research(tmp_path, limit=5)
+    by_identity = {row["identity"]: row for row in records}
+    row = by_identity[first["manifest"]["identity"]]
+    assert row["l2_style_admission_validation_identity"] == "6" * 64
+    assert row["l2_style_admission_asof_session"] == "2025-01-02"
+    assert row["l2_style_context_modes"] == ["CURRENT_FROZEN_FORWARD"]
+    assert row["l2_style_current_forward_session"] == "2025-01-02"
+    assert row["l2_style_historical_pit_attested"] is True
