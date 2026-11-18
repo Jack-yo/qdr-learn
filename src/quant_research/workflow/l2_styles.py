@@ -19,12 +19,11 @@ from quant_research.research.l2_style_rotation import (
 )
 
 
-def calculate(root: Path, *, asof: str | None = None,
-              cutoff: datetime | None = None,
-              start: str = "2017-01-03",
-              source: str = "yahoo",
-              include_rotation: bool = False) -> dict:
-    """Read verified existing prices and calculate observations; never ingests data."""
+def load_observation_frame(root: Path, *, asof: str | None = None,
+                           cutoff: datetime | None = None,
+                           start: str = "2017-01-03",
+                           source: str = "yahoo"):
+    """Return the full causal P1 observation frame and read-only source evidence."""
     root = Path(root)
     if source.lower() != "yahoo":
         raise ValueError("L2_V1_REQUIRES_SPLIT_ADJUSTED_YAHOO_PRICE_BASIS")
@@ -56,11 +55,24 @@ def calculate(root: Path, *, asof: str | None = None,
     if cutoff_timestamp.tzinfo is None:
         raise ValueError("L2_REQUIRES_TIMEZONE_AWARE_CUTOFF")
     cutoff_timestamp = cutoff_timestamp.tz_convert("UTC")
-    # Ignore prices with missing or post-cutoff source availability.
     eligible = available.notna() & available.le(cutoff_timestamp)
     close = close.where(eligible)
     available = available.where(eligible)
     observations = style_observations_v1(close, available)
+    return observations, prices_long, metadata, sessions, cutoff_timestamp
+
+
+def calculate(root: Path, *, asof: str | None = None,
+              cutoff: datetime | None = None,
+              start: str = "2017-01-03",
+              source: str = "yahoo",
+              include_rotation: bool = False) -> dict:
+    """Read verified existing prices and calculate observations; never ingests data."""
+    root = Path(root)
+    observations, prices_long, metadata, sessions, cutoff_timestamp = load_observation_frame(
+        root, asof=asof, cutoff=cutoff, start=start, source=source
+    )
+    end = metadata["asof_date_et"]
 
     symbol_coverage = []
     for symbol in REQUIRED_SYMBOLS:
