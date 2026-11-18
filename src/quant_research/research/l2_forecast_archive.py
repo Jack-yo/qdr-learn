@@ -8,6 +8,8 @@ from pathlib import Path
 import re
 import tempfile
 
+from quant_research.research.l2_forecast import HORIZONS, STYLE_IDS
+
 
 ARCHIVE_SCHEMA = "qdr.l2.frozen-forecast.v1"
 
@@ -35,6 +37,8 @@ def freeze_forecast_snapshot_v1(root: Path, forecast_payload: dict) -> dict:
         raise ValueError("Only RESEARCH_ONLY L2 forecasts may be frozen")
     if forecast_payload.get("real_orders_enabled") is not False:
         raise ValueError("L2 frozen forecast must keep real orders disabled")
+    if forecast_payload.get("historical_decision_eligible") is not False:
+        raise ValueError("L2 frozen forecast cannot claim historical decision eligibility")
     asof = str(forecast_payload.get("asof_session") or "")
     try:
         from datetime import date
@@ -68,10 +72,14 @@ def freeze_forecast_snapshot_v1(root: Path, forecast_payload: dict) -> dict:
                 raise ValueError("Eligible L2 forecast row has no prediction")
         elif row.get("forecast_status") != "BLOCKED":
             raise ValueError("Unexpected L2 forecast row status")
-    if len(set(identities)) != 21:
-        raise ValueError("Duplicate L2 style/horizon rows in frozen snapshot")
+    expected = {(style, horizon) for style in STYLE_IDS for horizon in HORIZONS}
+    if set(identities) != expected:
+        raise ValueError("L2 frozen forecast must contain the exact seven-style H1/H3/H5 grid")
+    blocked = sum(row.get("forecast_status") == "BLOCKED" for row in rows)
     if eligible != int(forecast_payload.get("eligible_units", -1)) or eligible <= 0:
         raise ValueError("L2 eligible-unit count mismatch")
+    if blocked != int(forecast_payload.get("blocked_units", -1)) or eligible + blocked != 21:
+        raise ValueError("L2 blocked-unit count mismatch")
 
     base = {
         "schema": ARCHIVE_SCHEMA,
