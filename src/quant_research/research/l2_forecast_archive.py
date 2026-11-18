@@ -8,6 +8,9 @@ from pathlib import Path
 import re
 import tempfile
 
+import pandas as pd
+
+from quant_research.clock import TradingClock
 from quant_research.research.l2_forecast import HORIZONS, STYLE_IDS
 
 
@@ -31,7 +34,9 @@ def _safe_model(value: str) -> str:
     return value
 
 
-def freeze_forecast_snapshot_v1(root: Path, forecast_payload: dict) -> dict:
+def freeze_forecast_snapshot_v1(
+    root: Path, forecast_payload: dict, *, now_utc=None
+) -> dict:
     """Freeze one exact style/horizon research snapshot; never overwrite it."""
     if forecast_payload.get("status") != "RESEARCH_ONLY":
         raise ValueError("Only RESEARCH_ONLY L2 forecasts may be frozen")
@@ -98,11 +103,28 @@ def freeze_forecast_snapshot_v1(root: Path, forecast_payload: dict) -> dict:
         "real_orders_enabled": False,
     }
     identity = _sha(base)
+    frozen_at = pd.Timestamp(now_utc or datetime.now(timezone.utc))
+    if frozen_at.tzinfo is None:
+        raise ValueError("L2 forecast freeze time must be timezone-aware")
+    frozen_at = frozen_at.tz_convert("UTC")
+    window = TradingClock().window(
+        asof, 1, now=frozen_at.to_pydatetime()
+    )
+    prospective = bool(
+        pd.Timestamp(window.signal_time)
+        <= frozen_at
+        < pd.Timestamp(window.entry_time)
+    )
     record = {
         **base,
         "identity": identity,
-        "frozen_at_utc": datetime.now(timezone.utc).isoformat(),
-        "status": "FROZEN_L2_RESEARCH_ONLY",
+        "frozen_at_utc": frozen_at.isoformat(),
+        "prospective_before_next_open": prospective,
+        "status": (
+            "FROZEN_L2_FORWARD_RESEARCH_ONLY"
+            if prospective
+            else "FROZEN_L2_RETROSPECTIVE_ASOF_ONLY"
+        ),
     }
 
     root = Path(root).resolve()
@@ -137,6 +159,50 @@ def load_frozen_forecast_v1(root: Path, session_date: str, model_version: str) -
     identity = data.pop("identity", None)
     frozen = data.pop("frozen_at_utc", None)
     status = data.pop("status", None)
-    if status != "FROZEN_L2_RESEARCH_ONLY" or not frozen or _sha(data) != identity:
+    declared_prospective = data.pop("prospective_before_next_open", None)
+    if not frozen or _sha(data) != identity:
         raise ValueError("L2_FROZEN_FORECAST_IDENTITY_MISMATCH")
-    return {**data, "identity": identity, "frozen_at_utc": frozen, "status": status}
+    frozen_at = pd.Timestamp(frozen)
+    if frozen_at.tzinfo is None:
+        raise ValueError("L2_FROZEN_FORECAST_TIME_INVALID")
+    frozen_at = frozen_at.tz_convert("UTC")
+    try:
+        window = TradingClock().window(
+            session_date, 1, now=frozen_at.to_pydatetime()
+        )
+    except ValueError as exc:
+        raise ValueError("L2_FROZEN_FORECAST_TIME_INVALID") from exc
+    expected_prospective = bool(
+        pd.Timestamp(window.signal_time)
+        <= frozen_at
+        < pd.Timestamp(window.entry_time)
+    )
+    allowed = {
+        "FROZEN_L2_RESEARCH_ONLY",
+        "FROZEN_L2_FORWARD_RESEARCH_ONLY",
+        "FROZEN_L2_RETROSPECTIVE_ASOF_ONLY",
+    }
+    if status not in allowed:
+        raise ValueError("L2_FROZEN_FORECAST_SCOPE_INVALID")
+    if status == "FROZEN_L2_RESEARCH_ONLY":
+        if declared_prospective is not None:
+            raise ValueError("L2_FROZEN_FORECAST_LEGACY_SCOPE_INVALID")
+        prospective = expected_prospective
+    else:
+        if type(declared_prospective) is not bool:
+            raise ValueError("L2_FROZEN_FORECAST_SCOPE_INVALID")
+        prospective = declared_prospective
+        expected_status = (
+            "FROZEN_L2_FORWARD_RESEARCH_ONLY"
+            if expected_prospective
+            else "FROZEN_L2_RETROSPECTIVE_ASOF_ONLY"
+        )
+        if prospective is not expected_prospective or status != expected_status:
+            raise ValueError("L2_FROZEN_FORECAST_SCOPE_TIME_MISMATCH")
+    return {
+        **data,
+        "identity": identity,
+        "frozen_at_utc": frozen_at.isoformat(),
+        "prospective_before_next_open": prospective,
+        "status": status,
+    }
