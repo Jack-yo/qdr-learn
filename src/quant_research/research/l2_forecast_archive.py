@@ -131,7 +131,7 @@ def freeze_forecast_snapshot_v1(
     folder = root / "outputs/l2_style_forecasts" / asof / model_version
     target = folder / "manifest.json"
     if target.is_file():
-        existing = json.loads(target.read_text(encoding="utf-8"))
+        existing = load_frozen_forecast_v1(root, asof, model_version)
         if existing.get("identity") == identity:
             return existing
         raise FileExistsError("L2_FORECAST_ALREADY_FROZEN_WITH_DIFFERENT_IDENTITY")
