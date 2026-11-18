@@ -75,3 +75,17 @@ def test_legacy_bundle_without_receipt_remains_loadable_but_unbound(tmp_path):
     _bundle(tmp_path)
     _, manifest = _checked_inputs(tmp_path, "bundle")
     assert "l2_style_context_receipt" not in manifest
+
+
+def test_legacy_v1_receipt_without_later_feature_bundle_field_remains_readable(
+    tmp_path,
+):
+    receipt = _receipt()
+    receipt.pop("feature_bundle_sha256s")
+    _bundle(tmp_path, receipt)
+    _, manifest = _checked_inputs(tmp_path, "bundle")
+    assert (
+        manifest["l2_style_context_receipt"]["contract_version"]
+        == "qdr-l2-l3-style-binding-v1"
+    )
+    assert "feature_bundle_sha256s" not in manifest["l2_style_context_receipt"]
