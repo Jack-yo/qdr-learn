@@ -171,8 +171,7 @@
     empty('暂时无法读取数据仓库',response.error?.message||'请检查本地服务和数据目录。')};
   const data=response.data||{};
   if(data.status==='MAINTENANCE_RUNNING'){
-   return {title:'数据与保障',html:heading('数据与保障','数据资产、来源、质量、更新与异常。',
-     '<a class="btn" href="/data">打开数据维护</a>')+
+   return {title:'数据与保障',html:heading('数据与保障','数据资产、来源、质量、更新与异常。')+
      '<div class="wh-maintenance-banner"><b>数据维护正在运行</b><span>'+e(data.message||'数据库由维护任务持有。')+'</span></div>'+
      renderHistory(data.maintenance?.recent_runs||[])};
   }
@@ -217,8 +216,7 @@
     '<a class="btn smallbtn" href="/api/v1/data/catalog/datasets.csv">导出资产 CSV</a>'+
     '<a class="btn smallbtn" href="/api/v1/data/catalog/cache_index.csv">导出缓存索引</a>':'';
   const top=heading('数据与保障','数据资产、来源、质量、更新与异常。',
-    '<button type="button" class="btn smallbtn" id="wh-refresh">刷新状态</button>'+exportLinks+
-    '<a class="btn primary" href="/data">打开数据维护</a>');
+    '<button type="button" class="btn smallbtn" id="wh-refresh">刷新状态</button>'+exportLinks);
   const registryLine='<div class="wh-registry-line"><b>L1 数据体系登记</b><span>'+
    n(reg.systems,0)+' 个体系 · '+n(reg.dimensions,0)+' 个维度 · '+n(reg.features,0)+' 个特征定义 · '+
    n(reg.features_observed,0)+' 个特征已有观测 · '+n(reg.sources,0)+' 个来源定义 · 目录快照 '+
