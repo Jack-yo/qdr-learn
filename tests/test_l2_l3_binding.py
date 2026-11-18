@@ -41,16 +41,32 @@ def _context(day):
             "downstream_context_eligible": True,
         },
     ]
+    historical = date.endswith("29")
     return {
-        "status": "MODEL_ADMITTED_CONTEXT",
+        "status": (
+            "MODEL_ADMITTED_REPLAY_CONTEXT"
+            if historical else "MODEL_ADMITTED_CONTEXT"
+        ),
+        "context_mode": (
+            "HISTORICAL_PIT_REPLAY"
+            if historical else "CURRENT_FROZEN_FORWARD"
+        ),
+        "context_available_at_utc": (
+            date + "T21:15:00Z"
+            if historical else date + "T21:16:00Z"
+        ),
         "asof_session": date,
-        "forecast_identity": ("a" if date.endswith("29") else "b") * 64,
+        "forecast_identity": ("a" if historical else "b") * 64,
         "validation_identity": "c" * 64,
-        "forecast_frozen_at_utc": date + "T21:16:00Z",
+        "admission_asof_session": "2026-01-30",
+        "admission_validation_identity": "c" * 64,
+        "forecast_frozen_at_utc": (
+            None if historical else date + "T21:16:00Z"
+        ),
         "model_version": "ridge-v1",
         "label_bundle_sha256": "d" * 64,
         "feature_bundle_sha256": "9" * 64,
-        "source_snapshot_sha256": ("e" if date.endswith("29") else "f") * 64,
+        "source_snapshot_sha256": ("e" if historical else "f") * 64,
         "historical_feature_pit_attested": True,
         "historical_decision_eligible": False,
         "contexts": admitted,
@@ -92,6 +108,15 @@ def test_binding_receipt_binds_exact_admitted_style_values():
         style_column("quality", 3),
         style_column("size", 3),
     ])
+    assert receipt["contract_version"] == "qdr-l2-l3-style-binding-v2"
+    assert receipt["context_modes"] == [
+        "CURRENT_FROZEN_FORWARD", "HISTORICAL_PIT_REPLAY"
+    ]
+    assert receipt["historical_replay_rows"] == 1
+    assert receipt["current_forward_rows"] == 1
+    assert receipt["current_forward_session"] == "2026-01-30"
+    assert receipt["admission_asof_session"] == "2026-01-30"
+    assert receipt["admission_validation_identity"] == "c" * 64
     assert len(receipt["context_identity_sha256"]) == 64
     assert receipt["decision_eligible"] is False
     assert receipt["real_orders_enabled"] is False
@@ -164,10 +189,10 @@ def test_structural_receipt_cannot_claim_execution():
         validate_l2_style_binding_receipt(receipt)
 
 
-def test_market_style_cannot_claim_l2_value_before_forecast_was_frozen():
+def test_market_style_cannot_claim_l2_value_before_context_existed():
     frame = _market_style()
-    frame.loc[0, "state_available_at"] = "2026-01-29T21:15:30Z"
-    with pytest.raises(ValueError, match="AVAILABLE_BEFORE_L2_FREEZE"):
+    frame.loc[0, "state_available_at"] = "2026-01-29T21:14:30Z"
+    with pytest.raises(ValueError, match="AVAILABLE_BEFORE_CONTEXT"):
         build_l2_style_history_binding(
             ".", frame,
             downstream_builder=lambda root, asof=None: _context(asof),
@@ -192,7 +217,10 @@ def test_materializer_adds_only_admitted_l2_columns_and_delays_state_availabilit
     assert result.loc[0, style_column("size", 3)] == pytest.approx(0.003)
     assert result.loc[1, style_column("quality", 3)] == pytest.approx(0.0025)
     assert pd.Timestamp(result.loc[0, "state_available_at"]) == pd.Timestamp(
-        "2026-01-29T21:16:00Z"
+        "2026-01-29T21:15:00Z"
+    )
+    assert pd.Timestamp(result.loc[1, "state_available_at"]) == pd.Timestamp(
+        "2026-01-30T21:16:00Z"
     )
     receipt = build_l2_style_history_binding(
         ".",
