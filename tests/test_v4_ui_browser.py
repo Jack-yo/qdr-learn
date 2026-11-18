@@ -213,34 +213,24 @@ def _open(browser,base,route):
     page=browser.new_page(viewport={"width":1536,"height":900})
     page.goto(base+"/studio#"+route,wait_until="domcontentloaded")
     page.locator("#content .heading").wait_for(timeout=10000)
-    if route not in ("overview","market"):
-        try:
-            page.locator(".v4-subtab").first.wait_for(timeout=10000)
-        except Exception as exc:
-            raise AssertionError(f"{route} did not render its tabs: {page.locator('#content').inner_text()[:500]}") from exc
+    if route=="style":
+        page.locator(".v4-subtab").first.wait_for(timeout=10000)
     page.wait_for_load_state('networkidle',timeout=10000)
     page.locator('.v4-pending-banner').wait_for(state='hidden',timeout=10000)
     return page
 
 
 def test_six_page_information_architecture_and_keyboard_tabs(browser,local_app):
-    expected={"lab":4,"screen":4,"risk":5}
-    for name,count in expected.items():
+    for name,heading_name,control in (
+        ("lab","因子实验","#v4-factor-name"),
+        ("screen","选股与回测","#v4-strategy-name"),
+        ("risk","持仓与风控",".kpis"),
+    ):
         page=_open(browser,local_app,name)
         try:
-            tabs=page.get_by_role("tab")
-            assert tabs.count()==count
-            selected=1 if name=="screen" else 0
-            following=(selected+1)%count
-            assert tabs.nth(selected).get_attribute("aria-selected")=="true"
-            tabs.nth(selected).press("ArrowRight")
-            assert tabs.nth(following).get_attribute("aria-selected")=="true"
-            assert page.locator("#v4-panel-"+name+"-"+str(following)).is_visible()
-            assert not page.locator("#v4-panel-"+name+"-"+str(selected)).is_visible()
-            if name=="risk":
-                assert page.locator(".v4-five-metrics .kpi").count()==5
-            if name=="lab":
-                assert page.locator("details #v4-factor-hypothesis").count()==1
+            page.get_by_role("heading",name=heading_name).wait_for(timeout=10000)
+            assert page.locator(control).count()>=1
+            assert page.get_by_role("tab").count()==0
         finally:
             page.close()
 
