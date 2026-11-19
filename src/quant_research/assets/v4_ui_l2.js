@@ -302,8 +302,9 @@ function forecastResearch(result){
    table(['风格','H1','H3','H5','资格'],tableRows)+
    note('数值是相对基准的研究预测收益，不是绝对收益、概率或交易目标。'),
    '模型 '+String(d.model_version||'—')+' · '+String(d.status||'—'))+
-  card(itemName(state.l2Style)+' · P4 预测依据',detail,
-   '标签包 '+String(d.label_bundle_id||'—')+' · 合格单元 '+String(d.eligible_units??0)+' / '+String((d.eligible_units??0)+(d.blocked_units??0)))+
+  card(itemName(state.l2Style)+' · P4 预测依据',detail+
+   '<div class="l2-source-line">标签包：'+e(String(d.label_bundle_id||'—'))+' · 合格单元：'+e(String(d.eligible_units??0))+' / '+e(String((d.eligible_units??0)+(d.blocked_units??0)))+'</div>',
+   '前瞻研究证据 · 与描述性轮动状态分离')+
   '</div>'+
   card('P4 研究边界',
     '<div class="l2-protocol"><p><b>标签：</b>T+1 开盘 → T+H 收盘的风格相对收益，必须来自公司行为一致、来源可验证的标签包。</p>'+
