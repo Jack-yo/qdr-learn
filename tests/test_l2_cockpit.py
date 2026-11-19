@@ -31,6 +31,10 @@ def test_l2_cockpit_is_loaded_last_and_assets_are_allowlisted():
     assert "L2_VERIFIED_LABEL_BUNDLE_REQUIRED" not in js
     assert "NO_DATA" not in js
     assert ".l2-main-grid" in css
+    assert ".l2-research-grid" in css
+    assert "function diagnosticPanel" in js
+    assert "60D 风格演化" in js
+    assert "当前描述何时失效" in js
 
 
 def test_l2_cockpit_browser_logic_has_valid_syntax_and_no_fake_forecast():
@@ -117,11 +121,17 @@ vm.runInNewContext(code,{window:{V4},console});
  const result=await V4.pages.style();
  assert.equal(calls.length,1,'one combined P1+P2 source request');
  assert(calls[0].includes('rotation=1'));
- assert(result.html.includes('轮动'));
- assert(result.html.includes('强势加速'));
+ assert(result.html.includes('风格变化概览'));
+ assert(result.html.includes('60D 风格演化'));
+ assert(result.html.includes('相对位置 × 边际变化'));
+ assert(result.html.includes('变化诊断'));
+ assert(result.html.includes('尚未确认 / 需要观察'));
+ assert(result.html.includes('当前描述何时失效'));
  assert(result.html.includes('2025-04-09'));
  assert(result.html.includes('OBSERVATION_ONLY'));
- assert(result.html.includes('预测模型尚未通过资格验收'));
+ assert(!result.html.includes('预测模型尚未通过资格验收'));
+ assert(!result.html.includes('买入'));
+ assert(!result.html.includes('建议仓位'));
  assert(!result.html.includes('胜率 80%'));
  V4.state.l2AsOf='2025-04-08';
  V4.state.l2Tab='evidence';
