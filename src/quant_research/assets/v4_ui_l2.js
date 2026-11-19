@@ -6,7 +6,7 @@ const V=window.V4;
 if(!V)throw Error('QDR L2 requires V4 core');
 const {pages,state,e,n,pct,signed,date,short,badge,heading,card,empty,note,table,settle,show}=V;
 const STYLE_LABELS={
- size:'规模',value:'价值',growth:'成长',momentum:'动量',
+ size:'小盘 / 大盘',value:'价值 / 成长',growth:'成长',momentum:'动量',
  quality:'质量',low_vol:'低波动',cyc_def:'周期 / 防御'
 };
 const STATES={
@@ -18,7 +18,7 @@ const STATES={
 };
 const STYLE_KEYS=Object.keys(STYLE_LABELS);
 state.l2Tab=state.l2Tab||'overview';
-state.l2Style=state.l2Style||'size';
+state.l2Style=state.l2Style||'quality';
 state.l2AsOf=state.l2AsOf||'';
 const finite=v=>v!==null&&v!==undefined&&v!==''&&Number.isFinite(Number(v));
 const number=v=>finite(v)?Number(v):null;
@@ -34,65 +34,187 @@ const strip=(items)=>'<div class="l2-stat-strip">'+items.map(x=>'<div class="l2-
 const itemName=id=>STYLE_LABELS[id]||id||'—';
 const tone=v=>!finite(v)?'na':Number(v)>0?'up':Number(v)<0?'down':'flat';
 const figure=(value,kind='return')=>'<span class="l2-number '+tone(value)+'">'+(kind==='return'?percent(value):finite(value)?n(value,kind==='integer'?0:4):'—')+'</span>';
-const point=(row,rangeX,rangeY)=>{
- const x=number(row.acceleration_relative_return_5d);
- const y=number(row.strength_relative_return_20d);
- if(x===null||y===null)return '';
- const cx=Math.max(30,Math.min(530,280+(x/rangeX)*245)).toFixed(1);
- const cy=Math.max(28,Math.min(282,155-(y/rangeY)*120)).toFixed(1);
- const selected=row.style_id===state.l2Style;
- return '<g class="'+(selected?'l2-selected-point':'')+'"><circle cx="'+cx+'" cy="'+cy+'" r="'+(selected?'10':'7')+'" class="l2-plot-point"/><text x="'+(Number(cx)+12)+'" y="'+(Number(cy)-8)+'" class="l2-point-label">'+e(itemName(row.style_id))+'</text><title>'+e(itemName(row.style_id)+' · 20D '+percent(y)+' · 加速度 '+percent(x))+'</title></g>';
+const pp=v=>finite(v)?signed(v).replace('%',' pp'):'—';
+const styleRows=(series,style)=>(
+ (Array.isArray(series)?series:[]).filter(x=>x.style_id===style&&x.date)
+   .sort((a,b)=>String(a.date).localeCompare(String(b.date)))
+);
+const stateMeaning=s=>{
+ const map={
+  STRONG_ACCELERATING:'强势 · 改善',
+  STRONG_DECELERATING:'强势 · 恶化',
+  WEAK_IMPROVING:'弱势 · 改善',
+  WEAK_DETERIORATING:'弱势 · 恶化',
+  UNKNOWN:'暂不可判定'
+ };
+ return map[String(s)||'UNKNOWN']||map.UNKNOWN;
 };
-function quadrant(rows){
+const prior=(rows,offset)=>rows.length>offset?rows[rows.length-1-offset]:null;
+const miniSparkline=(series,style)=>{
+ const rows=styleRows(series,style).slice(-24);
+ const vals=rows.map(x=>number(x.relative_return_20d)).filter(x=>x!==null);
+ if(vals.length<2)return '<span class="l2-spark-empty">—</span>';
+ const lo=Math.min(...vals),hi=Math.max(...vals),span=Math.max(1e-8,hi-lo);
+ let d='',drawing=false;
+ rows.forEach((row,i)=>{
+  const v=number(row.relative_return_20d);
+  if(v===null){drawing=false;return;}
+  const x=2+76*i/Math.max(1,rows.length-1),y=27-23*(v-lo)/span;
+  d+=(drawing?'L':'M')+x.toFixed(1)+' '+y.toFixed(1)+' ';drawing=true;
+ });
+ return '<svg class="l2-spark" viewBox="0 0 80 30" aria-hidden="true"><path d="'+d+'" /></svg>';
+};
+const latestRank=(items,style)=>{
+ const ranked=(Array.isArray(items)?items:[]).filter(x=>finite(x.relative_return_20d))
+  .slice().sort((a,b)=>Number(b.relative_return_20d)-Number(a.relative_return_20d));
+ const i=ranked.findIndex(x=>x.style_id===style);
+ return i<0?null:{rank:i+1,total:ranked.length};
+};
+const point=(row,rangeX,rangeY)=>{
+ const x=number(row.strength_relative_return_20d);
+ const y=number(row.acceleration_relative_return_5d);
+ if(x===null||y===null)return '';
+ const cx=Math.max(35,Math.min(525,280+(x/rangeX)*235)).toFixed(1);
+ const cy=Math.max(30,Math.min(280,155-(y/rangeY)*116)).toFixed(1);
+ const selected=row.style_id===state.l2Style;
+ return '<g class="'+(selected?'l2-selected-point':'')+'"><circle cx="'+cx+'" cy="'+cy+'" r="'+(selected?'8':'5.5')+'" class="l2-plot-point"/><text x="'+(Number(cx)+10)+'" y="'+(Number(cy)-7)+'" class="l2-point-label">'+e(itemName(row.style_id))+'</text><title>'+e(itemName(row.style_id)+' · 20D '+percent(x)+' · 5D边际 '+percent(y))+'</title></g>';
+};
+function quadrant(rows,series){
  const valid=rows.filter(x=>x.rotation_state!=='UNKNOWN'&&finite(x.strength_relative_return_20d)&&finite(x.acceleration_relative_return_5d));
  if(!valid.length)return empty('轮动位置无法绘制','需要 20 日相对收益、5 日相对加速度及来源时间证明。');
- const maxX=Math.max(0.0001,...valid.map(x=>Math.abs(Number(x.acceleration_relative_return_5d))));
- const maxY=Math.max(0.0001,...valid.map(x=>Math.abs(Number(x.strength_relative_return_20d))));
- return '<div class="l2-plot-scroll"><svg viewBox="0 0 560 320" class="l2-plot" role="img" aria-label="七类ETF风格：横轴五日相对加速度，纵轴二十日相对收益，零点为四象限原点">'+
+ const selectedHistory=styleRows(series,state.l2Style).filter(x=>finite(x.relative_return_20d)&&finite(x.relative_acceleration_5d)).slice(-10);
+ const maxX=Math.max(0.0001,...valid.map(x=>Math.abs(Number(x.strength_relative_return_20d))),...selectedHistory.map(x=>Math.abs(Number(x.relative_return_20d))));
+ const maxY=Math.max(0.0001,...valid.map(x=>Math.abs(Number(x.acceleration_relative_return_5d))),...selectedHistory.map(x=>Math.abs(Number(x.relative_acceleration_5d))));
+ const trail=selectedHistory.map((x,i)=>{
+  const cx=Math.max(35,Math.min(525,280+(Number(x.relative_return_20d)/maxX)*235));
+  const cy=Math.max(30,Math.min(280,155-(Number(x.relative_acceleration_5d)/maxY)*116));
+  return [cx,cy,i===selectedHistory.length-1];
+ });
+ const path=trail.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
+ return '<div class="l2-plot-scroll"><svg viewBox="0 0 560 320" class="l2-plot" role="img" aria-label="横轴20日相对收益，纵轴5日相对收益加速度；选中风格显示最近10个交易日轨迹">'+
  '<rect x="0" y="0" width="280" height="155" class="l2-q-neutral"/><rect x="280" y="0" width="280" height="155" class="l2-q-good"/>'+
  '<rect x="0" y="155" width="280" height="155" class="l2-q-low"/><rect x="280" y="155" width="280" height="155" class="l2-q-warn"/>'+
- '<line x1="280" y1="0" x2="280" y2="310" class="l2-axis"/>'+
- '<line x1="0" y1="155" x2="560" y2="155" class="l2-axis"/>'+
- '<text x="14" y="18" class="l2-quadrant-label">强势减速</text><text x="454" y="18" class="l2-quadrant-label">强势加速</text>'+
- '<text x="14" y="292" class="l2-quadrant-label">弱势恶化</text><text x="454" y="292" class="l2-quadrant-label">弱势改善</text>'+
- '<text x="4" y="150" class="l2-axis-label">0</text><text x="284" y="310" class="l2-axis-label">0</text>'+
+ '<line x1="280" y1="0" x2="280" y2="310" class="l2-axis"/><line x1="0" y1="155" x2="560" y2="155" class="l2-axis"/>'+
+ '<text x="14" y="18" class="l2-quadrant-label">弱势 · 改善</text><text x="454" y="18" class="l2-quadrant-label">强势 · 改善</text>'+
+ '<text x="14" y="292" class="l2-quadrant-label">弱势 · 恶化</text><text x="454" y="292" class="l2-quadrant-label">强势 · 恶化</text>'+
+ (path?'<path d="'+path+'" class="l2-trail-line"/>'+trail.map((p,i)=>'<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="'+(p[2]?'4':'2.4')+'" class="l2-trail-point"><title>'+e(itemName(state.l2Style)+' · 轨迹 '+(i+1)+'/'+trail.length)+'</title></circle>').join(''):'')+
  valid.map(x=>point(x,maxX,maxY)).join('')+'</svg></div>'+
- '<div class="l2-chart-foot"><span>↑ 20 日相对收益</span><span>→ 5 日相对加速度</span><span>归一化比例坐标 · 两轴独立缩放 · 非交易信号</span></div>';
+ '<div class="l2-chart-foot"><span>横轴：20D 相对收益</span><span>纵轴：5D 边际变化</span><span>细线：'+e(itemName(state.l2Style))+' 最近 10 个交易日轨迹</span></div>';
 }
-function historyGraph(series,style){
- const rows=(Array.isArray(series)?series:[]).filter(x=>x.style_id===style&&x.date)
-   .sort((a,b)=>String(a.date).localeCompare(String(b.date)));
- const values=rows.map(x=>number(x.relative_return_20d)),good=values.filter(x=>x!==null);
- if(good.length<2)return empty('历史曲线缺少足够观测','不会插值、补零或跨缺口连接。');
- const lo=Math.min(0,...good),hi=Math.max(0,...good),span=Math.max(1e-8,hi-lo);
- let path='',drawing=false;
- rows.forEach((row,i)=>{
-  const val=values[i];
-  if(val===null){drawing=false;return;}
-  const px=14+532*i/Math.max(1,rows.length-1);
-  const py=170-145*(val-lo)/span;
-  path+=(drawing?'L':'M')+px.toFixed(1)+' '+py.toFixed(1)+' ';
-  drawing=true;
- });
- const zeroY=(170-145*(0-lo)/span).toFixed(1);
- return '<svg viewBox="0 0 560 185" class="l2-trend" role="img" aria-label="真实20交易日ETF相对收益历史，缺失时断线">'+
- '<line x1="14" y1="'+zeroY+'" x2="546" y2="'+zeroY+'" class="l2-zero"/>'+
- '<path d="'+path+'" fill="none" class="l2-trend-line" stroke-width="2.5" stroke-linejoin="round" />'+
- '</svg><div class="l2-chart-foot"><span>'+date(rows[0].date)+'—'+date(rows[rows.length-1].date)+'</span><span>20D 相对收益 · 无补值</span></div>';
-}
-function tableStyles(items,rotation){
- const s=new Map(rotation.map(x=>[x.style_id,x]));
- const rows=items.filter(x=>STYLE_KEYS.includes(x.style_id))
-  .slice().sort((a,b)=>{
-   const av=number(a.relative_return_20d),bv=number(b.relative_return_20d);
-   return av===null&&bv===null?0:av===null?1:bv===null?-1:bv-av;
-  }).map(x=>{
-   const r=s.get(x.style_id)||{};
-   return ['<button type="button" class="l2-style-select'+(state.l2Style===x.style_id?' current':'')+'" data-l2-style="'+e(x.style_id)+'">'+e(itemName(x.style_id))+'</button>',
-     figure(x.relative_return_5d),figure(x.relative_return_20d),figure(x.relative_return_60d),
-     figure(x.relative_acceleration_5d),htmlStatus(r.rotation_state),e(x.missing_reason||r.block_reason||'—')];
+function multiStyleEvolution(series,selectedStyle){
+ const all=Array.isArray(series)?series:[];
+ const dates=[...new Set(all.map(x=>String(x.date||'').slice(0,10)).filter(Boolean))].sort().slice(-60);
+ if(dates.length<2)return empty('历史演化不足','至少需要两个有效交易日。');
+ const dateSet=new Set(dates);
+ const grouped=new Map(STYLE_KEYS.map(k=>[k,styleRows(all,k).filter(x=>dateSet.has(String(x.date).slice(0,10)))]));
+ const vals=[];
+ grouped.forEach(rows=>rows.forEach(x=>{const v=number(x.relative_return_20d);if(v!==null)vals.push(v);}));
+ if(vals.length<2)return empty('历史演化不足','20D 相对收益缺少可画观测。');
+ const lo=Math.min(0,...vals),hi=Math.max(0,...vals),span=Math.max(1e-8,hi-lo);
+ const index=new Map(dates.map((d,i)=>[d,i]));
+ const pathFor=(rows)=>{
+  let d='',drawing=false;
+  rows.forEach(row=>{
+   const v=number(row.relative_return_20d),i=index.get(String(row.date).slice(0,10));
+   if(v===null||i===undefined){drawing=false;return;}
+   const x=38+650*i/Math.max(1,dates.length-1),y=242-200*(v-lo)/span;
+   d+=(drawing?'L':'M')+x.toFixed(1)+' '+y.toFixed(1)+' ';drawing=true;
   });
- return table(['ETF 风格','5D 相对收益','20D 相对收益','60D 相对收益','5D 加速度','轮动状态','缺失原因'],rows);
+  return d;
+ };
+ const zeroY=(242-200*(0-lo)/span).toFixed(1);
+ const lines=STYLE_KEYS.map(style=>{
+  const d=pathFor(grouped.get(style)||[]);
+  if(!d)return '';
+  const cls=style===selectedStyle?'l2-evo-line selected':'l2-evo-line context';
+  return '<path d="'+d+'" class="'+cls+'"><title>'+e(itemName(style))+'</title></path>';
+ }).join('');
+ const sel=grouped.get(selectedStyle)||[],last=sel.filter(x=>finite(x.relative_return_20d)).slice(-1)[0];
+ return '<svg viewBox="0 0 720 270" class="l2-evolution" role="img" aria-label="最近60个交易日七风格20日相对收益演化，选中风格高亮">'+
+ '<line x1="38" y1="'+zeroY+'" x2="688" y2="'+zeroY+'" class="l2-zero"/>'+lines+
+ (last?'<text x="680" y="24" text-anchor="end" class="l2-evo-current">'+e(itemName(selectedStyle))+' '+e(percent(last.relative_return_20d))+'</text>':'')+
+ '</svg><div class="l2-chart-foot"><span>'+e(dates[0])+'—'+e(dates[dates.length-1])+'</span><span>20D 相对收益 · 选中风格高亮</span><span>其他风格仅作横截面对照</span></div>';
+}
+function overviewMatrix(items,rotation){
+ const map=new Map((rotation||[]).map(x=>[x.style_id,x]));
+ const styles=STYLE_KEYS.filter(id=>(items||[]).some(x=>x.style_id===id));
+ const row=(label,key,kind='return')=>'<tr><th>'+e(label)+'</th>'+styles.map(id=>{
+  const x=shownData(items,id);
+  return '<td>'+(kind==='state'?'<span class="l2-state-plain">'+e(stateMeaning(map.get(id)?.rotation_state))+'</span>':figure(x?.[key],kind))+'</td>';
+ }).join('')+'</tr>';
+ return '<div class="l2-matrix-scroll"><table class="l2-matrix"><thead><tr><th>观察维度</th>'+styles.map(id=>'<th><button type="button" class="l2-matrix-style'+(state.l2Style===id?' current':'')+'" data-l2-style="'+e(id)+'">'+e(itemName(id))+'</button></th>').join('')+'</tr></thead><tbody>'+
+ row('20D 相对收益','relative_return_20d')+
+ row('5D 相对收益','relative_return_5d')+
+ row('60D 相对收益','relative_return_60d')+
+ row('5D 边际变化','relative_acceleration_5d')+
+ row('当前象限','rotation_state','state')+
+ '</tbody></table></div>';
+}
+function styleRail(items,series){
+ const ranked=(items||[]).filter(x=>STYLE_KEYS.includes(x.style_id)).slice().sort((a,b)=>{
+  const av=number(a.relative_return_20d),bv=number(b.relative_return_20d);
+  return av===null&&bv===null?0:av===null?1:bv===null?-1:bv-av;
+ });
+ return '<div class="l2-style-rail">'+ranked.map((x,i)=>
+  '<button type="button" class="l2-rail-item'+(state.l2Style===x.style_id?' current':'')+'" data-l2-style="'+e(x.style_id)+'">'+
+   '<span class="l2-rail-rank">'+(i+1)+'</span><span class="l2-rail-main"><b>'+e(itemName(x.style_id))+'</b><small>20D '+e(percent(x.relative_return_20d))+' · Δ5D '+e(percent(x.relative_acceleration_5d))+'</small></span>'+
+   miniSparkline(series,x.style_id)+'</button>'
+ ).join('')+'</div>';
+}
+function rankChanges(series){
+ const all=Array.isArray(series)?series:[];
+ const dates=[...new Set(all.map(x=>String(x.date||'').slice(0,10)).filter(Boolean))].sort();
+ if(!dates.length)return empty('排名历史不足','没有可用于横截面排名的历史日期。');
+ const snap=(offset)=>{
+  const d=dates[Math.max(0,dates.length-1-offset)];
+  const rows=all.filter(x=>String(x.date||'').slice(0,10)===d&&finite(x.relative_return_20d))
+   .slice().sort((a,b)=>Number(b.relative_return_20d)-Number(a.relative_return_20d));
+  return {date:d,rank:new Map(rows.map((x,i)=>[x.style_id,i+1]))};
+ };
+ const now=snap(0),d5=snap(5),d20=snap(20);
+ const rows=STYLE_KEYS.filter(id=>now.rank.has(id)).sort((a,b)=>now.rank.get(a)-now.rank.get(b)).map(id=>{
+  const a=now.rank.get(id),b=d5.rank.get(id),c=d20.rank.get(id);
+  const move=finite(c)?Number(c)-Number(a):null;
+  const movement=move===null?'—':move>0?'↑ '+move:move<0?'↓ '+Math.abs(move):'—';
+  return ['<button class="l2-style-select'+(state.l2Style===id?' current':'')+'" data-l2-style="'+e(id)+'">'+e(itemName(id))+'</button>',n(a,0),b?String(b):'—',c?String(c):'—','<span class="l2-rank-move '+(move>0?'up':move<0?'down':'flat')+'">'+movement+'</span>'];
+ });
+ return table(['风格','当前','5D 前','20D 前','20D 排名变化'],rows)+
+  '<div class="l2-chart-foot"><span>当前：'+e(now.date)+'</span><span>排名依据：20D 相对收益</span></div>';
+}
+function diagnosticPanel(data,rotation){
+ const x=shownData(data?.latest,state.l2Style),r=shownData(rotation?.latest,state.l2Style);
+ const rows=styleRows(data?.series,state.l2Style);
+ if(!x)return card('变化诊断 · '+itemName(state.l2Style),empty('暂无可诊断观测','当前风格缺少有效观测。'));
+ const p5=prior(rows,5),p20=prior(rows,20);
+ const delta=(key,p)=>p&&finite(x[key])&&finite(p[key])?Number(x[key])-Number(p[key]):null;
+ const evidence=[
+  ['短期表现','5D 相对收益',figure(x.relative_return_5d),p5?('5D前 '+percent(p5.relative_return_5d)):'—'],
+  ['中期表现','20D 相对收益',figure(x.relative_return_20d),delta('relative_return_20d',p5)!==null?('近5D变化 '+pp(delta('relative_return_20d',p5))):'—'],
+  ['边际变化','5D 加速度',figure(x.relative_acceleration_5d),delta('relative_acceleration_5d',p5)!==null?('较5D前 '+pp(delta('relative_acceleration_5d',p5))):'—'],
+  ['持续性','10D 占优天数',figure(x.relative_up_days_10,'integer'),'正相对收益交易日'],
+  ['风险','20D 相对波动',figure(x.relative_volatility_20d),delta('relative_volatility_20d',p5)!==null?('近5D '+pp(delta('relative_volatility_20d',p5))):'—']
+ ];
+ const open=[];
+ if(!finite(x.relative_return_60d))open.push('60D 相对收益缺失，中期结构尚不可核验。');
+ else if(finite(x.relative_return_20d)&&Math.sign(Number(x.relative_return_60d))!==Math.sign(Number(x.relative_return_20d)))open.push('20D 与 60D 相对收益尚未同向，中期共振未确认。');
+ if((number(r?.consecutive_sessions)||0)<5)open.push('当前象限仅持续 '+n(r?.consecutive_sessions||0,0)+' 个交易日，持续性仍短。');
+ if(p5&&finite(x.relative_acceleration_5d)&&finite(p5.relative_acceleration_5d)&&Number(x.relative_acceleration_5d)<Number(p5.relative_acceleration_5d))open.push('边际改善速度低于 5 个交易日前，需观察是否继续回落。');
+ if(p20&&finite(x.relative_return_20d)&&finite(p20.relative_return_20d)&&Number(x.relative_return_20d)>Number(p20.relative_return_20d)&&finite(x.relative_drawdown_20d)&&Number(x.relative_drawdown_20d)<-0.03)open.push('相对收益改善，但 20D 回撤仍较深，趋势质量并不完全一致。');
+ if(!open.length)open.push('主要观察维度暂时一致；仍需通过后续交易日确认，而不是据此推断未来收益。');
+ const invalid=[];
+ if(r?.rotation_state==='STRONG_ACCELERATING'||r?.rotation_state==='STRONG_DECELERATING')invalid.push('20D 相对收益 ≤ 0：退出“强势”区域。');
+ else if(r?.rotation_state==='WEAK_IMPROVING'||r?.rotation_state==='WEAK_DETERIORATING')invalid.push('20D 相对收益 > 0：进入“强势”区域，当前弱势描述失效。');
+ if(number(r?.acceleration_relative_return_5d)>0)invalid.push('5D 边际变化 ≤ 0：改善状态失效并转入恶化侧。');
+ else if(number(r?.acceleration_relative_return_5d)<0)invalid.push('5D 边际变化 > 0：恶化状态失效并转入改善侧。');
+ invalid.push('关键窗口缺失或来源晚于截止时间：状态直接变为 UNKNOWN。');
+ const current=stateMeaning(r?.rotation_state);
+ return card('变化诊断 · '+itemName(state.l2Style),
+  '<div class="l2-diagnostic-head"><span>当前象限</span><b>'+e(current)+'</b><small>持续 '+n(r?.consecutive_sessions||0,0)+' 个交易日</small></div>'+
+  '<section class="l2-diag-section"><h4>1. 最近为什么在变化？</h4><div class="l2-evidence-list">'+evidence.map(a=>'<div><span>'+e(a[0])+'</span><b>'+e(a[1])+'</b><strong>'+a[2]+'</strong><small>'+e(a[3])+'</small></div>').join('')+'</div></section>'+
+  '<section class="l2-diag-section"><h4>2. 尚未确认 / 需要观察</h4><ul>'+open.map(v=>'<li>'+e(v)+'</li>').join('')+'</ul></section>'+
+  '<section class="l2-diag-section"><h4>3. 当前描述何时失效？</h4><ul class="l2-invalid">'+invalid.map(v=>'<li>'+e(v)+'</li>').join('')+'</ul></section>'+
+  '<section class="l2-diag-section l2-research-note"><h4>研究解释</h4><p>'+e(itemName(state.l2Style))+' 当前的“'+e(current)+'”只由 20D 相对收益与 5D 边际变化定义。它描述已经发生的轮动位置，不等于未来收益判断；H1/H3/H5 前瞻证据独立放在“领先预测”中。</p></section>',
+  '可观察事实 → 未确认项 → 失效边界');
 }
 function details(data,rotation){
  const x=shownData(data?.latest,state.l2Style),r=shownData(rotation?.latest,state.l2Style);
@@ -213,28 +335,31 @@ pages.style=async()=>{
  const leaders=items.filter(x=>finite(x.relative_return_20d)).sort((a,b)=>Number(b.relative_return_20d)-Number(a.relative_return_20d));
  const improving=known.filter(x=>x.rotation_state==='WEAK_IMPROVING').length;
  const resolvedDay=date(data?.asof_session);
- const header=heading('经典因子与风格轮动','L2 · 七类 ETF 风格相对收益、转折与历史证据。French 因子独立对照，不把表现描述为预测。');
+ const header=heading('经典因子 / 风格监测','L2 · 先看相对表现如何演化，再看边际变化、横截面位置与证据缺口；状态标签只作辅助描述。');
  const controls='<div class="l2-controls"><label for="l2-asof">研究日期</label><input type="date" id="l2-asof" value="'+e(state.l2AsOf)+'" aria-label="L2 研究日期，留空表示最新完整交易日"/>'+
  '<button type="button" id="l2-current" class="btn smallbtn">返回最新</button>'+
  '<span>当前观察：'+resolvedDay+'</span><span>'+badge(data?.status|| (request?.pending?'加载中':'BLOCKED'),
  data?.status==='OBSERVATION_ONLY'?'blue':'amber')+'</span></div>';
  const tabs='<div class="l2-tabs" role="group" aria-label="L2 研究视图">'+[
- linkTab('overview','风格总览'),linkTab('rotation','轮动与转折'),
+ linkTab('overview','风格概览'),linkTab('rotation','风格演化'),
  linkTab('forecast','领先预测'),linkTab('evidence','计算证据'),
  linkTab('french','French 因子')].join('')+'</div>';
+ const selectedNow=shownData(items,state.l2Style);
+ const selectedRotation=shownData(rotationRows,state.l2Style);
+ const rank=latestRank(items,state.l2Style);
  const summary=strip([
- ['20D 相对强势',leaders.length?e(itemName(leaders[0].style_id)):'—',leaders.length?'已发生的相对收益领先':'数据不可用'],
- ['弱势改善',rot?n(improving,0):'—','七类风格中的有效状态'],
- ['可判定状态',rot?n(known.length,0)+' / 7':'—','缺口或中性边界不推断'],
- ['未来 H1 / H3 / H5','尚未验证','不得展示虚构模型概率']
+ ['当前聚焦',e(itemName(state.l2Style)),'点击任一风格切换同一套诊断'],
+ ['20D 相对排名',rank?e(rank.rank+' / '+rank.total):'—','只描述当前横截面位置'],
+ ['5D 边际变化',selectedNow?figure(selectedNow.relative_acceleration_5d):'—','最近 5D 相对收益 - 前 5D'],
+ ['当前象限',e(stateMeaning(selectedRotation?.rotation_state)),'20D 相对收益 × 5D 边际变化']
  ]);
- const disclaimer='<div class="l2-disclaimer">当前产品资格：<b>OBSERVATION_ONLY</b> · ETF 当前版本历史观察不等于独立 PIT 研究；不生成交易建议或概率。</div>';
+ const disclaimer='<div class="l2-disclaimer">观察层：<b>OBSERVATION_ONLY</b> · 横截面相对表现用于解释风格轮动过程，不把象限、排名或短期改善直接解释为未来收益或交易信号。</div>';
  let body='';
  if(!data){
   body=problem(request,'L2 七风格观测')+
    card('领先性研究资格',empty('没有已核验的预测','请先完成真实历史标签、时间分割和样本外模型验证。'));
  }else if(state.l2Tab==='rotation'){
-  body='<div class="l2-main-grid">'+card('轮动四象限 · 七类风格',quadrant(rotationRows),'X：5D 加速度 · Y：20D 相对收益')+
+  body='<div class="l2-main-grid">'+card('相对位置 × 边际变化',quadrant(rotationRows,data.series),'X：20D 相对收益 · Y：5D 边际变化')+
     card('各风格状态',rotationRows.length?table(['风格','状态','持续交易日','前一状态'],rotationRows.map(x=>[
     '<button class="l2-style-select" data-l2-style="'+e(x.style_id)+'">'+e(itemName(x.style_id))+'</button>',
     htmlStatus(x.rotation_state),figure(x.consecutive_sessions,'integer'),htmlStatus(x.previous_state)])):
@@ -256,13 +381,21 @@ pages.style=async()=>{
   const factors=await settle('/api/v1/styles?mode=observation');
   body='<div class="l2-main-grid">'+french(factors)+quality(data)+'</div>';
  }else{
-  body='<div class="l2-main-grid">'+card('七风格轮动地图',quadrant(rotationRows),'已发生表现 · 不是未来概率')+
-    card('聚焦风格 · 20D 相对趋势',historyGraph(data.series,state.l2Style),'选择下表风格查看历史')+'</div>'+
-    card('七类 ETF 风格 · 当前强弱',items.length?tableStyles(items,rotationRows):problem(request,'风格强弱'),'点击风格切换右侧详情 · 缺失值显示 —')+
-    '<div class="l2-main-grid">'+details(data,rot)+
-    card('未来 H1 / H3 / H5 领先预测',empty('预测模型尚未通过资格验收',
-    '待建立独立验证的 T+1 开盘到 T+H 收盘相对收益标签、Walk-forward、样本外指标和时间证明。')+
-    '<div class="l2-future"><span>H1 —</span><span>H3 —</span><span>H5 —</span></div>','没有生成概率、收益目标或交易指令')+'</div>';
+  body=card('风格变化概览 · 各自基准',
+    overviewMatrix(items,rotationRows),
+    '20D / 5D / 60D 为已发生相对收益；5D 边际变化 = 最近 5D 相对收益 - 前 5D。')+
+   '<div class="l2-research-grid">'+
+    '<div class="l2-research-left">'+card('风格列表 · 20D 排名',styleRail(items,data.series),'排名不是推荐顺序')+'</div>'+
+    '<div class="l2-research-center">'+
+      card('60D 风格演化 · 20D 相对收益',multiStyleEvolution(data.series,state.l2Style),'同一坐标观察七类风格，避免只看单一风格')+
+      '<div class="l2-research-lower">'+
+       card('相对位置 × 边际变化',quadrant(rotationRows,data.series),'选中风格显示最近 10 个交易日轨迹')+
+       card('相对排名变化',rankChanges(data.series),'关注相对位置如何迁移，而不是只看当前第一名')+
+      '</div>'+
+    '</div>'+
+    '<div class="l2-research-right">'+diagnosticPanel(data,rot)+'</div>'+
+   '</div>';
+
  }
  return {title:'L2 · 风格轮动',html:'<div class="l2-page">'+header+controls+tabs+summary+disclaimer+body+'</div>',
   mount(){
