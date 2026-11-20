@@ -16,6 +16,15 @@ const STATES={
  WEAK_DETERIORATING:['弱势恶化','weak'],
  UNKNOWN:['暂不可判定','unknown']
 };
+const STYLE_COLORS={
+ size:'#2563EB',
+ value:'#16A34A',
+ growth:'#D97706',
+ momentum:'#7C3AED',
+ quality:'#0891B2',
+ low_vol:'#0F766E',
+ cyc_def:'#E11D48'
+};
 const STYLE_KEYS=Object.keys(STYLE_LABELS);
 state.l2Tab=state.l2Tab||'overview';
 state.l2Style=state.l2Style||'quality';
@@ -62,7 +71,8 @@ const miniSparkline=(series,style)=>{
   const x=2+76*i/Math.max(1,rows.length-1),y=27-23*(v-lo)/span;
   d+=(drawing?'L':'M')+x.toFixed(1)+' '+y.toFixed(1)+' ';drawing=true;
  });
- return '<svg class="l2-spark" viewBox="0 0 80 30" aria-hidden="true"><path d="'+d+'" /></svg>';
+ const color=STYLE_COLORS[style]||'#64748B';
+ return '<svg class="l2-spark" style="--style-color:'+e(color)+'" viewBox="0 0 80 30" aria-hidden="true"><path d="'+d+'" /></svg>';
 };
 const latestRank=(items,style)=>{
  const ranked=(Array.isArray(items)?items:[]).filter(x=>finite(x.relative_return_20d))
@@ -117,49 +127,89 @@ function multiStyleEvolution(series,selectedStyle){
   rows.forEach(row=>{
    const v=number(row.relative_return_20d),i=index.get(String(row.date).slice(0,10));
    if(v===null||i===undefined){drawing=false;return;}
-   const x=38+650*i/Math.max(1,dates.length-1),y=242-200*(v-lo)/span;
+   const x=38+620*i/Math.max(1,dates.length-1),y=242-200*(v-lo)/span;
    d+=(drawing?'L':'M')+x.toFixed(1)+' '+y.toFixed(1)+' ';drawing=true;
   });
   return d;
  };
  const zeroY=(242-200*(0-lo)/span).toFixed(1);
  const lines=STYLE_KEYS.map(style=>{
-  const d=pathFor(grouped.get(style)||[]);
+  const rows=grouped.get(style)||[],d=pathFor(rows);
   if(!d)return '';
-  const cls=style===selectedStyle?'l2-evo-line selected':'l2-evo-line context';
-  return '<path d="'+d+'" class="'+cls+'"><title>'+e(itemName(style))+'</title></path>';
+  const color=STYLE_COLORS[style]||'#64748B';
+  const selected=style===selectedStyle;
+  const latest=rows.filter(x=>finite(x.relative_return_20d)).slice(-1)[0];
+  const latestIndex=latest?index.get(String(latest.date).slice(0,10)):null;
+  const latestX=latestIndex===null||latestIndex===undefined?null:38+620*latestIndex/Math.max(1,dates.length-1);
+  const latestY=latest?242-200*(Number(latest.relative_return_20d)-lo)/span:null;
+  return '<g class="l2-evo-series'+(selected?' selected':'')+'" style="--series-color:'+e(color)+'">'+
+   '<path d="'+d+'" class="l2-evo-line"><title>'+e(itemName(style))+'</title></path>'+
+   (selected&&latestX!==null?'<circle cx="'+latestX.toFixed(1)+'" cy="'+latestY.toFixed(1)+'" r="4.8" class="l2-evo-end"><title>'+e(itemName(style)+' '+percent(latest.relative_return_20d))+'</title></circle>':'')+
+   '</g>';
  }).join('');
- const sel=grouped.get(selectedStyle)||[],last=sel.filter(x=>finite(x.relative_return_20d)).slice(-1)[0];
- return '<svg viewBox="0 0 720 270" class="l2-evolution" role="img" aria-label="最近60个交易日七风格20日相对收益演化，选中风格高亮">'+
- '<line x1="38" y1="'+zeroY+'" x2="688" y2="'+zeroY+'" class="l2-zero"/>'+lines+
- (last?'<text x="680" y="24" text-anchor="end" class="l2-evo-current">'+e(itemName(selectedStyle))+' '+e(percent(last.relative_return_20d))+'</text>':'')+
- '</svg><div class="l2-chart-foot"><span>'+e(dates[0])+'—'+e(dates[dates.length-1])+'</span><span>20D 相对收益 · 选中风格高亮</span><span>其他风格仅作横截面对照</span></div>';
+ const current=STYLE_KEYS.map(style=>{
+  const last=(grouped.get(style)||[]).filter(x=>finite(x.relative_return_20d)).slice(-1)[0];
+  return last?{style,value:Number(last.relative_return_20d)}:null;
+ }).filter(Boolean).sort((a,b)=>b.value-a.value);
+ const legend=current.map(x=>'<button type="button" class="l2-evo-legend-item'+(x.style===selectedStyle?' current':'')+'" data-l2-style="'+e(x.style)+'" style="--series-color:'+e(STYLE_COLORS[x.style]||'#64748B')+'">'+
+   '<i></i><span>'+e(itemName(x.style))+'</span><b class="'+tone(x.value)+'">'+e(percent(x.value))+'</b></button>').join('');
+ return '<div class="l2-evo-wrap"><svg viewBox="0 0 690 270" class="l2-evolution" role="img" aria-label="最近60个交易日七风格20日相对收益演化，每个风格使用固定独立颜色">'+
+ '<line x1="38" y1="'+zeroY+'" x2="658" y2="'+zeroY+'" class="l2-zero"/>'+lines+
+ '</svg><div class="l2-evo-legend">'+legend+'</div></div>'+
+ '<div class="l2-chart-foot"><span>'+e(dates[0])+'—'+e(dates[dates.length-1])+'</span><span>20D 相对收益 · 固定风格色</span><span>选中风格用线宽与终点强调</span></div>';
 }
-function overviewMatrix(items,rotation){
+function overviewMatrix(items,rotation,series){
  const map=new Map((rotation||[]).map(x=>[x.style_id,x]));
- const styles=STYLE_KEYS.filter(id=>(items||[]).some(x=>x.style_id===id));
- const row=(label,key,kind='return')=>'<tr><th>'+e(label)+'</th>'+styles.map(id=>{
-  const x=shownData(items,id);
-  return '<td>'+(kind==='state'?'<span class="l2-state-plain">'+e(stateMeaning(map.get(id)?.rotation_state))+'</span>':figure(x?.[key],kind))+'</td>';
- }).join('')+'</tr>';
- return '<div class="l2-matrix-scroll"><table class="l2-matrix"><thead><tr><th>观察维度</th>'+styles.map(id=>'<th><button type="button" class="l2-matrix-style'+(state.l2Style===id?' current':'')+'" data-l2-style="'+e(id)+'">'+e(itemName(id))+'</button></th>').join('')+'</tr></thead><tbody>'+
- row('20D 相对收益','relative_return_20d')+
- row('5D 相对收益','relative_return_5d')+
- row('60D 相对收益','relative_return_60d')+
- row('5D 边际变化','relative_acceleration_5d')+
- row('当前象限','rotation_state','state')+
- '</tbody></table></div>';
+ const ranked=(items||[]).filter(x=>STYLE_KEYS.includes(x.style_id)&&finite(x.relative_return_20d))
+  .slice().sort((a,b)=>Number(b.relative_return_20d)-Number(a.relative_return_20d));
+ return '<div class="l2-cross-strip">'+ranked.map((x,i)=>{
+   const style=x.style_id,color=STYLE_COLORS[style]||'#64748B';
+   return '<button type="button" class="l2-cross-card '+tone(x.relative_return_20d)+(state.l2Style===style?' current':'')+'" data-l2-style="'+e(style)+'" style="--style-color:'+e(color)+'">'+
+    '<div class="l2-cross-head"><b>'+e(itemName(style))+'</b><span>'+(i+1)+'</span></div>'+
+    '<strong>'+e(percent(x.relative_return_20d))+'</strong>'+
+    '<small>Δ5D '+e(percent(x.relative_acceleration_5d))+'</small>'+
+    miniSparkline(series,style)+
+    '<em>'+e(stateMeaning(map.get(style)?.rotation_state))+'</em>'+
+   '</button>';
+  }).join('')+'</div>';
 }
 function styleRail(items,series){
  const ranked=(items||[]).filter(x=>STYLE_KEYS.includes(x.style_id)).slice().sort((a,b)=>{
   const av=number(a.relative_return_20d),bv=number(b.relative_return_20d);
   return av===null&&bv===null?0:av===null?1:bv===null?-1:bv-av;
  });
- return '<div class="l2-style-rail">'+ranked.map((x,i)=>
-  '<button type="button" class="l2-rail-item'+(state.l2Style===x.style_id?' current':'')+'" data-l2-style="'+e(x.style_id)+'">'+
-   '<span class="l2-rail-rank">'+(i+1)+'</span><span class="l2-rail-main"><b>'+e(itemName(x.style_id))+'</b><small>20D '+e(percent(x.relative_return_20d))+' · Δ5D '+e(percent(x.relative_acceleration_5d))+'</small></span>'+
-   miniSparkline(series,x.style_id)+'</button>'
- ).join('')+'</div>';
+ const maxAbs=Math.max(0.0001,...ranked.map(x=>Math.abs(number(x.relative_return_20d)||0)));
+ return '<div class="l2-style-rail">'+ranked.map((x,i)=>{
+  const value=number(x.relative_return_20d),width=value===null?0:Math.max(4,Math.abs(value)/maxAbs*100);
+  const color=STYLE_COLORS[x.style_id]||'#64748B';
+  return '<button type="button" class="l2-rail-item '+tone(value)+(state.l2Style===x.style_id?' current':'')+'" data-l2-style="'+e(x.style_id)+'" style="--style-color:'+e(color)+'">'+
+   '<span class="l2-rail-rank">'+(i+1)+'</span>'+
+   '<span class="l2-rail-main"><b>'+e(itemName(x.style_id))+'</b><span class="l2-rail-values"><strong>'+e(percent(value))+'</strong><small>Δ5D '+e(percent(x.relative_acceleration_5d))+'</small></span>'+
+    '<span class="l2-rail-bar"><i style="width:'+width.toFixed(1)+'%"></i></span></span>'+
+   miniSparkline(series,x.style_id)+'</button>';
+ }).join('')+'</div>';
+}
+function comparisonSnapshot(items,series,selectedStyle){
+ const ranked=(items||[]).filter(x=>STYLE_KEYS.includes(x.style_id)&&finite(x.relative_return_20d))
+  .slice().sort((a,b)=>Number(b.relative_return_20d)-Number(a.relative_return_20d));
+ const selected=ranked.find(x=>x.style_id===selectedStyle);
+ if(!selected||!ranked.length)return '';
+ const rank=ranked.findIndex(x=>x.style_id===selectedStyle)+1;
+ const leader=ranked[0],second=ranked[1];
+ const gap=rank===1&&second?Number(selected.relative_return_20d)-Number(second.relative_return_20d):Number(selected.relative_return_20d)-Number(leader.relative_return_20d);
+ const all=Array.isArray(series)?series:[];
+ const dates=[...new Set(all.map(x=>String(x.date||'').slice(0,10)).filter(Boolean))].sort();
+ const priorDate=dates[Math.max(0,dates.length-21)];
+ const priorRows=all.filter(x=>String(x.date||'').slice(0,10)===priorDate&&finite(x.relative_return_20d)).slice()
+  .sort((a,b)=>Number(b.relative_return_20d)-Number(a.relative_return_20d));
+ const priorRank=priorRows.findIndex(x=>x.style_id===selectedStyle)+1;
+ const move=priorRank>0?priorRank-rank:null;
+ const dispersion=ranked.length>1?Number(ranked[0].relative_return_20d)-Number(ranked[ranked.length-1].relative_return_20d):null;
+ return '<div class="l2-key-snapshot">'+
+  '<div><span>'+(rank===1?'当前领先幅度':'距第一名')+'</span><b class="'+tone(gap)+'">'+e(pp(gap))+'</b><small>'+(rank===1?'相对第 2 名':'相对 '+e(itemName(leader.style_id)))+'</small></div>'+
+  '<div><span>排名变化（20D）</span><b class="'+(move>0?'up':move<0?'down':'flat')+'">'+(priorRank>0?e(priorRank+' → '+rank):'—')+'</b><small>'+(move===null?'历史不足':move>0?'上升 '+move+' 位':move<0?'下降 '+Math.abs(move)+' 位':'排名未变')+'</small></div>'+
+  '<div><span>风格分化度</span><b>'+e(pp(dispersion))+'</b><small>当前第一名 - 最后一名</small></div>'+
+ '</div>';
 }
 function rankChanges(series){
  const all=Array.isArray(series)?series:[];
@@ -176,9 +226,13 @@ function rankChanges(series){
   const a=now.rank.get(id),b=d5.rank.get(id),c=d20.rank.get(id);
   const move=finite(c)?Number(c)-Number(a):null;
   const movement=move===null?'—':move>0?'↑ '+move:move<0?'↓ '+Math.abs(move):'—';
-  return ['<button class="l2-style-select'+(state.l2Style===id?' current':'')+'" data-l2-style="'+e(id)+'">'+e(itemName(id))+'</button>',n(a,0),b?String(b):'—',c?String(c):'—','<span class="l2-rank-move '+(move>0?'up':move<0?'down':'flat')+'">'+movement+'</span>'];
+  const trajectory=(c||'—')+' → '+(b||'—')+' → '+a;
+  return ['<button class="l2-style-select'+(state.l2Style===id?' current':'')+'" data-l2-style="'+e(id)+'">'+e(itemName(id))+'</button>',
+    '<span class="l2-rank-current">'+n(a,0)+'</span>',
+    '<span class="l2-rank-trajectory">'+e(trajectory)+'</span>',
+    '<span class="l2-rank-move '+(move>0?'up':move<0?'down':'flat')+'">'+movement+'</span>'];
  });
- return table(['风格','当前','5D 前','20D 前','20D 排名变化'],rows)+
+ return table(['风格','当前','20D前 → 5D前 → 当前','变化'],rows)+
   '<div class="l2-chart-foot"><span>当前：'+e(now.date)+'</span><span>排名依据：20D 相对收益</span></div>';
 }
 function diagnosticPanel(data,rotation){
@@ -210,9 +264,9 @@ function diagnosticPanel(data,rotation){
  const current=stateMeaning(r?.rotation_state);
  return card('变化诊断 · '+itemName(state.l2Style),
   '<div class="l2-diagnostic-head"><span>当前象限</span><b>'+e(current)+'</b><small>持续 '+n(r?.consecutive_sessions||0,0)+' 个交易日</small></div>'+
-  '<section class="l2-diag-section"><h4>1. 最近为什么在变化？</h4><div class="l2-evidence-list">'+evidence.map(a=>'<div><span>'+e(a[0])+'</span><b>'+e(a[1])+'</b><strong>'+a[2]+'</strong><small>'+e(a[3])+'</small></div>').join('')+'</div></section>'+
-  '<section class="l2-diag-section"><h4>2. 尚未确认 / 需要观察</h4><ul>'+open.map(v=>'<li>'+e(v)+'</li>').join('')+'</ul></section>'+
-  '<section class="l2-diag-section"><h4>3. 当前描述何时失效？</h4><ul class="l2-invalid">'+invalid.map(v=>'<li>'+e(v)+'</li>').join('')+'</ul></section>'+
+  '<section class="l2-diag-section l2-support"><h4>1. 最近为什么在变化？</h4><div class="l2-evidence-list">'+evidence.map(a=>'<div><span>'+e(a[0])+'</span><b>'+e(a[1])+'</b><strong>'+a[2]+'</strong><small>'+e(a[3])+'</small></div>').join('')+'</div></section>'+
+  '<section class="l2-diag-section l2-watch"><h4>2. 尚未确认 / 需要观察</h4><ul>'+open.map(v=>'<li>'+e(v)+'</li>').join('')+'</ul></section>'+
+  '<section class="l2-diag-section l2-risk"><h4>3. 当前描述何时失效？</h4><ul class="l2-invalid">'+invalid.map(v=>'<li>'+e(v)+'</li>').join('')+'</ul></section>'+
   '<section class="l2-diag-section l2-research-note"><h4>研究解释</h4><p>'+e(itemName(state.l2Style))+' 当前的“'+e(current)+'”只由 20D 相对收益与 5D 边际变化定义。它描述已经发生的轮动位置，不等于未来收益判断；H1/H3/H5 前瞻证据独立放在“领先预测”中。</p></section>',
   '可观察事实 → 未确认项 → 失效边界');
 }
@@ -382,11 +436,12 @@ pages.style=async()=>{
   const factors=await settle('/api/v1/styles?mode=observation');
   body='<div class="l2-main-grid">'+french(factors)+quality(data)+'</div>';
  }else{
-  body=card('风格变化概览 · 各自基准',
-    overviewMatrix(items,rotationRows),
-    '20D / 5D / 60D 为已发生相对收益；5D 边际变化 = 最近 5D 相对收益 - 前 5D。')+
+  body=card('风格横截面概览 · 各自基准',
+    overviewMatrix(items,rotationRows,data.series),
+    '20D 相对收益决定当前横截面排名；Δ5D 显示边际变化。颜色只编码数据方向与风格身份，不代表交易建议。')+
    '<div class="l2-research-grid">'+
-    '<div class="l2-research-left">'+card('风格列表 · 20D 排名',styleRail(items,data.series),'排名不是推荐顺序')+'</div>'+
+    '<div class="l2-research-left">'+card('风格强弱榜 · 20D',styleRail(items,data.series),'横条长度 = |20D 相对收益|')+
+     card('关键信息速览',comparisonSnapshot(items,data.series,state.l2Style),'与横截面其他风格直接比较')+'</div>'+
     '<div class="l2-research-center">'+
       card('60D 风格演化 · 20D 相对收益',multiStyleEvolution(data.series,state.l2Style),'同一坐标观察七类风格，避免只看单一风格')+
       '<div class="l2-research-lower">'+
