@@ -164,7 +164,10 @@ class Registry:
                 'start':'2017-01-01','train_end':'2022-12-31','validation_end':'2024-12-31',
                 'horizons':[1,3,5],'knowledge_cutoff_utc':stamp,'protocol':'factor-lab-descriptive-v1',
                 'research_protocol':protocol,'symbols':list(spec.symbols if spec.symbols is not None else SYMBOLS),
-                'universe_version':'EXPLICIT_CURRENT_ETF_LIST_NOT_PIT'}
+                'universe_version':(
+                    'EXPLICIT_CURRENT_ETF_LIST_NOT_PIT'
+                    if spec.symbols is None else 'EXPLICIT_CUSTOM_SECURITY_LIST_NOT_HISTORICAL_PIT'
+                )}
         with self.connect() as db:
             db.execute('INSERT INTO experiments VALUES (?,?,?,?,?,?,?,?)',
                        [identifier,spec.factor_version_id,canonical(config),fingerprint(config),stamp,'CREATED',None,None])
