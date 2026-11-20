@@ -352,84 +352,91 @@ def l3_overview(root, *, horizon=3, limit=20):
     strategies = []
     try:
         from quant_research.research.strategy import StrategyRegistry
-        strategies = [_strategy_summary(item) for item in StrategyRegistry(root).versions()]
+        strategies = [
+            _strategy_summary(item) for item in StrategyRegistry(root).versions()
+        ]
     except (PolicyError, ValueError, OSError):
         blockers.append("STRATEGY_REGISTRY_UNAVAILABLE")
 
-    forward_index, forward = _latest_forward(root)
-    if forward is None:
-        blockers.append("NO_PROSPECTIVE_FORWARD_FORECAST")
-        return {
-            "schema": _SCHEMA, "status": "WATCH_ONLY",
-            "horizon": horizon, "active_strategy": strategy,
-            "strategies": strategies, "factor_library": factor_library,
-            "daily": None, "candidates": [], "model_evidence": None,
-            "validation": None,
-            "outcomes": latest_research_outcomes(root, limit=10).get("records", []),
-            "blockers": blockers + (
-                ["NO_ACTIVE_ALPHA_STRATEGY"] if active is None else []
-            ),
-            "research_only": True, "execution_ready": False,
-            "real_orders_enabled": False,
-        }
+    scores = pd.DataFrame()
+    factor_names = [
+        item["factor_name"] for item in strategy["factors"]
+    ] if strategy else []
+    daily_manifest = None
+    daily_identity = None
 
-    manifest = forward["manifest"]
-    contract = manifest.get("input_contract") or {}
-    session = manifest["session_date_et"]
-    bundle_id, frames, bundle_manifest = _matching_bundle(root, contract)
-    if frames is None:
-        blockers.append("FROZEN_FORWARD_INPUT_BUNDLE_NOT_FOUND")
-
-    active_names = [item["factor_name"] for item in strategy["factors"]] if strategy else []
-    forecast_names = contract.get("factor_names") or []
     if active is None:
         blockers.append("NO_ACTIVE_ALPHA_STRATEGY")
-
-    # Product pages read a write-once T-day Alpha ranking. GET never recalculates
-    # current selection from mutable files merely to make the page look populated.
-    scores = pd.DataFrame()
-    factor_names = active_names
-    daily_manifest = None
-    if active is not None:
+    else:
         from quant_research.workflow.l3_daily import latest_l3_daily, read_l3_daily
         records = latest_l3_daily(root, limit=30)
-        match = next((row for row in records
-                      if row.get("status") != "CORRUPT_L3_DAILY_ALPHA_ARCHIVE"
-                      and row.get("session_date_et") == session
-                      and row.get("strategy_version_id") == active["id"]
-                      and row.get("strategy_config_sha256") == active["config_sha256"]
-                      and row.get("source_snapshot_sha256") == manifest["source_snapshot_sha256"]), None)
+        match = next((
+            row for row in records
+            if row.get("status") != "CORRUPT_L3_DAILY_ALPHA_ARCHIVE"
+            and row.get("strategy_version_id") == active["id"]
+            and row.get("strategy_config_sha256") == active["config_sha256"]
+        ), None)
         if match is None:
             blockers.append("NO_FROZEN_L3_DAILY_SELECTION")
         else:
             try:
                 daily_snapshot = read_l3_daily(
-                    root, match["session_date_et"], match["identity"], include_scores=True)
+                    root, match["session_date_et"], match["identity"],
+                    include_scores=True,
+                )
                 daily_manifest = daily_snapshot["manifest"]
+                daily_identity = match["identity"]
                 scores = daily_snapshot["scores"]
                 factor_names = list(daily_manifest.get("factor_names") or [])
-                bundle_id = daily_manifest.get("bundle_id") or bundle_id
             except (OSError, ValueError, KeyError, TypeError, FileNotFoundError):
                 blockers.append("FROZEN_L3_DAILY_SELECTION_INVALID")
 
-    same_factor_set = (bool(active_names) and bool(factor_names)
-                       and set(active_names) == set(factor_names)
-                       and set(active_names) == set(forecast_names))
-    if active is not None and not same_factor_set:
-        blockers.append("ACTIVE_STRATEGY_FORECAST_FACTOR_SET_MISMATCH")
+    # A frozen Alpha rank can stand on its own. H1/H3/H5 return/probability
+    # fields are joined only when a separately frozen forward model archive
+    # matches the exact day, source snapshot and factor set.
+    forward_index, forward = _latest_forward(root)
+    forecast_matched = False
+    forecast_names = []
+    evidence = None
+    forecasts = pd.DataFrame()
+    forward_status = None
+    forward_identity = None
 
-    evidence = _research_model_evidence(
-        root, active_names if same_factor_set else forecast_names,
-        manifest["source_snapshot_sha256"], horizon,
-    )
-    variant = evidence["selected_variant"] if same_factor_set else "A"
-    forecasts = forward["forecasts"].copy()
-    forecasts["horizon"] = pd.to_numeric(forecasts["horizon"], errors="coerce")
-    if not same_factor_set:
-        forecasts = forecasts.iloc[:0]
+    if forward is None:
+        blockers.append("NO_PROSPECTIVE_FORWARD_FORECAST")
+    else:
+        f_manifest = forward["manifest"]
+        contract = f_manifest.get("input_contract") or {}
+        forecast_names = list(contract.get("factor_names") or [])
+        forward_status = forward_index.get("status")
+        forward_identity = forward_index.get("identity")
+        forecast_matched = bool(
+            daily_manifest
+            and f_manifest.get("session_date_et") == daily_manifest.get("session_date_et")
+            and f_manifest.get("source_snapshot_sha256")
+                == daily_manifest.get("source_snapshot_sha256")
+            and set(forecast_names) == set(factor_names)
+            and set(factor_names) == set(
+                item["factor_name"] for item in (strategy or {}).get("factors", [])
+            )
+        )
+        if forecast_matched:
+            evidence = _research_model_evidence(
+                root, factor_names,
+                f_manifest["source_snapshot_sha256"], horizon,
+            )
+            variant = evidence["selected_variant"]
+            forecasts = forward["forecasts"].copy()
+            forecasts["horizon"] = pd.to_numeric(
+                forecasts["horizon"], errors="coerce"
+            )
+        else:
+            blockers.append("FORWARD_FORECAST_NOT_MATCHED_TO_FROZEN_ALPHA")
+
+    variant = evidence["selected_variant"] if evidence else "A"
     candidates = _build_candidates(
         scores, factor_names, pd.DataFrame(columns=["security_id"]),
-        forecasts, variant, horizon, limit
+        forecasts, variant, horizon, limit,
     )
 
     validation = None
@@ -438,48 +445,80 @@ def l3_overview(root, *, horizon=3, limit=20):
             composite = compute_composite(root, active["id"])
             validation = {
                 "status": composite["status"],
-                "validation_rank_ic_mean": _finite(composite.get("validation_rank_ic_mean")),
-                "validation_daily_ic_count": int(composite.get("validation_daily_ic_count") or 0),
-                "redundancy_warning_count": int(composite.get("redundancy_warning_count") or 0),
+                "validation_rank_ic_mean": _finite(
+                    composite.get("validation_rank_ic_mean")
+                ),
+                "validation_daily_ic_count": int(
+                    composite.get("validation_daily_ic_count") or 0
+                ),
+                "redundancy_warning_count": int(
+                    composite.get("redundancy_warning_count") or 0
+                ),
                 "factor_correlations": composite.get("factor_correlations") or [],
                 "retrospective_only": True,
             }
         except (PolicyError, ValueError, KeyError, OSError, TypeError):
-            blockers.append("ACTIVE_STRATEGY_RETROSPECTIVE_VALIDATION_UNAVAILABLE")
+            blockers.append(
+                "ACTIVE_STRATEGY_RETROSPECTIVE_VALIDATION_UNAVAILABLE"
+            )
 
     status = (
         "ALPHA_CANDIDATES_RESEARCH_ONLY" if candidates
         else "NO_QUALIFIED_ALPHA_CANDIDATES"
-        if scores is not None and not scores.empty
+        if not scores.empty
         else "WATCH_ONLY"
     )
-    return {
-        "schema": _SCHEMA, "status": status, "horizon": horizon,
-        "active_strategy": strategy, "strategies": strategies,
-        "factor_library": factor_library,
-        "daily": {
-            "session_date_et": session,
-            "forecast_identity": forward_index["identity"],
-            "forecast_status": forward_index["status"],
-            "bundle_id": bundle_id,
-            "source_snapshot_sha256": manifest["source_snapshot_sha256"],
+    daily = None
+    if daily_manifest is not None:
+        daily = {
+            "session_date_et": daily_manifest["session_date_et"],
+            "daily_alpha_identity": daily_identity,
+            "daily_input_kind": daily_manifest.get("input_kind"),
+            "daily_input_id": daily_manifest.get("input_id"),
+            "bundle_id": daily_manifest.get("bundle_id"),
+            "factor_snapshot_identity": daily_manifest.get(
+                "factor_snapshot_identity"
+            ),
+            "source_snapshot_sha256": daily_manifest[
+                "source_snapshot_sha256"
+            ],
             "observed_security_count": int(
                 daily_manifest.get("observed_security_count") or 0
-            ) if daily_manifest else 0,
+            ),
             "complete_alpha_score_count": int(len(scores)),
             "candidate_count": len(candidates),
             "active_factor_names": factor_names,
-            "forecast_factor_names": list(forecast_names),
-            "selected_model_variant": variant if same_factor_set else None,
-            "model_selection_reason": evidence["selection_reason"] if same_factor_set else None,
-            "input_bundle_verified": bundle_manifest is not None,
-            "daily_alpha_frozen": daily_manifest is not None,
-        },
+            "forecast_factor_names": forecast_names,
+            "forecast_identity": forward_identity if forecast_matched else None,
+            "forecast_status": forward_status if forecast_matched else None,
+            "selected_model_variant": (
+                evidence["selected_variant"] if evidence else None
+            ),
+            "model_selection_reason": (
+                evidence["selection_reason"] if evidence else
+                "ALPHA_SCORE_ONLY_NO_MATCHED_FORWARD_MODEL"
+            ),
+            "daily_alpha_frozen": True,
+            "forward_forecast_matched": forecast_matched,
+        }
+
+    return {
+        "schema": _SCHEMA,
+        "status": status,
+        "horizon": horizon,
+        "active_strategy": strategy,
+        "strategies": strategies,
+        "factor_library": factor_library,
+        "daily": daily,
         "candidates": candidates,
-        "model_evidence": evidence if same_factor_set else None,
+        "model_evidence": evidence,
         "validation": validation,
-        "outcomes": latest_research_outcomes(root, limit=10).get("records", []),
+        "outcomes": latest_research_outcomes(root, limit=10).get(
+            "records", []
+        ),
         "blockers": list(dict.fromkeys(blockers)),
-        "research_only": True, "execution_ready": False,
+        "research_only": True,
+        "execution_ready": False,
         "real_orders_enabled": False,
     }
+
