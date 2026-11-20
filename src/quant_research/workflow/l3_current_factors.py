@@ -439,3 +439,24 @@ def latest_current_factor_snapshots(root, *, limit=20):
             if len(rows) >= limit:
                 return rows
     return rows
+
+
+def run_current_l3_day(root, *, session_date, feature_run_id=None):
+    """One-command Alpha-only current-session path: factor snapshot then ranking freeze."""
+    snapshot = build_current_factor_snapshot(
+        root, session_date=session_date, feature_run_id=feature_run_id
+    )
+    from quant_research.workflow.l3_daily import freeze_l3_current
+    daily = freeze_l3_current(
+        root, session_date=session_date,
+        factor_snapshot_identity=snapshot["manifest"]["identity"],
+    )
+    return {
+        "status": "L3_CURRENT_ALPHA_DAY_FROZEN",
+        "session_date_et": session_date,
+        "factor_snapshot": snapshot,
+        "daily_alpha": daily,
+        "research_only": True,
+        "execution_ready": False,
+        "real_orders_enabled": False,
+    }
