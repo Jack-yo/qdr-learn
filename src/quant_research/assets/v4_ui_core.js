@@ -24,7 +24,7 @@ const note=(text)=>'<div class="v4-muted-note">'+e(text)+'</div>';
 const row=(label,value)=>'<div class="v4-stat-pair"><span class="muted">'+e(label)+'</span><b>'+value+'</b></div>';
 const table=(cols,data)=> data&&data.length?'<div class="v4-table-scroll"><table class="table"><thead><tr>'+cols.map(x=>'<th>'+e(x)+'</th>').join('')+'</tr></thead><tbody>'+data.map((r,i)=>'<tr'+(i===0?' class="selected"':'')+'>'+r.map(c=>'<td>'+c+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>':empty('暂无符合条件的数据','当前没有已验证的研究记录，不显示示意数据。');
 const fail=(error)=>empty('无法读取真实研究结果',String(error?.message||error?.code||'数据或来源资格尚未满足，请前往数据中心检查。'));
-const moduleLoading=(name)=>'<section class="v4-module-state is-loading" role="status" aria-live="polite"><span class="v4-module-spinner"></span><div><b>'+e(name)+'正在加载</b><small>其他模块可以继续使用；数据返回后会自动更新。</small></div></section>';
+const moduleLoading=(name)=>'<section class="v4-module-state is-loading v4-icon-loading" role="status" aria-live="polite" aria-label="'+e(name)+'加载中"><span class="v4-loading-icon" aria-hidden="true"></span><span class="v4-visually-hidden">'+e(name)+'加载中</span></section>';
 const moduleError=(name,error,retryUrl='')=>'<section class="v4-module-state is-error" role="alert" data-v4-module-error><div><b>'+e(name)+'加载失败</b><small>'+e(error?.message||error?.code||'暂时无法读取，请稍后重试。')+'</small></div><button type="button" class="btn smallbtn" data-v4-retry="'+e(retryUrl)+'">重新加载</button></section>';
 const value=(d,k)=>Object.prototype.hasOwnProperty.call(d||{},k)?d[k]:null;
 const api=async (path,body,signal)=>{
@@ -121,10 +121,8 @@ async function updateStatus(){
 }
 function loadingSkeleton(key){
  const names={overview:'总览',market:'市场未来展望',style:'经典因子',lab:'因子实验室',screen:'选股研究',risk:'持仓与风控',data:'研究准入',warehouse:'数据仓库'};
- return '<div class="v4-page-skeleton" role="status" aria-live="polite"><h1>'+e(names[key]||'研究工作区')+'</h1><p>页面已就绪，各模块正在独立读取真实数据…</p><div class="v4-skeleton-grid">'+
-   Array.from({length:4},()=>'<div class="v4-skeleton-block v4-skeleton-kpi"><i></i><b></b></div>').join('')+
-   '</div><div class="v4-skeleton-grid two">'+
-   Array.from({length:2},()=>'<div class="v4-skeleton-block v4-skeleton-panel"><i></i><b></b><b></b></div>').join('')+'</div></div>';
+ const name=names[key]||'研究工作区';
+ return '<div class="v4-page-loading" role="status" aria-live="polite" aria-label="'+e(name)+'加载中"><span class="v4-loading-icon v4-loading-icon-lg" aria-hidden="true"></span><span class="v4-visually-hidden">'+e(name)+'加载中</span></div>';
 }
 async function show(page,progressive=false){
  const key=pages[page]?page:'overview';
@@ -146,7 +144,7 @@ async function show(page,progressive=false){
    const result=await pages[key]();
    if(epoch!==state.epoch)return;
    const count=[...requested].filter(url=>viewResults.get(url)?.pending).length;
-   const banner=count?'<div class="v4-pending-banner" role="status" aria-live="polite"><span class="v4-pending-dot"></span>正在加载 '+count+' 项数据模块；尚未返回的内容不代表数据缺失。</div>':'';
+   const banner=count?'<div class="v4-pending-banner v4-icon-loading-inline" role="status" aria-live="polite" aria-label="'+count+' 项数据模块加载中"><span class="v4-loading-icon v4-loading-icon-sm" aria-hidden="true"></span><span class="v4-visually-hidden">'+count+' 项数据模块加载中</span></div>':'';
    setContent(banner+result.html);
    if((progressive||!changePage)&&previousScroll>0)root.scrollTop=previousScroll;
    existingDetails.forEach((isOpen,i)=>{
