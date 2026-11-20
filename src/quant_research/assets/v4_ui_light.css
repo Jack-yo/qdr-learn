@@ -688,3 +688,16 @@ label,.boxlabel{color:#52677a}
 .v4-message,.notice{border-color:#e7d3ac;background:#fff8eb;color:#875e20}
 .progress{background:#e7edf3}.progress>div{background:linear-gradient(90deg,#4f7fa8,#2f9a7e)}
 .green{color:var(--rise)}.red{color:var(--fall)}.amber{color:#a66d18}.blue{color:#2f67a1}
+
+/* Contrast pass: shared research workspace emphasis. */
+.v4-hero{background:#fff;border-color:#d2dce6;box-shadow:0 2px 8px #172b400c}.v4-hero p{color:#66798b}.v4-heading-note{color:#617487}
+.v4-mini-metric{background:#f7f9fb;border-color:#d7e0e8}.v4-mini-metric span{color:#6c7f91}.v4-mini-metric b{color:#1d3449;font-weight:720}
+.v4-workflow-step{background:#fff;border-color:#d4dde7}.v4-workflow-step span{color:#315f88}.v4-workflow-step b{color:#20364a}
+.v4-factor-groups>div{background:#f7f9fb;border-color:#d5dee7;color:#53687b}.v4-factor-groups b{color:#2f67a1}
+.v4-factor-config{border-bottom-color:#e0e6ec}
+.v4-current-quotes{background:#fff;border-color:#d2dce6}.v4-current-heading{color:#24394d}.v4-current-heading span,.v4-current-note{color:#78899a}.v4-current-quote-grid span{color:#65788a}.v4-current-quote-grid b{color:#1f354a}
+.v4-detail-title{color:#1f354a;font-weight:720}.v4-stock-selected{background:#eaf1f7!important;border-color:#9fb5c8!important;color:#20384f!important}
+.v4-workspace-details,.v4-collapsed-card{background:#fff;border-color:#d4dde7}.v4-workspace-details summary,.v4-collapsed-card>summary{background:#f7f9fb;color:#354c61;border-color:#d4dde7}
+.v4-quick-actions>a{background:#fff;border-color:#cbd7e2;color:#345f84}.v4-quick-actions>a:hover{background:#eef3f7;color:#214f77}
+.v4-chart-empty{background:repeating-linear-gradient(to bottom,#fff 0,#fff 39px,#f1f4f7 40px);border-color:#d4dde7;color:#718294}.v4-chart-empty b{color:#31485d}
+.v4-calibration-row>div:first-child,.v4-calibration-row small,.v4-calibration-row>span{color:#5f7285}.v4-calibration-bar{background:#e8edf2}.v4-calibration-bar>div{background:#6f94b7}.v4-calibration-bar.observed>div{background:#4a9b7d}
