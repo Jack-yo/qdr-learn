@@ -382,10 +382,40 @@ def l3_overview(root, *, horizon=3, limit=20):
 
     active_names = [item["factor_name"] for item in strategy["factors"]] if strategy else []
     forecast_names = contract.get("factor_names") or []
-    same_factor_set = bool(active_names) and set(active_names) == set(forecast_names)
     if active is None:
         blockers.append("NO_ACTIVE_ALPHA_STRATEGY")
-    elif not same_factor_set:
+
+    # Product pages read a write-once T-day Alpha ranking. GET never recalculates
+    # current selection from mutable files merely to make the page look populated.
+    scores = pd.DataFrame()
+    factor_names = active_names
+    daily_manifest = None
+    if active is not None:
+        from quant_research.workflow.l3_daily import latest_l3_daily, read_l3_daily
+        records = latest_l3_daily(root, limit=30)
+        match = next((row for row in records
+                      if row.get("status") != "CORRUPT_L3_DAILY_ALPHA_ARCHIVE"
+                      and row.get("session_date_et") == session
+                      and row.get("strategy_version_id") == active["id"]
+                      and row.get("strategy_config_sha256") == active["config_sha256"]
+                      and row.get("source_snapshot_sha256") == manifest["source_snapshot_sha256"]), None)
+        if match is None:
+            blockers.append("NO_FROZEN_L3_DAILY_SELECTION")
+        else:
+            try:
+                daily_snapshot = read_l3_daily(
+                    root, match["session_date_et"], match["identity"], include_scores=True)
+                daily_manifest = daily_snapshot["manifest"]
+                scores = daily_snapshot["scores"]
+                factor_names = list(daily_manifest.get("factor_names") or [])
+                bundle_id = daily_manifest.get("bundle_id") or bundle_id
+            except (OSError, ValueError, KeyError, TypeError, FileNotFoundError):
+                blockers.append("FROZEN_L3_DAILY_SELECTION_INVALID")
+
+    same_factor_set = (bool(active_names) and bool(factor_names)
+                       and set(active_names) == set(factor_names)
+                       and set(active_names) == set(forecast_names))
+    if active is not None and not same_factor_set:
         blockers.append("ACTIVE_STRATEGY_FORECAST_FACTOR_SET_MISMATCH")
 
     evidence = _research_model_evidence(
@@ -393,23 +423,13 @@ def l3_overview(root, *, horizon=3, limit=20):
         manifest["source_snapshot_sha256"], horizon,
     )
     variant = evidence["selected_variant"] if same_factor_set else "A"
-    scores = pd.DataFrame()
-    factor_names = active_names
-    if active is not None and frames is not None:
-        try:
-            scores, factor_names = _daily_scores(active, frames, session)
-        except PolicyError as exc:
-            blockers.append(exc.code)
-
     forecasts = forward["forecasts"].copy()
     forecasts["horizon"] = pd.to_numeric(forecasts["horizon"], errors="coerce")
     if not same_factor_set:
         forecasts = forecasts.iloc[:0]
-    meta = _candidate_metadata(frames, session) if frames is not None else pd.DataFrame(
-        columns=["security_id"]
-    )
     candidates = _build_candidates(
-        scores, factor_names, meta, forecasts, variant, horizon, limit
+        scores, factor_names, pd.DataFrame(columns=["security_id"]),
+        forecasts, variant, horizon, limit
     )
 
     validation = None
@@ -444,9 +464,8 @@ def l3_overview(root, *, horizon=3, limit=20):
             "bundle_id": bundle_id,
             "source_snapshot_sha256": manifest["source_snapshot_sha256"],
             "observed_security_count": int(
-                frames["factors"].loc[pd.to_datetime(frames["factors"]["date"]).eq(
-                    pd.Timestamp(session)), "security_id"].nunique()
-            ) if frames is not None and "factors" in frames else 0,
+                daily_manifest.get("observed_security_count") or 0
+            ) if daily_manifest else 0,
             "complete_alpha_score_count": int(len(scores)),
             "candidate_count": len(candidates),
             "active_factor_names": factor_names,
@@ -454,6 +473,7 @@ def l3_overview(root, *, horizon=3, limit=20):
             "selected_model_variant": variant if same_factor_set else None,
             "model_selection_reason": evidence["selection_reason"] if same_factor_set else None,
             "input_bundle_verified": bundle_manifest is not None,
+            "daily_alpha_frozen": daily_manifest is not None,
         },
         "candidates": candidates,
         "model_evidence": evidence if same_factor_set else None,
