@@ -172,6 +172,15 @@ def run_v4_pipeline_day(root: Path, session_date: str, *,
                 'session_date_et':session_date,
                 'real_orders_enabled':False,'paper_ledger_advanced':False}
     try:
+        from quant_research.workflow.l3_daily import freeze_l3_daily
+        l3_alpha=freeze_l3_daily(
+            root,session_date=session_date,bundle_id=bundle_id,admitted=admitted)
+    except (PolicyError,OSError,ValueError,KeyError,TypeError,FileNotFoundError) as exc:
+        l3_alpha={'status':'L3_DAILY_ALPHA_NOT_FROZEN',
+                  'code':getattr(exc,'code',None) or str(exc)[:160] or type(exc).__name__,
+                  'session_date_et':session_date,
+                  'real_orders_enabled':False}
+    try:
         plan=run_v4_review_day(root,bundle_id=bundle_id,asof_session=session_date,
                                research_budget=research_budget)
     except (OSError,ValueError,TypeError,KeyError,FileNotFoundError) as exc:
@@ -186,6 +195,7 @@ def run_v4_pipeline_day(root: Path, session_date: str, *,
         return {'status':'RESEARCH_PLAN_BLOCKED_BEFORE_DAILY_FREEZE',
                 'code':plan.get('code') or plan.get('status') or 'PLAN_NOT_ACCEPTED',
                 'session_date_et':session_date,'research_plan':plan,
+                'l3_alpha':l3_alpha,
                 'real_orders_enabled':False,'paper_ledger_advanced':False}
     if not plan.get('source_snapshot_sha256'):
         return {'status':'PLAN_SOURCE_NOT_VERIFIED',
@@ -252,6 +262,7 @@ def run_v4_pipeline_day(root: Path, session_date: str, *,
                       else 'RESEARCH_PLAN_SAVED_DAILY_DATA_UNVERIFIED' if plan_ok
                       else 'RESEARCH_ONLY_PARTIALLY_BLOCKED'),
             'session_date_et':session_date,
+            'l3_alpha':l3_alpha,
             'research_plan':plan,
             'daily_diary':diary,
             'real_orders_enabled':False,
