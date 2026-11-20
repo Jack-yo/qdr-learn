@@ -304,10 +304,10 @@ def latest_l3_daily(root, *, limit=20):
     records = []
     if not base.is_dir():
         return records
-    for day in sorted(base.iterdir(), reverse=True):
+    for day in base.iterdir():
         if not day.is_dir():
             continue
-        for folder in sorted(day.iterdir(), reverse=True):
+        for folder in day.iterdir():
             if not folder.is_dir() or not _ID.fullmatch(folder.name):
                 continue
             try:
@@ -318,6 +318,7 @@ def latest_l3_daily(root, *, limit=20):
                 records.append({
                     "session_date_et": day.name,
                     "identity": folder.name,
+                    "created_at_utc": manifest.get("created_at_utc"),
                     "status": item["status"],
                     "strategy_version_id": manifest["strategy_version_id"],
                     "strategy_config_sha256": manifest["strategy_config_sha256"],
@@ -336,8 +337,16 @@ def latest_l3_daily(root, *, limit=20):
                 records.append({
                     "session_date_et": day.name,
                     "identity": folder.name,
+                    "created_at_utc": None,
                     "status": "CORRUPT_L3_DAILY_ALPHA_ARCHIVE",
                 })
-            if len(records) >= limit:
-                return records
-    return records
+    records.sort(
+        key=lambda item: (
+            item.get("session_date_et") or "",
+            item.get("created_at_utc") or "",
+            item.get("identity") or "",
+        ),
+        reverse=True,
+    )
+    return records[:limit]
+
