@@ -701,3 +701,33 @@ label,.boxlabel{color:#52677a}
 .v4-quick-actions>a{background:#fff;border-color:#cbd7e2;color:#345f84}.v4-quick-actions>a:hover{background:#eef3f7;color:#214f77}
 .v4-chart-empty{background:repeating-linear-gradient(to bottom,#fff 0,#fff 39px,#f1f4f7 40px);border-color:#d4dde7;color:#718294}.v4-chart-empty b{color:#31485d}
 .v4-calibration-row>div:first-child,.v4-calibration-row small,.v4-calibration-row>span{color:#5f7285}.v4-calibration-bar{background:#e8edf2}.v4-calibration-bar>div{background:#6f94b7}.v4-calibration-bar.observed>div{background:#4a9b7d}
+
+/* Unified loading spinner: replaces text/skeleton loading states. */
+.v4-loading-icon{
+ display:inline-block;width:18px;height:18px;border-radius:50%;
+ border:2px solid #d6e0e8;border-top-color:#356f9c;
+ animation:v4-loading-spin .72s linear infinite;flex:none
+}
+.v4-loading-icon-sm{width:14px;height:14px;border-width:2px}
+.v4-loading-icon-lg{width:28px;height:28px;border-width:3px}
+.v4-page-loading{
+ min-height:240px;display:flex;align-items:center;justify-content:center;
+ padding:42px 0
+}
+.v4-module-state.is-loading.v4-icon-loading{
+ min-height:96px;display:flex;align-items:center;justify-content:center;
+ background:transparent;border:0;padding:20px
+}
+.v4-pending-banner.v4-icon-loading-inline{
+ width:30px;height:30px;min-height:0;padding:0;margin:0 0 12px auto;
+ display:flex;align-items:center;justify-content:center;
+ background:transparent;border:0;color:transparent
+}
+.v4-visually-hidden{
+ position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;
+ overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important
+}
+@keyframes v4-loading-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){
+ .v4-loading-icon{animation-duration:1.8s}
+}
