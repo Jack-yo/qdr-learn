@@ -275,3 +275,32 @@
 @media(max-width:520px){
  .l2-cross-strip{grid-template-columns:1fr}
 }
+
+/* Contrast pass: L2 hierarchy only; layout/components unchanged. */
+.l2-page{color:#1f3043}
+.l2-page .title{color:#17283a;font-weight:760}.l2-page .subtitle{color:#66798b}
+.l2-controls{background:#fff;border-color:#d2dce6;color:#607386}.l2-controls label{color:#30485d}.l2-controls input[type=date]{border-color:#c8d5e0;color:#263d51}
+.l2-tabs{border-color:#d3dde7}.l2-tab{color:#6a7d8f}.l2-tab:hover,.l2-tab:focus-visible{color:#315f88}.l2-tab.selected{color:#214f77;border-bottom-color:#356f9c}
+.l2-stat{background:#fff;border-color:#d2dce6;box-shadow:0 1px 5px #172b4008}.l2-stat>div{color:#617487}.l2-stat>b{color:#172b40}.l2-stat>small{color:#8997a6}
+.l2-page .card{background:#fff;border-color:#d2dce6}.l2-page .ctitle{color:#24384b}.l2-page .ctitle span{color:#7d8c9b}
+.l2-page .table th{background:#eef3f7;color:#52687b;border-bottom-color:#cfd9e2;font-weight:650}.l2-page .table td{color:#304559;border-bottom-color:#e1e7ed}
+.l2-page .table tbody tr:hover td{background:#f7f9fb}
+.l2-style-select{color:#315f88}.l2-style-select.current{color:#173f69;font-weight:760}
+.l2-number.up,.l2-rank-move.up,.l2-key-snapshot b.up,.l2-evo-legend-item b.up{color:var(--rise,#0a8b68)}
+.l2-number.down,.l2-rank-move.down,.l2-key-snapshot b.down,.l2-evo-legend-item b.down{color:var(--fall,#d54a59)}
+.l2-style-rail{background:#fff}.l2-rail-item{border-bottom-color:#e1e7ed}.l2-rail-item:hover{background:#f5f8fa}
+.l2-rail-item.current{background:#edf3f8;box-shadow:inset 3px 0 0 var(--style-color,#356f9c)}
+.l2-rail-rank{background:#e8eef4;color:#556b7f}.l2-rail-main b{color:#263d52}.l2-rail-main small{color:#7f8f9f}
+.l2-rail-item:first-child .l2-rail-rank{background:#264f79;color:#fff}
+.l2-cross-card{border-color:#d7e0e8}.l2-cross-card:hover{border-color:#aebfce;box-shadow:0 3px 10px #172b4010}
+.l2-cross-card.current{box-shadow:inset 0 3px 0 var(--style-color),0 3px 10px #172b4010}
+.l2-cross-head b{color:#21374b}.l2-cross-head span{background:#e8eef4;color:#53687b}
+.l2-cross-card.up>strong{color:var(--rise,#0a8b68)}.l2-cross-card.down>strong{color:var(--fall,#d54a59)}
+.l2-cross-card.up>small{color:var(--rise,#0a8b68)}.l2-cross-card.down>small{color:var(--fall,#d54a59)}
+.l2-matrix th,.l2-matrix td{border-bottom-color:#e1e7ed}.l2-matrix thead th{background:#eef3f7;color:#52687b}.l2-matrix tbody th{color:#5f7183}
+.l2-diagnostic-head{border-color:#dbe3eb}.l2-diagnostic-head span{color:#748596}.l2-diagnostic-head b{color:#21374b}.l2-diagnostic-head small{color:#8795a4}
+.l2-diag-section{border-color:#dbe3eb}.l2-diag-section h4{color:#273e53}.l2-diag-section ul{color:#5f7285}
+.l2-evidence-list>div{border-bottom-color:#e1e7ed}.l2-evidence-list span,.l2-evidence-list small{color:#8795a4}.l2-evidence-list b{color:#465c70}
+.l2-mini{background:#f7f9fb;border-color:#dfe6ed}.l2-mini>span{color:#697c8e}.l2-mini>b{color:#20364a}
+.l2-pair{color:#4c6277;border-color:#dfe6ed}.l2-source-line,.l2-chart-foot{color:#82909f}
+.l2-disclaimer{background:#fff8eb;border-color:#ead8b5;color:#805d24}
