@@ -35,6 +35,12 @@ def test_l2_cockpit_is_loaded_last_and_assets_are_allowlisted():
     assert "function diagnosticPanel" in js
     assert "60D 风格演化" in js
     assert "当前描述何时失效" in js
+    assert "const STYLE_COLORS" in js
+    for color in ("#2563EB", "#16A34A", "#D97706", "#7C3AED", "#0891B2", "#0F766E", "#E11D48"):
+        assert color in js
+    assert "l2-evo-legend-item" in js
+    assert "l2-rail-bar" in js
+    assert ".l2-cross-strip" in css
 
 
 def test_l2_cockpit_browser_logic_has_valid_syntax_and_no_fake_forecast():
@@ -121,12 +127,16 @@ vm.runInNewContext(code,{window:{V4},console});
  const result=await V4.pages.style();
  assert.equal(calls.length,1,'one combined P1+P2 source request');
  assert(calls[0].includes('rotation=1'));
- assert(result.html.includes('风格变化概览'));
+ assert(result.html.includes('风格横截面概览'));
+ assert(result.html.includes('风格强弱榜'));
+ assert(result.html.includes('关键信息速览'));
  assert(result.html.includes('60D 风格演化'));
  assert(result.html.includes('相对位置 × 边际变化'));
  assert(result.html.includes('变化诊断'));
  assert(result.html.includes('尚未确认 / 需要观察'));
  assert(result.html.includes('当前描述何时失效'));
+ assert(result.html.includes('--style-color:'));
+ assert(result.html.includes('l2-evo-legend'));
  assert(result.html.includes('2025-04-09'));
  assert(result.html.includes('OBSERVATION_ONLY'));
  assert(!result.html.includes('预测模型尚未通过资格验收'));
