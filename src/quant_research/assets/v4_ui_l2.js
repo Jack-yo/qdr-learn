@@ -4,7 +4,7 @@
 'use strict';
 const V=window.V4;
 if(!V)throw Error('QDR L2 requires V4 core');
-const {pages,state,e,n,pct,signed,date,short,badge,heading,card,empty,note,table,settle,show}=V;
+const {pages,state,e,n,pct,signed,date,short,badge,heading,card,empty,note,table,settle,show,moduleLoading}=V;
 const STYLE_LABELS={
  size:'小盘 / 大盘',value:'价值 / 成长',growth:'成长',momentum:'动量',
  quality:'质量',low_vol:'低波动',cyc_def:'周期 / 防御'
@@ -37,7 +37,7 @@ const availability=(v)=>v?e(String(v).replace('T',' ').slice(0,16)):'—';
 const linkTab=(id,name)=>'<button type="button" class="l2-tab'+(state.l2Tab===id?' selected':'')+'" data-l2-tab="'+e(id)+'" aria-pressed="'+(state.l2Tab===id?'true':'false')+'">'+e(name)+'</button>';
 const shownData=(data,style)=>Array.isArray(data)?data.find(x=>x.style_id===style):null;
 const problem=(result,title)=>result?.pending?
-  empty(title+'正在加载','各模块独立获取真实研究数据，尚未返回不是数据缺失。'):
+  moduleLoading(title):
   empty(title+'暂不可用',result?.error?.message||'没有可用的真实观测或来源校验未通过。');
 const strip=(items)=>'<div class="l2-stat-strip">'+items.map(x=>'<div class="l2-stat"><div>'+e(x[0])+'</div><b>'+x[1]+'</b><small>'+e(x[2])+'</small></div>').join('')+'</div>';
 const itemName=id=>STYLE_LABELS[id]||id||'—';
@@ -393,8 +393,8 @@ pages.style=async()=>{
  const header=heading('经典因子 / 风格监测','L2 · 先看相对表现如何演化，再看边际变化、横截面位置与证据缺口；状态标签只作辅助描述。');
  const controls='<div class="l2-controls"><label for="l2-asof">研究日期</label><input type="date" id="l2-asof" value="'+e(state.l2AsOf)+'" aria-label="L2 研究日期，留空表示最新完整交易日"/>'+
  '<button type="button" id="l2-current" class="btn smallbtn">返回最新</button>'+
- '<span>当前观察：'+resolvedDay+'</span><span>'+badge(data?.status|| (request?.pending?'加载中':'BLOCKED'),
- data?.status==='OBSERVATION_ONLY'?'blue':'amber')+'</span></div>';
+ '<span>当前观察：'+resolvedDay+'</span><span>'+(request?.pending?'<span class="v4-loading-icon v4-loading-icon-sm" role="status" aria-label="状态加载中"></span>':badge(data?.status||'BLOCKED',
+ data?.status==='OBSERVATION_ONLY'?'blue':'amber'))+'</span></div>';
  const tabs='<div class="l2-tabs" role="group" aria-label="L2 研究视图">'+[
  linkTab('overview','风格概览'),linkTab('rotation','风格演化'),
  linkTab('forecast','领先预测'),linkTab('evidence','计算证据'),
