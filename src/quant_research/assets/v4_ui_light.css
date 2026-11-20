@@ -532,7 +532,7 @@ label{color:#576d83}
 .v4-skeleton-block,.v4-skeleton-block i,.v4-skeleton-block b{background:#eaf0f6}
 .v4-pending-dot{background:#3381cb}
 .v4-market-colors-toggle{padding:7px 10px;border:1px solid #d5e1ef;border-radius:8px;
-  background:#fff;color:#52667f;font-size:11px;cursor:pointer;white-space:nowrap;
+  background:#fff;color:#52667f;font-size:12px;cursor:pointer;white-space:nowrap;
   display:inline-flex;align-items:center;gap:7px}
 .v4-market-colors-toggle:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--rise);
   box-shadow:11px 0 0 var(--fall);margin-right:11px}
@@ -745,9 +745,9 @@ aside{
 }
 .brand{border-bottom:1px solid #eaecf0}
 .brandmark b{background:#475467}
-.brandname{color:#101828;font-size:20px}
+.brandname{color:#101828;font-size:21px}
 .brandsub{color:#98a2b3}
-.side-section{color:#98a2b3;font-size:9px;letter-spacing:1.3px}
+.side-section{color:#98a2b3;font-size:10px;letter-spacing:1.3px}
 .nav,.sub-nav{border-radius:7px;color:#475467}
 .nav:hover,.sub-nav:hover{background:#f7f8fa;color:#1d2939}
 .nav.active{
@@ -760,13 +760,13 @@ aside{
 .topbar{
  background:#fff;border-bottom:1px solid #e4e7ec;box-shadow:none
 }
-.top-label{color:#344054;font-size:13px;font-weight:600}
+.top-label{color:#344054;font-size:14px;font-weight:600}
 .top-status{color:#667085}.top-status span{border-color:#eaecf0}
 .status-pill{background:#f9fafb;border:1px solid #e4e7ec;color:#667085;border-radius:7px}
 .content{padding-top:22px}
 .heading{margin-bottom:18px}
-.title{font-size:22px;font-weight:700;color:#101828;letter-spacing:-.2px}
-.subtitle{font-size:12px;color:#667085}
+.title{font-size:23px;font-weight:700;color:#101828;letter-spacing:-.2px}
+.subtitle{font-size:13px;color:#667085}
 .btn{
  background:#fff;border:1px solid #d0d5dd;color:#344054;border-radius:7px;
  box-shadow:none;font-weight:600
@@ -786,24 +786,24 @@ aside{
  box-shadow:none!important
 }
 .card.pad{padding:16px 17px}
-.ctitle{font-size:14px;color:#1d2939;font-weight:650;margin-bottom:12px}
-.ctitle span{color:#98a2b3;font-size:10px}
+.ctitle{font-size:15px;color:#1d2939;font-weight:650;margin-bottom:12px}
+.ctitle span{color:#98a2b3;font-size:11px}
 .kpis{gap:8px}
 .kpi{
  background:#fff!important;border:1px solid #d9dee5!important;border-radius:9px!important;
  box-shadow:none!important;padding:14px 15px
 }
-.klabel{font-size:10px;color:#667085;margin-bottom:7px}
-.kval{font-size:22px;color:#101828;font-weight:700}
-.knote{font-size:10px;color:#98a2b3;margin-top:7px}
+.klabel{font-size:11px;color:#667085;margin-bottom:7px}
+.kval{font-size:23px;color:#101828;font-weight:700}
+.knote{font-size:11px;color:#98a2b3;margin-top:7px}
 .mini-stat,.v4-mini-metric{
  background:#fff!important;border:1px solid #e1e5ea!important;border-radius:7px!important;
  box-shadow:none!important
 }
-.table{font-size:12px}
+.table{font-size:13px}
 .table th{
  background:#f8f9fb!important;color:#667085!important;border-bottom:1px solid #d9dee5!important;
- font-size:10px;font-weight:650;padding:10px 12px
+ font-size:11px;font-weight:650;padding:10px 12px
 }
 .table td{
  color:#1d2939!important;border-bottom:1px solid #eaecf0!important;padding:11px 12px
@@ -819,7 +819,7 @@ input:focus,select:focus,textarea:focus{
  border-color:#84aaf7;box-shadow:0 0 0 2px #2f6fed12
 }
 .badge{
- border-radius:6px;padding:3px 7px;font-size:9px;font-weight:650
+ border-radius:6px;padding:3px 7px;font-size:10px;font-weight:650
 }
 .badge.green{background:#ecfdf3;color:#067647}
 .badge.red{background:#fff1f3;color:#c01048}
