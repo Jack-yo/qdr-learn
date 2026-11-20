@@ -87,8 +87,6 @@ def research_dependency(root, identifier, horizon):
         "factor_sha256": version["config_sha256"], "experiment_sha256": result["config_sha256"],
         "snapshot_sha256": result["data_sha256"], "result_sha256": fingerprint(result),
         "source": result["source"], "adjustment_basis": result["adjustment_basis"],
-        "universe_version": result.get("universe_version"),
-        "symbols_sha256": fingerprint(result.get("symbols")),
         "report_path": evaluated["report_path"],
         "historical_decision_eligible": False,
     }
@@ -118,8 +116,8 @@ def research_mix(root, factors, horizon):
             "snapshot_sha256": dependency["snapshot_sha256"],
             "source": dependency["source"],
             "adjustment_basis": dependency["adjustment_basis"],
-            "universe_version": dependency.get("universe_version"),
-            "symbols_sha256": dependency.get("symbols_sha256"),
+            "universe_version": detail.get("universe_version"),
+            "symbols_sha256": fingerprint(detail.get("symbols")),
             "protocol_sha256": fingerprint(detail.get("experiment")),
         }
         if baseline is None:
@@ -214,7 +212,7 @@ class StrategyRegistry:
             "factor_mix": mix, "protocol": protocol.model_dump(mode="json"),
             "universe": (
                 mix["research_scope"]["universe_version"] if mix is not None
-                else dependency.get("universe_version")
+                else "EXPLICIT_FACTOR_EXPERIMENT_RESEARCH_SCOPE_NOT_PIT"
             ),
             "entry_rule": "NEXT_SESSION_OPEN", "exit_rule": "HORIZON_CLOSE_OR_ATR_STOP",
             "ranking_rule": ranking_rule,
