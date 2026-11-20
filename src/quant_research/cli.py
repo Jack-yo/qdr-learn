@@ -132,6 +132,7 @@ def main(argv=None):
     feature_prices.add_argument('--db',type=Path,default=Path('data/real_v21.duckdb'))
     feature_prices.add_argument('--data-dir',type=Path,default=Path('data'))
     feature_prices.add_argument('--start',default='2017-01-03')
+    feature_prices.add_argument('--symbols',help='Explicit comma-separated research symbols; include SPY for L3 factor work')
     feature_prices.add_argument('--asof')
     feature_prices.add_argument('--cutoff')
     feature_prices.add_argument('--action-start',default='2016-01-01')
