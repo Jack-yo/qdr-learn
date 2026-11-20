@@ -60,6 +60,19 @@ def test_console_single_writer_and_http_boundaries(tmp_path):
             with pytest.raises(HTTPError) as error:
                 urlopen(base+stale)
             assert error.value.code==404
+        for asset in ("/assets/v4_ui_l3.js","/assets/v4_ui_l3.css"):
+            with urlopen(base+asset) as response:
+                assert response.status==200
+                assert response.read()
+        with urlopen(base + "/api/v1/l3/active-strategy") as response:
+            active=json.load(response)
+            assert active["status"]=="NO_ACTIVE_ALPHA_STRATEGY"
+            assert active["execution_ready"] is False
+        with urlopen(base + "/api/v1/l3/overview?horizon=3") as response:
+            l3=json.load(response)
+            assert l3["status"]=="WATCH_ONLY"
+            assert l3["candidates"]==[]
+            assert l3["real_orders_enabled"] is False
         with urlopen(base + "/api/status") as response:
             assert json.load(response)["busy"]
         with urlopen(base + "/api/v1/paper") as response:
