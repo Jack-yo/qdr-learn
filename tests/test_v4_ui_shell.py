@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / 'src/quant_research'
 SHELL = APP / 'v4_shell.html'
 CORE = 'v4_ui_core.js'
-PAGES = ('v4_ui_pages_a.js','v4_ui_pages_b.js','v4_ui_pages_c.js')
+PAGES = ('v4_ui_pages_a.js','v4_ui_pages_b.js','v4_ui_l3.js','v4_ui_pages_c.js')
 FIDELITY = 'v4_ui_fidelity.js'
 
 
@@ -40,6 +40,7 @@ def test_workspaces_protect_real_research_data_and_navigation():
         assert 'pages.'+page+'=' in script
     for url in ('/api/v1/v4/daily','/api/v1/v4/forecasts',
                 '/api/v1/factor-lab/library','/api/v1/strategies',
+                '/api/v1/l3/overview','/api/v1/l3/active-strategy',
                 '/api/v1/paper/risk','/api/v1/research/readiness'):
         assert url in script
     assert 'X-Console-Token' in root
@@ -104,21 +105,26 @@ def test_fidelity_workspace_implements_real_tabs_and_stock_master_detail():
     source=(APP/'assets'/FIDELITY).read_text(encoding='utf-8')
     shell=SHELL.read_text(encoding='utf-8')
     assert 'v4_ui_fidelity.js' in shell
+    assert 'v4_ui_l3.js' in shell
+    assert 'v4_ui_l3.css' in shell
     assert '.v4-subtab[aria-selected="true"]' in shell
     assert '.v4-tabpanel[hidden]' in shell
-    for name in ('market','style','lab','screen','risk'):
+    for name in ('market','style','lab','risk'):
         assert " "+name+":" in source
+    assert " screen:" not in source
     for tab in ('状态识别','风险驱动','预测验证','ETF 代理观察','领先性验证',
-                '因子有效性','因子相关性','候选股票与解释',
-                '样本外实验','实时预警','交易复盘'):
+                '因子有效性','因子相关性','实时预警','交易复盘'):
         assert tab in source
-    assert 'data-v4-stock' in source
-    assert 'v4-stock-detail' in source
-    assert '/api/v1/strategies/' in source
+    l3=(APP/'assets'/'v4_ui_l3.js').read_text(encoding='utf-8')
+    for tab in ('今日选股','因子组合','因子实验室','验证与回测'):
+        assert tab in l3
+    assert 'l3-stock-open' in l3
+    assert 'l3-candidate-detail' in l3
+    assert '/api/v1/strategies/' in l3
     assert '/api/v1/factor-lab/compare' in source
     assert 'calibrationHistory' in source
     assert 'historicalTransitions' in source
-    assert 'const view={tabs:{screen:1}' in source
+    assert 'const view={tabs:{}' in source
     assert 'RETROSPECTIVE_CURRENT_VINTAGE_NOT_PIT_NOT_FORWARD' in (
         APP/'web.py').read_text(encoding='utf-8')
     assert 'Math.random' not in source
