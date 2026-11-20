@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 const V=window.V4;
-const {pages,state,$,e,n,pct,signed,date,short,badge,button,link,heading,card,kpi,empty,note,row,table,fail,value,api,settle,grid,toolbar,field,select,svgLine,progress,toast,show}=V;
+const {pages,state,$,e,n,pct,signed,date,short,badge,button,link,heading,card,kpi,empty,note,row,table,fail,value,api,settle,grid,toolbar,field,select,svgLine,progress,toast,show,moduleLoading}=V;
 const stepper=(steps)=>'<div class="v4-actions" style="margin-bottom:15px">'+steps.map((x,i)=>'<span class="v4-step"><strong>'+(i+1)+'</strong>'+e(x)+'</span>').join('')+'</div>';
 const savedFactor=(x)=>'<button type="button" class="btn smallbtn" data-factor-version="'+e(x.id)+'" style="width:100%;text-align:left;margin-bottom:7px">'+e(x.name)+' · v'+e(x.version)+'　'+badge(x.config?.template||'未知','purple')+'</button>';
 const optionFactor=(x)=>'<div class="v4-factor-config"><label style="display:flex;gap:9px;align-items:center;cursor:pointer;margin:0"><input type="checkbox" class="v4-factor-pick" data-exp="'+e(x.id)+'" style="width:17px;height:17px"/><span style="flex:1;color:var(--txt)">'+e(x.factor_name)+' · v'+e(x.factor_version)+'</span></label><div class="v4-factor-controls"><select class="v4-factor-group" aria-label="'+e(x.factor_name)+' 因子组"><option value="A">A · 超跌程度</option><option value="B">B · 卖压衰竭</option><option value="C">C · 重新转强</option></select><input type="number" class="v4-weight" min="1" max="100" value="50" title="因子权重百分比" aria-label="'+e(x.factor_name)+' 权重" style="width:80px" /><span class="muted">%</span></div></div>';
@@ -79,7 +79,7 @@ pages.lab=async()=>{
    }));
    $('#v4-factor-preview')?.addEventListener('click',()=>action(async()=>{
       if(!state.factorVersion)throw Error('请先保存或选择一个因子版本');
-      $('#v4-factor-result').innerHTML='<p class="muted">正在读取真实价格计算…</p>';
+      $('#v4-factor-result').innerHTML=moduleLoading('因子预览');
       const query=new URLSearchParams({version_id:state.factorVersion,source:$('#v4-factor-source').value});
       const result=await api('/api/v1/factor-lab/preview?'+query);
       const rows=(result.rows||[]).slice(0,20).map(x=>[
