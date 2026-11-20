@@ -304,3 +304,69 @@
 .l2-mini{background:#f7f9fb;border-color:#dfe6ed}.l2-mini>span{color:#697c8e}.l2-mini>b{color:#20364a}
 .l2-pair{color:#4c6277;border-color:#dfe6ed}.l2-source-line,.l2-chart-foot{color:#82909f}
 .l2-disclaimer{background:#fff8eb;border-color:#ead8b5;color:#805d24}
+
+/* Modern Research UI: L2 restrained outline skin. */
+.l2-page{gap:12px;color:#151b26}
+.l2-page .title{font-size:22px;color:#101828;font-weight:700}
+.l2-page .subtitle{color:#667085}
+.l2-controls{
+ background:#fff;border:1px solid #d9dee5;border-radius:8px;box-shadow:none
+}
+.l2-controls label{color:#475467}.l2-controls input[type=date]{border-color:#d0d5dd;border-radius:7px}
+.l2-tabs{border-color:#e4e7ec;gap:18px}
+.l2-tab{color:#667085;border-bottom-width:2px;padding:10px 3px 9px}
+.l2-tab.selected{color:#101828;border-bottom-color:#2f6fed}
+.l2-stat-strip{gap:8px}
+.l2-stat{
+ background:#fff;border:1px solid #d9dee5;border-radius:9px;box-shadow:none;
+ min-height:82px;padding:12px 14px
+}
+.l2-stat>div{color:#667085;font-size:10px}.l2-stat>b{color:#101828;font-size:18px}.l2-stat>small{color:#98a2b3}
+.l2-disclaimer{
+ background:#fafbfc;border:1px solid #e4e7ec;color:#667085;border-radius:7px
+}
+.l2-page .card{
+ background:#fff!important;border:1px solid #d9dee5!important;border-radius:9px!important;
+ box-shadow:none!important
+}
+.l2-page .ctitle{color:#1d2939;font-size:14px;font-weight:650}
+.l2-page .ctitle span{color:#98a2b3}
+.l2-page .table th{background:#f8f9fb!important;color:#667085!important;border-bottom-color:#d9dee5!important}
+.l2-page .table td{color:#1d2939!important;border-bottom-color:#eaecf0!important}
+.l2-style-select{color:#344054}.l2-style-select.current{color:#234fba}
+.l2-state{border-radius:5px;padding:4px 7px}
+.l2-strong{background:#ecfdf3;color:#067647}
+.l2-cooling{background:#fffaeb;color:#93370d}
+.l2-improving{background:#eff4ff;color:#305fc9}
+.l2-weak{background:#fff1f3;color:#c01048}
+.l2-unknown{background:#f2f4f7;color:#667085}
+.l2-mini{
+ background:#fafbfc;border:1px solid #e4e7ec;border-radius:7px
+}
+.l2-style-rail{background:#fff}
+.l2-rail-item{border-bottom-color:#eaecf0}
+.l2-rail-item:hover{background:#fafbfc}
+.l2-rail-item.current{background:#f5f8ff;box-shadow:inset 2px 0 0 var(--style-color,#2f6fed)}
+.l2-rail-rank{background:#f2f4f7;color:#667085;border-radius:5px}
+.l2-rail-item:first-child .l2-rail-rank{background:#344054;color:#fff}
+.l2-cross-card{
+ background:#fff!important;border:1px solid #d9dee5!important;border-radius:8px!important;
+ box-shadow:none!important
+}
+.l2-cross-card:hover{border-color:#cbd2da;box-shadow:none!important}
+.l2-cross-card.current{
+ border-color:#cbd5e8!important;box-shadow:inset 0 2px 0 var(--style-color)!important
+}
+.l2-cross-card.up,.l2-cross-card.down{background:#fff!important}
+.l2-cross-head span{background:#f2f4f7;color:#667085;border-radius:5px}
+.l2-matrix thead th{background:#f8f9fb;color:#667085}
+.l2-matrix th,.l2-matrix td{border-bottom-color:#eaecf0}
+.l2-evo-legend-item{border-radius:5px}
+.l2-evo-legend-item:hover{background:#fafbfc}
+.l2-evo-legend-item.current{background:#f5f8ff}
+.l2-diagnostic-head{border-color:#e4e7ec}
+.l2-diag-section{
+ background:#fff!important;border:1px solid #e4e7ec!important;border-radius:7px!important
+}
+.l2-support h4,.l2-watch h4,.l2-risk h4,.l2-research-note h4{color:#344054}
+.l2-evidence-list>div{border-bottom-color:#eaecf0}
