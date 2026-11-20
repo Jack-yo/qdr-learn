@@ -73,6 +73,9 @@ def activate_strategy(root, identifier: str) -> dict:
     if strategy["status"] != "FROZEN":
         raise PolicyError("STRATEGY_MUST_BE_FROZEN_BEFORE_ACTIVATION",
                           "Freeze the Alpha strategy version before activating it")
+    if not strategy["config"].get("factor_mix"):
+        raise PolicyError("L3_MULTI_FACTOR_STRATEGY_REQUIRED",
+                          "L3 daily selection requires a 2–8 factor Alpha strategy")
     payload = {
         "schema": _SCHEMA,
         "strategy_version_id": strategy["id"],
