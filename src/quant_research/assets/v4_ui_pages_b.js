@@ -38,20 +38,20 @@ pages.lab=async()=>{
          '<div class="v4-field wide" id="v4-formula-wrap"><label for="v4-factor-expression">自定义公式（历史时间窗口，禁止未来函数）</label><textarea id="v4-factor-expression" placeholder="-ret(close,5)" maxlength="512">-ret(close,5)</textarea></div>'+
          '<div class="v4-field wide"><label for="v4-factor-hypothesis">研究假设</label><textarea id="v4-factor-hypothesis" maxlength="1000" placeholder="该信号为什么可能影响未来1/3/5日的收益分布？"></textarea></div>'+
        '</div>'+
-       '<div class="v4-actions" style="margin-top:15px">'+button('v4-save-factor','保存不可变因子版本','primary')+'</div>'+
-       '<div class="v4-muted-note">公式白名单包括 lag / ret / mean / std / sum / abs / rank / zscore；不允许任意代码和未来数据。</div>'+
+       '<div class="v4-actions" style="margin-top:15px">'+button('v4-save-factor','保存因子版本','primary')+'</div>'+
+       '<div class="v4-muted-note">支持 lag / ret / mean / std / sum / abs / rank / zscore；禁止未来函数。</div>'+
        '</form>','L3 · Alpha / Factor Lab')+
      card('已保存因子 · 版本管理',
        factors.length?'<div class="v4-table-scroll">'+factors.slice(0,35).map(savedFactor).join('')+'</div>':
        empty('暂无因子版本',r.ok?'使用左侧表单创建第一项研究因子。':String(r.error?.message||'注册表尚未就绪')),
-       '注册历史，不能覆盖旧版')+
+       '保留历史版本')+
    '</div>'+
    '<div class="grid cols2" style="margin-top:15px">'+
-     card('真实数据预览及实验',
+     card('数据预览与实验',
         row('当前选择',selected?e(selected.name)+' · v'+e(selected.version):'—')+
         '<div class="v4-toolbar" style="margin-top:12px">'+
          select('数据来源','v4-factor-source',[
-           ['alpaca','Alpaca（需真实历史来源资格）'],
+           ['alpaca','Alpaca'],
            ['yahoo','Yahoo（仅当前版本历史探索）']],'alpaca')+
          '<div class="v4-actions">'+button('v4-factor-preview','预览真实计算')+
            button('v4-factor-run','创建并运行因子实验','primary')+'</div></div>'+
@@ -143,37 +143,37 @@ pages.screen=async()=>{
       card('因子组合配置',
         '<div class="v4-form">'+field('策略名称','v4-strategy-name','text','','maxlength="80" placeholder="超跌衰竭多因子研究"')+
         select('研究持有期','v4-strategy-h',[['1','1日'],['3','3日'],['5','5日']],selected)+'</div>'+
-        '<div class="v4-muted-note" style="margin:12px 0">选择 2–8 个已完成的真实实验，按超跌程度、卖压衰竭、重新转强分类，权重之和必须为 100%。组别是研究假设，不代表已验证贡献。</div>'+
+        '<div class="v4-muted-note" style="margin:12px 0">选择 2–8 个因子 · 权重合计 100%。</div>'+
         '<div class="v4-factor-groups">'+
         '<div>组 A · 超跌程度 <b data-v4-group-total="A">0%</b></div>'+
         '<div>组 B · 卖压衰竭 <b data-v4-group-total="B">0%</b></div>'+
         '<div>组 C · 重新转强 <b data-v4-group-total="C">0%</b></div>'+
         '<div>已选总权重 <b data-v4-weight-total>0%</b></div></div>'+
         (experiments.length?'<div class="v4-table-scroll">'+experiments.map(optionFactor).join('')+'</div>':
-           empty('暂无可组合的因子实验','请先在因子实验室完成真实样本研究。'))+
-        '<div class="v4-actions" style="margin-top:15px">'+button('v4-save-strategy','保存不可变策略','primary')+
+           empty('暂无可组合因子','请先完成因子实验。'))+
+        '<div class="v4-actions" style="margin-top:15px">'+button('v4-save-strategy','保存策略版本','primary')+
         link('/studio#lab','去因子实验室')+'</div>'+
         note('初始风险约束：单股≤10%，总仓位≤50%，行业≤25%，ADV20≥2000万美元，止损≥2×ATR20；最终交易需独立验证。'),
         'L3 · 多因子选股')+
       card('已保存策略与候选解释',
         strategies.length?table(['策略版本','持有期','状态','操作'],stratrows):
-          empty('尚无保存的组合研究','配置左侧因子组并保存后，选择版本查看真实排名。')+
-        '<div id="v4-composite-result" style="margin-top:14px">'+empty('尚未选取策略研究结果','点击“查看选股”核对真实因子贡献、冗余及候选股票。')+'</div>',
-        '分数不是预测交易收益')+
+          empty('尚无组合研究','保存策略后查看排名。')+
+        '<div id="v4-composite-result" style="margin-top:14px">'+empty('尚未选择策略','点击“查看选股”查看候选。')+'</div>',
+        '候选排序')+
    '</div>'+
    '<div class="grid cols2" style="margin-top:15px">'+
       card('样本外预测 · 模型增量',
         studies.length?table(['研究版本','状态','操作'],reportrows):
-          empty('尚无已归档的 OOS 对照','模型必须在同样本中比较预测增量，不能只展示历史收益高的组合。')+
-        '<div id="v4-study-result" style="margin-top:12px">'+empty('选择研究版本','查看 Brier、MSE、Rank IC 和样本外增量；不填充演示胜率。')+'</div>',
+          empty('尚无 OOS 对照','暂无可用验证结果。')+
+        '<div id="v4-study-result" style="margin-top:12px">'+empty('选择研究版本','查看验证指标。')+'</div>',
         'A/B/C/D · 预测有效性')+
-      card('严格回测与前向冻结记录',
+      card('回测与前向记录',
         row('已验证历史回测',verified.length?n(verified.length,0):'—')+
-        row('当日真实冻结的 Alpha 研究',frozen.length?n(frozen.length,0):'—')+
+        row('当日 Alpha 研究',frozen.length?n(frozen.length,0):'—')+
         row('最新风险研究计划',planRow?n(planRow.research_plan_count,0):'—')+
         (planDetail?.plans?.length?table(['H3 研究候选','成本后期望','参考持仓权重'],
           planDetail.plans.slice(0,5).map(x=>[e(x.security_id),signed(x.estimated_net_edge),pct(x.indicative_weight)])):
-          empty('目前无已冻结的研究交易计划','缺少已校准预测、同日真实证券元数据或对账账户时，系统不制造买入建议。'))+
+          empty('暂无研究计划','当前没有满足条件的候选。'))+
         (verified.length?table(['运行版本','来源资格'],verified.slice(0,8).map(x=>[
            short(x.run_id||x.id),e(x.status||'已登记')])):empty('暂无严格回测业绩',
            '缺少历史 PIT/公司行为/原价成交资格时，不显示净值、收益和回撤曲线。'))+
