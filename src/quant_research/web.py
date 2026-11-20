@@ -943,8 +943,13 @@ def handler(console):
                     if path=='/api/v1/factor-lab/library' and not query:
                         return self.send(200,{'factor_versions':registry.factors(),'experiments':registry.experiments(),
                             'templates':['reversal','momentum','volatility'],'policy':'REAL_ONLY','execution_ready':False})
-                    if path=='/api/v1/factor-lab/preview' and set(query)=={'version_id','source'}:
-                        return self.send(200,preview(console.root,query['version_id'][0],query['source'][0]))
+                    if path=='/api/v1/factor-lab/preview' and set(query)<= {'version_id','source','symbols'} and {'version_id','source'}<=set(query):
+                        symbols=None
+                        if 'symbols' in query:
+                            symbols=[item.strip().upper() for item in query['symbols'][0].replace('\n',',').split(',') if item.strip()]
+                            if not symbols or len(symbols)!=len(set(symbols)):
+                                raise ValueError('Invalid preview symbols')
+                        return self.send(200,preview(console.root,query['version_id'][0],query['source'][0],symbols=symbols))
                     if path=='/api/v1/factor-lab/compare' and set(query)=={'left','right'}:
                         return self.send(200,compare(console.root,query['left'][0],query['right'][0]))
                     if path.startswith('/api/v1/factor-lab/experiments/') and not query:
