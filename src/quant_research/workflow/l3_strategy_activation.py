@@ -54,6 +54,10 @@ def active_strategy(root) -> dict:
     if strategy["status"] != "FROZEN":
         raise PolicyError("ACTIVE_STRATEGY_NOT_FROZEN",
                           "Only a frozen Alpha strategy may remain active")
+    mix=strategy["config"].get("factor_mix") or {}
+    if not 2 <= len(mix.get("allocations") or []) <= 8:
+        raise PolicyError("L3_MULTI_FACTOR_STRATEGY_REQUIRED",
+                          "The active L3 strategy must contain 2–8 frozen factors")
     if strategy["config_sha256"] != payload.get("strategy_config_sha256"):
         raise PolicyError("ACTIVE_STRATEGY_CHANGED",
                           "The active strategy no longer matches its frozen configuration")
@@ -73,7 +77,8 @@ def activate_strategy(root, identifier: str) -> dict:
     if strategy["status"] != "FROZEN":
         raise PolicyError("STRATEGY_MUST_BE_FROZEN_BEFORE_ACTIVATION",
                           "Freeze the Alpha strategy version before activating it")
-    if not strategy["config"].get("factor_mix"):
+    mix=strategy["config"].get("factor_mix") or {}
+    if not 2 <= len(mix.get("allocations") or []) <= 8:
         raise PolicyError("L3_MULTI_FACTOR_STRATEGY_REQUIRED",
                           "L3 daily selection requires a 2–8 factor Alpha strategy")
     payload = {
