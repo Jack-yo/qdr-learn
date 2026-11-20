@@ -89,7 +89,7 @@ function candidateDetail(x,data){
  }).join('');
  return '<div class="l3-detail-grid">'+
   card('为什么进入候选',
-   '<div class="l3-detail-head"><div><h3>'+e(x.symbol)+'</h3><p>'+e(x.sector||x.security_id)+'</p></div>'+badge('Top '+n((1-Number(x.alpha_rank_pct||0))*100,1)+'%','blue')+'</div>'+
+   '<div class="l3-detail-head"><div><h3>'+e(x.symbol)+'</h3><p>'+e(x.sector||x.security_id)+'</p></div>'+badge('横截面 '+pct(x.alpha_rank_pct,1)+' 分位','blue')+'</div>'+
    '<div class="l3-mini-grid"><div class="l3-mini"><span>Alpha Score</span><b>'+fmtScore(x.alpha_score)+'</b></div>'+
    '<div class="l3-mini"><span>H'+state.screenHorizon+' 预期超额</span><b>'+signedOrDash(x.expected_excess_return)+'</b></div>'+
    '<div class="l3-mini"><span>P(up)</span><b>'+prob(x.p_up,x.probability_status_up)+'</b></div>'+
