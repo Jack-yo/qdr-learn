@@ -105,11 +105,11 @@
     <text x="${zero}" y="34" fill="#596e84" text-anchor="middle" font-size="12">0%</text>
     <text x="675" y="194" fill="#596e84" text-anchor="end" font-size="12">${n(quant[4]*100,2)}%</text></svg>
     <div class="l1-chart-legend"><span><i class="l1-key med"></i>10–90% 分位区间</span><span><i class="l1-key teal"></i>25–75% 分位区间</span><span><i class="l1-key bright"></i>中位数</span><span><i class="l1-key dot"></i>预期收益</span></div>
-    <div class="l1-chart-footnote">展示预测分布的分位数，不是未来真实价格路径；区间覆盖率仍需样本外评价。</div></div>`;
+    <div class="l1-chart-footnote">预测分布区间 · 覆盖率见验证。</div></div>`;
   }
   function currentForecast(rec, horizon) {
     const f=rec?.f || null;
-    const status = rec?.data?.status==='MODEL_OOS_ADMITTED'?'样本外模型已验收':'前向研究 · 非交易';
+    const status = rec?.data?.status==='MODEL_OOS_ADMITTED'?'样本外模型已验收':'前向研究';
     return panel('l1-primary', `${header('01 / MARKET OUTLOOK', '未来市场展望', f?`<span class="l1-valid">${e(status)}</span>`:'<span class="l1-caution">暂无合格预测</span>')}
       <div class="l1-period">${[1,3,5].map(h=>`<button data-l1-horizon="${h}" type="button" aria-pressed="${h===horizon}" class="${h===horizon?'active':''}">H${h}<small>${h} 个交易日</small></button>`).join('')}</div>
       <div class="l1-prediction-metrics">
@@ -132,15 +132,15 @@
      <div class="l1-event-caption">对比未来价格先触及上涨或下跌边界的事件，而不是事后定义“底部”。</div>
      ${eligible ? `<div class="l1-event-bars">${rows.map(([label,key,cls])=>`<div class="l1-event-item"><div><span>${label}</span><strong>${pct(p[key])}</strong></div><div class="l1-track"><i class="${cls}" style="width:${Number(p[key])*100}%"></i></div></div>`).join('')}</div><div class="l1-tiny">边界：+${n(Number(p.up_threshold)*100,2)}% / ${n(Number(p.down_threshold)*100,2)}% · 独立时间序列校准</div>`
       :empty('路径事件尚无合格预测','等数据与首次触及标签接入后，展示先反弹 / 先下跌 / 均未触及三类互斥结果。')}
-      <div class="l1-caveat"><strong>需要验证的风险：</strong>压力衰减并不等于市场见底；模型必须同时报告误报、提前量和尾部风险。</div>`);
+      <div class="l1-caveat"><strong>需要验证的风险：</strong>同时关注误报、提前量与尾部风险。</div>`);
   }
   function driversAndSignals(data) {
     const records=Array.isArray(data?.drivers)?data.drivers.filter(x=>x&&x.label&&isNum(x.value)&&['OBSERVED','PARTIAL'].includes(x.status||'OBSERVED')).slice(0,7):[];
     return panel('l1-driver', `${header('03 / CONDITION CHANGE', '哪些市场特征正在变化？', '<span class="l1-kicker">FEATURE EVIDENCE</span>')}
-      <div class="l1-subtitle">观察到的变化 ≠ 已验证的预测驱动。贡献必须来自实际模型与样本外增量。</div>
+      <div class="l1-subtitle">模型贡献仅显示已验证结果。</div>
       ${records.length ? `<div class="l1-driver-rows">${records.map((x)=>`<div class="l1-driver-row"><div class="l1-driver-head"><span>${e(x.label)}</span><strong>${num(x.value,x.unit||'',2)}</strong></div><div class="l1-driver-meta"><span>${asText(x.status||'OBSERVED')}</span><span>${x.delta!==null&&isNum(x.delta)?'日变化 '+signed(x.delta):'变化待核验'}</span><span>${x.oos_increment===null||!isNum(x.oos_increment)?'增量未验证':'样本外增量 '+signed(x.oos_increment,4)}</span></div></div>`).join('')}</div>`
-        :empty('尚无经过审计的特征变化', '后续接入 12 维日频观测。若因子未经过增量验证，只展示变化，不标记为有效领先信号。')}
-      <div class="l1-driver-footer">支持未来展开历史条件检索、相似环境、模型贡献与条件情景；本阶段不伪造解释性数值。</div>`);
+        :empty('尚无经过审计的特征变化', '暂无已验证的特征变化。')}
+      <div class="l1-driver-footer"></div>`);
   }
   function domainsGrid(data) {
     const raw=Array.isArray(data?.domains)?data.domains:[];
@@ -149,14 +149,14 @@
     const observed=DOMAINS.filter(([id])=>lookup.get(id)?.status==='OBSERVED').length;
     const partial=DOMAINS.filter(([id])=>lookup.get(id)?.status==='PARTIAL').length;
     return panel('l1-monitor', `${header('04 / MARKET OBSERVATORY', '12 维市场自动观测', `<span class="l1-kicker">已观测 ${observed} / 12 · 部分覆盖 ${partial}</span>`)}
-      <div class="l1-subtitle">每个维度独立校验数据来源、发布时间及股票池覆盖率；未接入维度不计算为零。</div>
+      <div class="l1-subtitle">缺失维度不按 0 处理。</div>
       <div class="l1-filters" role="group" aria-label="观测维度筛选">${FILTERS.map(([id,name])=>`<button type="button" data-l1-domain="${e(id)}" class="${S.dimension===id?'active':''}" aria-pressed="${S.dimension===id}">${e(name)}</button>`).join('')}</div>
       <div class="l1-domain-grid">${displayed.map(([id,name,desc,group],i)=>{
         const item=lookup.get(id), status=item?.status||'MISSING';
         const val=['OBSERVED','PARTIAL'].includes(status)&&isNum(item.value)?num(item.value,item.unit||'',item.precision??2):'—';
         return `<button type="button" class="l1-domain" data-l1-open-domain="${e(id)}" aria-pressed="${S.selectedDomain===id}"><div class="l1-domain-h"><span class="l1-domain-icon">${String(DOMAINS.findIndex(x=>x[0]===id)+1).padStart(2,'0')}</span><span class="l1-domain-state ${e(status.toLowerCase())}">${label(status)}</span></div><strong>${e(name)}</strong><p>${e(desc)}</p><div class="l1-domain-number">${val}</div><small>${status==='OBSERVED'?asText(item.label||'已到达的数据观察值') : status==='PARTIAL'?'部分覆盖：仅显示已取得的实际数值': '数据或计算尚未完成'}<span class="l1-domain-coverage">${item?.coverage?e(item.coverage.available+' / '+item.coverage.registered+' 项特征'):''}</span></small></button>`;
       }).join('')}</div>
-      ${S.selectedDomain ? `<div class="l1-domain-details"><h3>${e((DOMAINS.find(x=>x[0]===S.selectedDomain)||[])[1]||'指标明细')}</h3><p>数据、来源及可得时点，研究观察不代表领先预测有效。</p><div class="l1-domain-details-list">${(Array.isArray(data?.features)?data.features:[]).filter(x=>x.domain===S.selectedDomain).map(x=>`<div class="l1-research-row"><span>${e(x.id)} <small>${asText(x.status)} · ${asText(x.source)}</small></span><strong>${isNum(x.value)?n(x.value,4):'—'} <small>${asText(x.available_at)}</small></strong></div>`).join('')||'<p class="l1-no-features">该维度尚未取得可核验的指标明细</p>'}</div></div>` : ''}`);
+      ${S.selectedDomain ? `<div class="l1-domain-details"><h3>${e((DOMAINS.find(x=>x[0]===S.selectedDomain)||[])[1]||'指标明细')}</h3><p>来源与可得时点</p><div class="l1-domain-details-list">${(Array.isArray(data?.features)?data.features:[]).filter(x=>x.domain===S.selectedDomain).map(x=>`<div class="l1-research-row"><span>${e(x.id)} <small>${asText(x.status)} · ${asText(x.source)}</small></span><strong>${isNum(x.value)?n(x.value,4):'—'} <small>${asText(x.available_at)}</small></strong></div>`).join('')||'<p class="l1-no-features">该维度尚未取得可核验的指标明细</p>'}</div></div>` : ''}`);
   }
   function validation(oldStudy, rec) {
     const rows=Array.isArray(oldStudy?.summary?.direction)?oldStudy.summary.direction:[];
@@ -167,7 +167,7 @@
       ${small('旧实验 · 模型 Brier',metric?num(metric.brier,'',4):'—','历史回顾研究，非当前模型')}
       ${small('旧实验 · 常数基准 Brier',metric?num(metric.naive_brier,'',4):'—','历史回顾研究，非当前模型')}
       </div><div class="l1-qualify">${metric?`历史回溯 Brier 差（模型−基准）：${signed(Number(metric.brier)-Number(metric.naive_brier),4)}；负值较优。该实验不得用于证明最新 L1 预测已经验收。`:'当前没有可核验的历史验证结果。'}</div>
-      <details class="l1-method"><summary>展开数据资格与验证口径</summary><p>交易窗口：T 日收盘后形成信号，T+1 日开盘至 T+H 日收盘。历史实验与连续冻结预测严格分开；所有分位数、事件概率必须在同一预测时点生成。</p><p>验收目标：概率校准、分布预测损失、波动预测误差、首触事件误报与提前量、基准对照。H3/H5 重叠标签必须使用适当的滚动净化、区块自助法和独立时间外测试。</p><p>数据缺少 PIT 身份、公司行为、当时已知发布时间、覆盖率证据时，仅能作观察或探索性研究。</p></details>`);
+      <details class="l1-method"><summary>方法与验证</summary><p>信号：T 日收盘后；观察窗口：T+1 开盘至 T+H 收盘。</p><p>验证：校准、预测损失、误报/提前量与基准对照。</p><p>PIT 与覆盖证据不足时仅作观察。</p></details>`);
   }
   function researchTools(anomalyData, validationData, replayData) {
     const alerts=Array.isArray(anomalyData?.anomalies)?anomalyData.anomalies:[];
@@ -181,7 +181,7 @@
       <div class="l1-research-columns"><div><h3>市场异常扫描</h3>${alertsHTML}</div><div><h3>模型与基准对照</h3>${metricsHTML}</div></div>
       <div class="l1-replay"><label for="l1-replay-date">回放历史研究日</label><input type="date" id="l1-replay-date" value="${e(S.replayDate)}"><button type="button" data-l1-replay>查看当时研究</button>
         <span>${replay?'研究预测 '+num(replay.expected_return*100,'%',2)+' · 后续实际 '+num(replay.actual_return*100,'%',2)+' · 非真实冻结预测':replayData?.status==='NO_OOS_PREDICTION'?'该日期无样本外实验记录':'选择日期后显示真实研究记录'}</span></div>
-      <p class="l1-research-warning">历史回溯 ≠ 当时已冻结的前向预测。研究指标不自动授予模型使用资格，误报、校准和概率增量必须使用独立样本外评价。</p>`);
+      <p class="l1-research-warning">历史回放与前向预测分开验证。</p>`);
   }
   pages.market=async()=>{
     const horizon=Number(state.marketHorizon||S.horizon||3);
@@ -199,12 +199,12 @@
     const old=oldRaw.ok?oldRaw.data:null;
     const observationStatus=fresh?.modules?.market_observation?.freshness_status || 'BLOCKED';
     const html=`<div class="l1-cockpit">
-      <div class="l1-head"><div><div class="l1-breadcrumb">L1 / MARKET FORECAST <span>· 01</span></div><h1>市场未来展望 <span class="l1-beta">RESEARCH</span></h1><p>从市场内部变化推断未来收益与风险分布；对每个预测提供真实证据，不把过去行情包装成未来信号。</p></div>
+      <div class="l1-head"><div><div class="l1-breadcrumb">L1 / MARKET FORECAST <span>· 01</span></div><h1>市场未来展望 <span class="l1-beta">RESEARCH</span></h1><p>未来收益、风险分布与关键驱动。</p></div>
       <div class="l1-head-actions"><span class="l1-access ${rec?'good':''}"><i></i>${rec?'已读取冻结预测':typed?'已读取市场观察':'等待研究归档'}</span><button class="l1-refresh" type="button" data-l1-refresh>↻ 重新核查</button></div></div>
       ${indicatorCards(fresh,system,observationStatus)}
       <div class="l1-top-grid">${currentForecast(rec,S.horizon)}${firstPassage(rec)}</div>
       ${driversAndSignals(typed)}${domainsGrid(typed)}${validation(old,rec)}${researchTools(anomalyRaw?.ok?anomalyRaw.data:null, validationRaw?.ok?validationRaw.data:null, replayRaw?.ok?replayRaw.data:null)}
-      <div class="l1-bottom-note"><span>QDR · MARKET RESEARCH · L1</span><span>观察 / 回溯 / 前向预测分级 · 真实订单关闭</span></div></div>`;
+      <div class="l1-bottom-note"><span>QDR · MARKET RESEARCH · L1</span><span>观察 · 回放 · 前向</span></div></div>`;
     return {title:'L1 市场未来展望',html,mount(){
       document.querySelectorAll('[data-l1-horizon]').forEach(btn=>btn.addEventListener('click',()=>{
         const h=Number(btn.dataset.l1Horizon);
