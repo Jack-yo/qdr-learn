@@ -18,7 +18,9 @@ class FakeRegistry:
         return {
             "id": identifier, "name": "Alpha Mix", "version": 2,
             "status": self.status, "config_sha256": "a"*64,
-            "config": {"factor_mix": {"allocations": []} if self.multi else None},
+            "config": {"factor_mix": {"allocations": [
+                {"weight": .5}, {"weight": .5}
+            ]} if self.multi else None},
         }
 
 
