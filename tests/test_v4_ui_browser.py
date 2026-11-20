@@ -102,6 +102,59 @@ def _payload(path: str):
                       {"factor_experiment_id":"E2","weight":0.6}]}}}],
                 "factor_experiments":[{"id":"E1","factor_name":"反转A","factor_version":1},
                                       {"id":"E2","factor_name":"动量B","factor_version":1}]}
+    if route=="/api/v1/l3/overview":
+        horizon=int(urlsplit(path).query.split("horizon=")[-1].split("&")[0]) if "horizon=" in path else 3
+        return {
+            "status":"ALPHA_CANDIDATES_RESEARCH_ONLY","horizon":horizon,
+            "active_strategy":{"id":"S1","name":"反转组合","version":1,"status":"FROZEN",
+              "horizon":3,"factors":[
+                {"experiment_id":"E1","factor_name":"反转A","factor_version":1,"weight":0.4},
+                {"experiment_id":"E2","factor_name":"动量B","factor_version":1,"weight":0.6}]},
+            "strategies":[{"id":"S1","name":"反转组合","version":1,"status":"FROZEN",
+              "horizon":3,"factors":[
+                {"experiment_id":"E1","factor_name":"反转A","weight":0.4},
+                {"experiment_id":"E2","factor_name":"动量B","weight":0.6}]}],
+            "factor_library":[
+              {"experiment_id":"E1","factor_name":"反转A","factor_version":1,
+               "horizon":horizon,"rank_ic_mean":0.12,"icir_unannualized":0.45,
+               "label_pair_coverage":0.8},
+              {"experiment_id":"E2","factor_name":"动量B","factor_version":1,
+               "horizon":horizon,"rank_ic_mean":0.03,"icir_unannualized":0.11,
+               "label_pair_coverage":0.7}],
+            "daily":{"session_date_et":"2026-11-20","observed_security_count":428,
+              "complete_alpha_score_count":391,"candidate_count":2,
+              "selected_model_variant":"D",
+              "model_selection_reason":"FULL_MODEL_PAIRED_OOS_INCREMENT_CONFIRMED",
+              "daily_alpha_frozen":True},
+            "candidates":[
+              {"security_id":"SID-A","symbol":"AMD","sector":"Semiconductors",
+               "alpha_score":0.84,"alpha_rank_pct":1.0,
+               "expected_excess_return":0.031,"p_up":0.68,"p_downside":0.11,
+               "probability_status_up":"CALIBRATED_CHRONOLOGICAL_HOLDOUT",
+               "probability_status_downside":"CALIBRATED_CHRONOLOGICAL_HOLDOUT",
+               "model_variant":"D","model_version":"M1",
+               "factor_contributions":{"反转A":0.55,"动量B":0.29},
+               "primary_factors":[{"factor_name":"反转A","contribution":0.55},
+                                  {"factor_name":"动量B","contribution":0.29}]},
+              {"security_id":"SID-B","symbol":"AVGO","sector":"Semiconductors",
+               "alpha_score":0.78,"alpha_rank_pct":0.92,
+               "expected_excess_return":0.024,"p_up":0.64,"p_downside":0.13,
+               "probability_status_up":"CALIBRATED_CHRONOLOGICAL_HOLDOUT",
+               "probability_status_downside":"CALIBRATED_CHRONOLOGICAL_HOLDOUT",
+               "model_variant":"D","model_version":"M1",
+               "factor_contributions":{"反转A":0.18,"动量B":0.60},
+               "primary_factors":[{"factor_name":"动量B","contribution":0.60},
+                                  {"factor_name":"反转A","contribution":0.18}]}],
+            "model_evidence":{"selection_reason":"FULL_MODEL_PAIRED_OOS_INCREMENT_CONFIRMED",
+              "alpha_ranking":[
+                {"variant":"A","rank_ic_mean":0.052,"rank_icir_unannualized":0.21,"sessions":80},
+                {"variant":"B","rank_ic_mean":0.058,"rank_icir_unannualized":0.24,"sessions":80},
+                {"variant":"C","rank_ic_mean":0.063,"rank_icir_unannualized":0.27,"sessions":80},
+                {"variant":"D","rank_ic_mean":0.071,"rank_icir_unannualized":0.31,"sessions":80}]},
+            "validation":{"validation_rank_ic_mean":0.067,"validation_daily_ic_count":120,
+              "redundancy_warning_count":0,"factor_correlations":[]},
+            "outcomes":[],"blockers":[],"research_only":True,
+            "execution_ready":False,"real_orders_enabled":False}
     if route=="/api/v1/strategies/S1/composite":
         return {"status":"RETROSPECTIVE_COMPOSITE_RESEARCH_ONLY",
                 "asof_date_et":"2024-12-30",
@@ -215,7 +268,8 @@ def _open(browser,base,route):
     page.locator("#content .heading").wait_for(timeout=10000)
     if route!="overview":
         try:
-            page.locator(".v4-subtab").first.wait_for(timeout=10000)
+            selector=".l3-tab" if route=="screen" else ".v4-subtab"
+            page.locator(selector).first.wait_for(timeout=10000)
         except Exception as exc:
             raise AssertionError(f"{route} did not render its tabs: {page.locator('#content').inner_text()[:500]}") from exc
     page.wait_for_load_state('networkidle',timeout=10000)
@@ -231,13 +285,16 @@ def test_six_page_information_architecture_and_keyboard_tabs(browser,local_app):
         try:
             tabs=page.get_by_role("tab")
             assert tabs.count()==count
-            selected=1 if name=="screen" else 0
-            following=(selected+1)%count
-            assert tabs.nth(selected).get_attribute("aria-selected")=="true"
-            tabs.nth(selected).press("ArrowRight")
-            assert tabs.nth(following).get_attribute("aria-selected")=="true"
-            assert page.locator("#v4-panel-"+name+"-"+str(following)).is_visible()
-            assert not page.locator("#v4-panel-"+name+"-"+str(selected)).is_visible()
+            assert tabs.nth(0).get_attribute("aria-selected")=="true"
+            tabs.nth(0).press("ArrowRight")
+            tabs=page.get_by_role("tab")
+            assert tabs.nth(1).get_attribute("aria-selected")=="true"
+            if name=="screen":
+                assert page.get_by_role("tab",name="因子组合").get_attribute("aria-selected")=="true"
+                assert page.get_by_text("有效因子库").count()>=1
+            else:
+                assert page.locator("#v4-panel-"+name+"-1").is_visible()
+                assert not page.locator("#v4-panel-"+name+"-0").is_visible()
             if name=="risk":
                 assert page.locator(".v4-five-metrics .kpi").count()==5
             if name=="lab":
@@ -317,15 +374,18 @@ def test_style_monitor_does_not_fetch_market_research_archive(browser,local_app)
 def test_screen_candidate_master_detail_uses_actual_api_scores(browser,local_app):
     page=_open(browser,local_app,"screen")
     try:
-        page.get_by_role("tab",name="候选股票与解释").click()
-        assert page.get_by_text("历史候选股票").count()>=1
-        assert page.locator("#v4-workspace-strategy").input_value()=="S1"
-        page.locator('[data-v4-stock="1"]').click()
-        detail=page.locator("#v4-stock-detail")
-        assert detail.get_by_text("SID-B").count()>=1
-        assert detail.get_by_text("0.7800").count()>=1
-        assert detail.get_by_text("F2").count()>=1
-        assert page.get_by_text("2024-12-30").count()>=1
+        page.get_by_role("tab",name="今日选股").wait_for()
+        assert page.get_by_text("AMD",exact=True).count()>=1
+        assert page.get_by_text("+3.10%",exact=True).count()>=1
+        page.locator('.l3-stock-open[data-symbol="AVGO"]').click()
+        detail=page.locator("#l3-candidate-detail")
+        assert detail.get_by_text("AVGO",exact=True).count()>=1
+        assert detail.get_by_text("0.780").count()>=1
+        assert detail.get_by_text("动量B").count()>=1
+        assert page.get_by_text("2026-11-20").count()>=1
+        page.get_by_role("tab",name="验证与回测").click()
+        assert page.get_by_text("0.0670").count()>=1
+        assert page.get_by_text("Full").count()>=1
     finally:
         page.close()
 
