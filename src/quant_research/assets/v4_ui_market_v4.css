@@ -131,3 +131,27 @@
 .l1-domain:focus-visible{outline:2px solid #087d6e;outline-offset:2px}
 .l1-period button:focus-visible,.l1-filters button:focus-visible,.l1-refresh:focus-visible{outline:2px solid #087d6e;outline-offset:2px}
 @media(max-width:760px){.l1-domain-details-list,.l1-research-columns{grid-template-columns:1fr}}
+
+/* Contrast pass: L1 hierarchy only; layout/components unchanged. */
+.l1-cockpit{--l1-bg:#f3f6fa;--l1-card:#fff;--l1-edge:#d2dce6;--l1-faint:#687b8e;--l1-text:#1c2d3f;--l1-teal:#0a846c;--l1-purple:#365f92;--l1-yellow:#a66d18}
+.l1-head h1,.l1-section-heading h2{color:#17283a}
+.l1-head p,.l1-data-note,.l1-qualify,.l1-method{color:#66798b}
+.l1-topstats,.l1-prediction-metrics{background:#d2dce6;border-color:#d2dce6}
+.l1-mini{background:#fff}.l1-mini span{color:#65788a}.l1-mini strong{color:#172b40;font-weight:760}.l1-mini small{color:#8997a6}
+.l1-panel{background:#fff;border-color:#d2dce6;box-shadow:0 2px 8px #172b400d}
+.l1-primary{background:linear-gradient(145deg,#f7fbfe,#fff 78%)}
+.l1-period{background:#eef3f7;border-color:#d2dce6}
+.l1-period button{color:#65788b}.l1-period button.active{background:#e4f1ee;color:#08775f;box-shadow:inset 0 0 0 1px #bad8d1}
+.l1-prediction-metrics .l1-mini{background:#f8fafc}.l1-prediction-metrics .l1-mini strong{color:#142a40}
+.l1-driver-row,.l1-domain,.l1-valid-grid .l1-mini{background:#fff;border-color:#d5dee7}
+.l1-driver-row:hover,.l1-domain:hover{background:#f8fafc;border-color:#aebfce}
+.l1-driver-head{color:#647789}.l1-driver-head strong{color:#20364a}
+.l1-driver-meta,.l1-domain small,.l1-domain p,.l1-research-row,.l1-research-row small{color:#8190a0}
+.l1-domain>strong,.l1-domain-number,.l1-research-row strong{color:#1e3348}
+.l1-domain-icon{background:#edf3f8;border-color:#cbd9e4;color:#315f8a}
+.l1-domain-state.observed{color:#08775a}.l1-domain-state.partial{color:#9b671c}.l1-domain-state.blocked,.l1-domain-state.stale{color:#c94252}
+.l1-filters button{background:#fff;border-color:#cfd9e2;color:#607386}.l1-filters button.active{background:#e8f5ef;border-color:#bddbcf;color:#08775a}
+.l1-replay{background:#f7f9fb;border-color:#d4dde7}.l1-replay input{border-color:#cbd7e2;color:#2a4054}.l1-replay button{background:#e9f5ef;border-color:#b9d9ce;color:#08775a}
+.l1-research-warning{background:#fff7ea;border-left-color:#d6aa62;color:#82591f}
+.l1-chart-placeholder{background:linear-gradient(180deg,#f5f8fb,#fff)}
+.l1-chart-grid:after{border-color:#cfd9e2}.l1-chart-grid i{border-color:#e0e6ec}
