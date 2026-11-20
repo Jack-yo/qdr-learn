@@ -50,8 +50,8 @@ pages.lab=async()=>{
         row('当前选择',selected?e(selected.name)+' · v'+e(selected.version):'—')+
         '<div class="v4-toolbar" style="margin-top:12px">'+
          select('数据来源','v4-factor-source',[
-           ['alpaca','Alpaca'],
-           ['yahoo','Yahoo（仅当前版本历史探索）']],'alpaca')+
+           ['yahoo','Yahoo（仅当前版本历史探索）'],
+           ['alpaca','Alpaca（当前严格数据，历史因子研究通常会被资格门阻断）']],'yahoo')+
          '<div class="v4-field wide" style="min-width:280px"><label for="v4-factor-symbols">研究股票池（可选）</label><textarea id="v4-factor-symbols" rows="2" placeholder="SPY,AAPL,MSFT,NVDA…；留空使用基础研究池"></textarea></div>'+
          '<div class="v4-actions">'+button('v4-factor-preview','预览真实计算')+
            button('v4-factor-run','创建并运行因子实验','primary')+'</div></div>'+
@@ -82,7 +82,12 @@ pages.lab=async()=>{
       $('#v4-factor-result').innerHTML=moduleLoading('因子预览');
       const rawSymbols=$('#v4-factor-symbols')?.value.trim()||'';
       const query=new URLSearchParams({version_id:state.factorVersion,source:$('#v4-factor-source').value});
-      if(rawSymbols)query.set('symbols',rawSymbols);
+      if(rawSymbols){
+        const symbols=rawSymbols.split(/[\s,]+/).map(x=>x.trim().toUpperCase()).filter(Boolean);
+        if(new Set(symbols).size!==symbols.length||symbols.length<5||symbols.length>1000||!symbols.includes('SPY'))
+          throw Error('自定义股票池需 5–1000 个不重复代码，并包含 SPY');
+        query.set('symbols',symbols.join(','));
+      }
       const result=await api('/api/v1/factor-lab/preview?'+query);
       const rows=(result.rows||[]).slice(0,20).map(x=>[
          date(x.date),e(x.symbol||x.security_id),n(x.close,2),n(x.value,5)]);
