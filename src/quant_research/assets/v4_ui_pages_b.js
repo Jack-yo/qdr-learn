@@ -52,6 +52,7 @@ pages.lab=async()=>{
          select('数据来源','v4-factor-source',[
            ['alpaca','Alpaca'],
            ['yahoo','Yahoo（仅当前版本历史探索）']],'alpaca')+
+         '<div class="v4-field wide" style="min-width:280px"><label for="v4-factor-symbols">研究股票池（可选）</label><textarea id="v4-factor-symbols" rows="2" placeholder="SPY,AAPL,MSFT,NVDA…；留空使用基础研究池"></textarea></div>'+
          '<div class="v4-actions">'+button('v4-factor-preview','预览真实计算')+
            button('v4-factor-run','创建并运行因子实验','primary')+'</div></div>'+
         '<div id="v4-factor-result">'+empty('尚未选择计算','选择版本后读取已有的真实行情及其因子计算值。')+'</div>',
@@ -79,7 +80,9 @@ pages.lab=async()=>{
    $('#v4-factor-preview')?.addEventListener('click',()=>action(async()=>{
       if(!state.factorVersion)throw Error('请先保存或选择一个因子版本');
       $('#v4-factor-result').innerHTML=moduleLoading('因子预览');
+      const rawSymbols=$('#v4-factor-symbols')?.value.trim()||'';
       const query=new URLSearchParams({version_id:state.factorVersion,source:$('#v4-factor-source').value});
+      if(rawSymbols)query.set('symbols',rawSymbols);
       const result=await api('/api/v1/factor-lab/preview?'+query);
       const rows=(result.rows||[]).slice(0,20).map(x=>[
          date(x.date),e(x.symbol||x.security_id),n(x.close,2),n(x.value,5)]);
@@ -89,8 +92,15 @@ pages.lab=async()=>{
    $('#v4-factor-run')?.addEventListener('click',()=>action(async()=>{
       if(!state.factorVersion)throw Error('请先保存或选择因子版本');
       const source=$('#v4-factor-source').value;
-      const created=await api('/api/v1/factor-lab/experiments',
-              {factor_version_id:state.factorVersion,source});
+      const rawSymbols=$('#v4-factor-symbols')?.value.trim()||'';
+      const body={factor_version_id:state.factorVersion,source};
+      if(rawSymbols){
+        const symbols=rawSymbols.split(/[\s,]+/).map(x=>x.trim().toUpperCase()).filter(Boolean);
+        if(new Set(symbols).size!==symbols.length||symbols.length<5||symbols.length>1000||!symbols.includes('SPY'))
+          throw Error('自定义股票池需 5–1000 个不重复代码，并包含 SPY');
+        body.symbols=symbols;
+      }
+      const created=await api('/api/v1/factor-lab/experiments',body);
       await api('/api/v1/factor-lab/experiments/'+encodeURIComponent(created.id)+'/run',{});
       $('#v4-factor-result').innerHTML=empty('因子实验已提交','已记录实验编号：'+created.id+'。可在实验历史中查看真实运行状态。');
       toast('实验任务已创建，可在工作台查看实际执行情况');
