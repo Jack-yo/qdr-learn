@@ -341,24 +341,26 @@ def _build_candidates(scores, factor_names, meta, forecasts, variant, horizon, l
     return output
 
 
-def l3_overview(root, *, horizon=3, limit=20):
-    if horizon not in (1, 3, 5) or type(limit) is not int or not 1 <= limit <= 50:
-        raise ValueError("L3 overview supports H1/H3/H5 and limit 1–50")
+def l3_overview(root, *, horizon=3, limit=20, section="today"):
+    if (horizon not in (1, 3, 5) or type(limit) is not int or not 1 <= limit <= 50
+            or section not in {"today", "strategy", "validation"}):
+        raise ValueError("Invalid L3 overview horizon, limit or section")
     root = Path(root).resolve()
     blockers = []
-    factor_library = _factor_library(root, horizon)
+    factor_library = _factor_library(root, horizon) if section == "strategy" else []
     activation = active_strategy(root)
     active = activation.get("strategy")
     strategy = _strategy_summary(active) if active else None
 
     strategies = []
-    try:
-        from quant_research.research.strategy import StrategyRegistry
-        strategies = [
-            _strategy_summary(item) for item in StrategyRegistry(root).versions()
-        ]
-    except (PolicyError, ValueError, OSError):
-        blockers.append("STRATEGY_REGISTRY_UNAVAILABLE")
+    if section == "strategy":
+        try:
+            from quant_research.research.strategy import StrategyRegistry
+            strategies = [
+                _strategy_summary(item) for item in StrategyRegistry(root).versions()
+            ]
+        except (PolicyError, ValueError, OSError):
+            blockers.append("STRATEGY_REGISTRY_UNAVAILABLE")
 
     scores = pd.DataFrame()
     factor_names = [
@@ -442,7 +444,8 @@ def l3_overview(root, *, horizon=3, limit=20):
     )
 
     validation = None
-    if active is not None and active["config"].get("factor_mix"):
+    if (section == "validation" and active is not None
+            and active["config"].get("factor_mix")):
         try:
             composite = compute_composite(root, active["id"])
             validation = {
@@ -515,8 +518,9 @@ def l3_overview(root, *, horizon=3, limit=20):
         "candidates": candidates,
         "model_evidence": evidence,
         "validation": validation,
-        "outcomes": latest_research_outcomes(root, limit=10).get(
-            "records", []
+        "outcomes": (
+            latest_research_outcomes(root, limit=10).get("records", [])
+            if section == "validation" else []
         ),
         "blockers": list(dict.fromkeys(blockers)),
         "research_only": True,
