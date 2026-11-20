@@ -87,6 +87,18 @@ def observed_v4_adapters(root: Path, readiness: dict):
                     'detail':{'session_date_et':day,'forecast_identity':matching[0]['identity'],
                               'forecast_rows':matching[0]['forecast_rows'],
                               'paper_admission':False}}
+        from quant_research.workflow.l3_daily import latest_l3_daily
+        daily_alpha=[x for x in latest_l3_daily(root,limit=20)
+                     if x.get('session_date_et')==day
+                     and x.get('status')!='CORRUPT_L3_DAILY_ALPHA_ARCHIVE']
+        if daily_alpha:
+            return {'status':'RESEARCH_ONLY',
+                    'code':'CURRENT_ALPHA_RANKING_FROZEN_NO_MATCHED_RETURN_MODEL',
+                    'detail':{'session_date_et':day,
+                              'daily_alpha_identity':daily_alpha[0]['identity'],
+                              'alpha_score_rows':daily_alpha[0]['complete_alpha_score_count'],
+                              'input_kind':daily_alpha[0].get('input_kind'),
+                              'paper_admission':False}}
         rows=list_research_runs(root,limit=20)
         actual=[r for r in rows if r.get('status')=='VERIFIED_LOCAL_RESEARCH_ARTIFACT_ONLY']
         if not actual:
