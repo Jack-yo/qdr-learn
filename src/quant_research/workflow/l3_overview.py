@@ -86,6 +86,8 @@ def _factor_library(root, horizon):
                 "factor_name": version.get("name") or (result.get("factor_version") or {}).get("name"),
                 "factor_version": version.get("version") or (result.get("factor_version") or {}).get("version"),
                 "horizon": horizon,
+                "universe_version": (experiment.get("config") or {}).get("universe_version"),
+                "symbol_count": len((experiment.get("config") or {}).get("symbols") or []),
                 "rank_ic_mean": _finite(row.get("rank_ic_mean")),
                 "excess_rank_ic_mean": _finite(row.get("excess_rank_ic_mean")),
                 "icir_unannualized": _finite(row.get("icir_unannualized")),
