@@ -107,6 +107,14 @@ def main(argv=None):
     results.add_argument('--scenario',help='Optional h1/h3/h5 and 5/10/20/50bps scenario, requires run ID')
     strategy_preflight=commands.add_parser('strategy-preflight',help='Check strict backtest evidence for a frozen version')
     strategy_preflight.add_argument('--strategy-version',required=True)
+    l3_activate=commands.add_parser('l3-activate',help='Activate one frozen multi-factor Alpha strategy for daily L3 research')
+    l3_activate.add_argument('--strategy-version',required=True)
+    l3_daily=commands.add_parser('l3-daily',help='Freeze one immutable T-day Alpha ranking from an admitted V4 bundle')
+    l3_daily.add_argument('--date',required=True)
+    l3_daily.add_argument('--bundle-id',required=True)
+    l3_overview=commands.add_parser('l3-overview',help='Read the product-facing L3 Alpha overview without recomputing rankings')
+    l3_overview.add_argument('--horizon',type=int,choices=[1,3,5],default=3)
+    l3_overview.add_argument('--limit',type=int,default=20)
     maintain=commands.add_parser('maintain-data',help='Maintain classified free real datasets; never trains or trades')
     maintain.add_argument('--config',type=Path,default=Path('configs/data_maintenance.yaml'))
     maintain.add_argument('--cadence',choices=['daily','weekly'],default='daily')
@@ -227,6 +235,21 @@ def main(argv=None):
             record=run(Path.cwd(),args.experiment_id)
             print(json.dumps(record,ensure_ascii=False))
             return 0 if record['status']=='COMPLETED' else 4
+        if args.command=='l3-activate':
+            from .workflow.l3_strategy_activation import activate_strategy
+            record=activate_strategy(Path.cwd(),args.strategy_version)
+            print(json.dumps(record,ensure_ascii=False,allow_nan=False,default=str))
+            return 0
+        if args.command=='l3-daily':
+            from .workflow.l3_daily import freeze_l3_daily
+            record=freeze_l3_daily(Path.cwd(),session_date=args.date,bundle_id=args.bundle_id)
+            print(json.dumps(record,ensure_ascii=False,allow_nan=False,default=str))
+            return 0
+        if args.command=='l3-overview':
+            from .workflow.l3_overview import l3_overview
+            record=l3_overview(Path.cwd(),horizon=args.horizon,limit=args.limit)
+            print(json.dumps(record,ensure_ascii=False,allow_nan=False,default=str))
+            return 0
         if args.command=='style-report':
             from .workflow.styles import execute
             return execute(args)
