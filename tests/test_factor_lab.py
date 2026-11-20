@@ -106,6 +106,20 @@ def test_tampered_artifact_is_not_served_as_a_valid_result(project,real_runs):
     finally:path.write_bytes(original)
 
 
+def test_custom_security_universe_is_not_mislabeled_as_etf_proxy(tmp_path):
+    config=tmp_path/'configs/experiments'
+    config.mkdir(parents=True)
+    shutil.copyfile('configs/experiments/p2_factors.yaml',config/'p2_factors.yaml')
+    registry=Registry(tmp_path)
+    version=registry.create_factor(
+        {'name':'equity-reversal','template':'reversal','window':5,'direction':1})
+    symbols=['SPY','AAPL','MSFT','NVDA','AMZN','META','GOOGL','AVGO','AMD','TSLA','JPM','XOM']
+    experiment=registry.create_experiment(
+        {'factor_version_id':version['id'],'source':'yahoo','symbols':symbols})
+    assert experiment['config']['symbols']==symbols
+    assert experiment['config']['universe_version']=='EXPLICIT_CUSTOM_SECURITY_LIST_NOT_HISTORICAL_PIT'
+
+
 def test_snapshot_and_protocol_are_frozen_at_creation(project,real_runs):
     registry,v1,_,_=real_runs
     exp=registry.create_experiment({'factor_version_id':v1['id'],'source':'yahoo'})
