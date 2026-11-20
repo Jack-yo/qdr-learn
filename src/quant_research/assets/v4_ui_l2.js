@@ -267,7 +267,7 @@ function diagnosticPanel(data,rotation){
   '<section class="l2-diag-section l2-support"><h4>1. 最近为什么在变化？</h4><div class="l2-evidence-list">'+evidence.map(a=>'<div><span>'+e(a[0])+'</span><b>'+e(a[1])+'</b><strong>'+a[2]+'</strong><small>'+e(a[3])+'</small></div>').join('')+'</div></section>'+
   '<section class="l2-diag-section l2-watch"><h4>2. 尚未确认 / 需要观察</h4><ul>'+open.map(v=>'<li>'+e(v)+'</li>').join('')+'</ul></section>'+
   '<section class="l2-diag-section l2-risk"><h4>3. 当前描述何时失效？</h4><ul class="l2-invalid">'+invalid.map(v=>'<li>'+e(v)+'</li>').join('')+'</ul></section>'+
-  '<section class="l2-diag-section l2-research-note"><h4>研究解释</h4><p>'+e(itemName(state.l2Style))+' 当前的“'+e(current)+'”只由 20D 相对收益与 5D 边际变化定义。它描述已经发生的轮动位置，不等于未来收益判断；H1/H3/H5 前瞻证据独立放在“领先预测”中。</p></section>',
+  '<section class="l2-diag-section l2-research-note"><h4>研究解释</h4><p>'+e(itemName(state.l2Style))+' 当前：'+e(current)+'。前瞻结果见「领先预测」。</p></section>',
   '可观察事实 → 未确认项 → 失效边界');
 }
 function details(data,rotation){
@@ -284,8 +284,8 @@ function details(data,rotation){
    '<div class="l2-detail-status">'+htmlStatus(r?.rotation_state)+'<span>状态开始：'+date(r?.rotation_state_start_session)+'</span><span>上次有效转折：'+date(r?.last_transition_session)+'</span></div>'+
    '<div class="l2-mini-grid">'+labels+'</div>'+info+
    '<div class="l2-source-line">数据可用时间：'+availability(x.available_at)+' · 来源版本：'+e(x.registry_version||'—')+'</div>'+
-   (x.missing_reason||r?.block_reason?note('数据限制：'+(x.missing_reason||r?.block_reason)):'')+
-   note('四象限是描述性分类；不代表未来上涨概率、入场位置或已通过样本外验证的信号。'),
+   (x.missing_reason||r?.block_reason?note('数据：'+(x.missing_reason||r?.block_reason)):'')+
+   note('四象限描述当前轮动位置。'),
    '单一风格 · 实际计算');
 }
 function transitions(rotation){
@@ -295,8 +295,8 @@ function transitions(rotation){
    selected.length?table(['转折日','前一状态','当前状态','20D 相对收益','5D 加速度'],
    selected.slice(0,15).map(x=>[date(x.date),htmlStatus(x.previous_state),htmlStatus(x.rotation_state),
      figure(x.strength_relative_return_20d),figure(x.acceleration_relative_return_5d)])):
-   empty('暂无已确认转折','只统计相邻、有效状态之间的变化；无法确认的时点不会伪造转折。'),
-   '历史状态仅以现存当前版本数据回放，非历史 PIT 证明');
+   empty('暂无已确认转折','仅统计有效状态转折。'),
+   '当前版本历史回放');
 }
 function quality(data){
  const coverage=data?.coverage||{};
@@ -361,17 +361,17 @@ function forecastResearch(result){
    '前瞻研究证据 · 与描述性轮动状态分离')+
   '</div>'+
   card('P4 研究边界',
-    '<div class="l2-protocol"><p><b>标签：</b>T+1 开盘 → T+H 收盘的风格相对收益，必须来自公司行为一致、来源可验证的标签包。</p>'+
-    '<p><b>训练：</b>每个 style × horizon 独立 StandardScaler + Ridge；训练标签必须在信号前已知，并执行至少 5 个交易日 embargo。</p>'+
-    '<p><b>基准：</b>Zero、历史扩展均值、当前 5D 动量外推。P5 必须证明 OOS 增量，P4 本身不授予模型准入。</p>'+
-    '<p><b>当前资格：</b>'+e(d.status||'BLOCKED')+'；historical_decision_eligible=false，real_orders_enabled=false。</p></div>',
-    '没有概率校准 · 没有模型准入 · 没有订单');
+    '<div class="l2-protocol"><p><b>标签：</b>T+1 开盘 → T+H 收盘的风格相对收益。</p>'+
+    '<p><b>训练：</b>每个 style × horizon 独立训练；使用时间隔离。</p>'+
+    '<p><b>基准：</b>基准：Zero / 历史均值 / 5D 动量。</p>'+
+    '<p><b>状态：</b>'+e(d.status||'BLOCKED')+'。</p></div>',
+    '方法与验证');
 }
 
 function french(result){
  const d=result?.ok?result.data:null,items=Array.isArray(d?.latest)?d.latest:[];
  return card('Fama–French 因子 · 独立观测',
-   items.length?'<div class="l2-fr-note">法玛—弗伦奇因子与 ETF 风格不是同一条收益序列；当前下载版本不能直接用作历史 PIT 训练。</div>'+
+   items.length?'<div class="l2-fr-note">Fama–French 与 ETF 风格分开观察。</div>'+
    table(['因子','含义','5D','20D','状态'],items.map(x=>[e(x.factor_name),e(x.factor_label||'—'),
    figure(x.sum_5d),figure(x.sum_20d),e(x.state||'—')])):
    problem(result,'French 因子'),
@@ -408,7 +408,7 @@ pages.style=async()=>{
  ['5D 边际变化',selectedNow?figure(selectedNow.relative_acceleration_5d):'—','最近 5D 相对收益 - 前 5D'],
  ['当前象限',e(stateMeaning(selectedRotation?.rotation_state)),'20D 相对收益 × 5D 边际变化']
  ]);
- const disclaimer='<div class="l2-disclaimer">观察层：<b>OBSERVATION_ONLY</b> · 横截面相对表现用于解释风格轮动过程，不把象限、排名或短期改善直接解释为未来收益或交易信号。</div>';
+ const disclaimer='<div class="l2-disclaimer">当前轮动为观察结果；前瞻结果见「领先预测」。</div>';
  let body='';
  if(!data){
   body=problem(request,'L2 七风格观测')+
@@ -431,14 +431,14 @@ pages.style=async()=>{
     '<p><b>加速度</b>：最近 5 个交易日相对收益减去前 5 个交易日相对收益。</p>'+
     '<p><b>四象限</b>：20 日相对收益正负 × 5 日相对收益加速度正负；零值及缺数据时为 UNKNOWN。</p>'+
     '<p><b>数据限制</b>：Yahoo 拆股调整收盘价为当前版本价格收益代理，不是分红再投总收益，也不是交易时点可验证 PIT 历史。</p>'+
-    '</div>','研究口径 v1 · 不构成投资建议');
+    '</div>','计算口径');
  }else if(state.l2Tab==='french'){
   const factors=await settle('/api/v1/styles?mode=observation');
   body='<div class="l2-main-grid">'+french(factors)+quality(data)+'</div>';
  }else{
   body=card('风格横截面概览 · 各自基准',
     overviewMatrix(items,rotationRows,data.series),
-    '20D 相对收益决定当前横截面排名；Δ5D 显示边际变化。颜色只编码数据方向与风格身份，不代表交易建议。')+
+    '20D 排名 · Δ5D 边际变化')+
    '<div class="l2-research-grid">'+
     '<div class="l2-research-left">'+card('风格强弱榜 · 20D',styleRail(items,data.series),'横条长度 = |20D 相对收益|')+
      card('关键信息速览',comparisonSnapshot(items,data.series,state.l2Style),'与横截面其他风格直接比较')+'</div>'+
