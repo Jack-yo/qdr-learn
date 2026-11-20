@@ -62,10 +62,10 @@ pages.risk=async()=>{
        empty('组合风险暂不可计算',requests[1].ok?e(risk?.code||'没有内部对账的持仓估值'):e(requests[1].error?.message)),
      '波动 / 相关性 / 下行风险')
  ].join(''));
- const positionCard=card('当前模拟持仓 · 真实账本',
+ const positionCard=card('当前持仓',
     detail.length?table(['证券ID','数量','最近估值价','估计市值','行业'],detail):
-      empty('当前没有具备内部对账的持仓','只有来源真实、身份明确且完成对账的持仓才能列入风险表。'),
-    verified?'账本已内部对账 · 非券商订单':'缺少合格持仓');
+      empty('当前没有具备内部对账的持仓','仅展示已核对持仓。'),
+    verified?'账本已核对':'缺少合格持仓');
  const alertCard=card('风险预警 · 规则与解释',
     riskOK?(alerts.length?table(['触发规则','风险对象','当前风险','约束值','受影响标的'],warningRows):
        empty('当前未触发已核验的规则预警','无超额集中度不等于不存在市场和尾部风险。')):
@@ -76,15 +76,15 @@ pages.risk=async()=>{
      table(['实际交易日','现金','组合权益','持仓数','本日模拟成交'],
      sessions.slice(-10).map(x=>[date(x.session_date_et),'$'+n(x.cash,2),
       '$'+n(x.equity,2),n(x.positions,0),n(x.new_modeled_fills,0)])):
-     empty('暂无足够连续交易日数据','只有已经冻结并真实观察的未来交易日可以形成模拟账本曲线。'),
-   '数据源时间序列 · 非券商绩效');
+     empty('暂无足够连续交易日数据','仅展示已冻结观察期。'),
+   '权益变化');
  const evidence=card('来源与模型可靠性',
    row('模拟账户',riskStatus(account?.status||'NOT_READY'))+
    row('逐日流水',riskStatus(timeline?.status||'NOT_READY'))+
    row('前向模拟数据资格',riskStatus(readiness?.stages?.forward_shadow?.status||'BLOCKED'))+
    row('持仓集中度计算',riskStatus(risk?.status||'NOT_READY'))+
    row('真实券商订单',badge('不支持','amber'))+
-   note('风险预警应持续复核市场环境、个股止损、行业敞口与策略模型失效，不允许把预测精度伪装为真实交易回报。'),
+   note('关注市场、止损、行业敞口与模型失效。'),
    'L4 · 证据检查');
  return {title:'持仓管理与风控预警',html:nav+cards+
    '<div class="grid cols2" style="margin-top:15px">'+limits+'</div>'+
@@ -95,13 +95,13 @@ pages.data=async()=>{
  const response=await settle('/api/v1/research/readiness');
  if(response.pending){
   return {title:'研究准入与资格',html:
-   heading('研究准入与资格','判断现有数据和研究证据能否进入历史模型、严格回测、前向研究与模拟组合',
+   heading('研究准入与资格','判断当前数据与证据能否进入模型、回测与前向研究',
     link('/studio#warehouse','查看数据仓库')+link('/data','高级数据维护'))+
    V.moduleLoading('研究资格矩阵')};
  }
  if(!response.ok){
   return {title:'研究准入与资格',html:
-   heading('研究准入与资格','判断现有数据和研究证据能否进入历史模型、严格回测、前向研究与模拟组合',
+   heading('研究准入与资格','判断当前数据与证据能否进入模型、回测与前向研究',
     link('/studio#warehouse','查看数据仓库'))+
    V.moduleError('研究资格矩阵',response.error,'/api/v1/research/readiness')};
  }
