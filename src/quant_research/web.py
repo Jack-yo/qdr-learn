@@ -839,11 +839,13 @@ def handler(console):
                 from .workflow.l3_overview import l3_overview
                 query=parse_qs(urlsplit(self.path).query,keep_blank_values=True)
                 try:
-                    if set(query)-{'horizon','limit'} or any(len(v)!=1 for v in query.values()):
+                    if set(query)-{'horizon','limit','section'} or any(len(v)!=1 for v in query.values()):
                         raise ValueError('Invalid L3 overview query')
                     horizon=int(query.get('horizon',['3'])[0])
                     limit=int(query.get('limit',['20'])[0])
-                    return self.send(200,l3_overview(console.root,horizon=horizon,limit=limit))
+                    section=query.get('section',['today'])[0]
+                    return self.send(200,l3_overview(
+                        console.root,horizon=horizon,limit=limit,section=section))
                 except PolicyError as exc:
                     return self.send(409,exc.payload())
                 except (ValueError,TypeError):
