@@ -37,15 +37,15 @@ pages.overview=async()=>{
  const factorBars=styleStrong.length?styleStrong.map(x=>progress(x.factor_name,Math.min(100,Math.abs(Number(x.sum_5d))*1400),signed(x.sum_5d))).join(''):empty('暂无风格监测数据','等待来自真实来源的经典因子观察记录。');
  const isnum=(v)=>v!=null&&Number.isFinite(Number(v));
  const riskRows=hasPaper?(risk.alerts||[]).map(x=>[e(x.code),e(x.subject||'组合'),e(isnum(x.actual)?pct(x.actual):'—')]):[];
- const content=heading('研究总览','四层模型的日终研究结论、实际预测归档与组合风险，统一按真实证据展示',
+ const content=heading('研究总览','日终四层研究结果与组合风险',
      link('/market','查看市场研究')+link('/strategies','进入因子组选股'))+
-     '<div class="v4-muted-note" style="margin-bottom:15px">数据交易日 '+e(day)+' · 未验收的研究结果不会包装成交易建议</div>'+
+     '<div class="v4-muted-note" style="margin-bottom:15px">数据交易日 '+e(day)+'</div>'+
      kpis+'<div class="grid cols2" style="margin:15px 0">'+
        card('市场状态预测 · 未来 1 / 3 / 5 日',
-         grid(3,[1,3,5].map(h=>'<div class="mini-stat"><div class="muted">H'+h+' 上涨概率</div><div class="val blue">—</div><div class="fine">需要真实前向校准结果</div></div>').join(''))+
-         note('当前展示框架保留三个交易期限；不借用历史回溯预测或演示概率填充。')+
+         grid(3,[1,3,5].map(h=>'<div class="mini-stat"><div class="muted">H'+h+' 上涨概率</div><div class="val blue">—</div><div class="fine">待验证</div></div>').join(''))+
+         note('预测仅显示已验证结果。')+
          '<div class="v4-actions" style="margin-top:14px">'+link('/studio#market','市场预测研究')+'</div>','L1 · 前向预测资格待核验')+
-       card('经典因子 · 风格轮动',factorBars+note('French 历史修订版本仅供当前观察；领先性须另行样本外验证。')+
+       card('经典因子 · 风格轮动',factorBars+note('领先性验证见研究准入。')+
          '<div style="margin-top:10px">'+link('/studio#style','查看经典因子趋势')+'</div>','L2 · French 截止 '+styleDay)+
      '</div>'+
      '<div class="grid cols2" style="margin-bottom:15px">'+
@@ -112,17 +112,17 @@ pages.market=async()=>{
  const risk=pred?.p_downside??pred?.downside_probability??null;
  const predicted=pred?.predicted_return??pred?.expected_gross_trade_return??null;
  const marketValid=!!d;
- const header=heading('市场状态预测','研究未来市场方向、尾部风险和状态转移；历史回溯与今日真实前向预测明确区分',
+ const header=heading('市场状态预测','市场方向、尾部风险与状态转移',
    link('/market','打开完整市场研究工具'));
  const controls=toolbar(
    select('研究持有期','v4-market-h',[['1','未来1日'],['3','未来3日'],['5','未来5日']],horizon)+
-   '<div class="v4-actions">'+badge(marketValid?'历史模型研究 · 非当前预测':'等待真实模型归档',marketValid?'blue':'amber')+'</div>'
+   '<div class="v4-actions">'+badge(marketValid?'历史研究':'待验证',marketValid?'blue':'amber')+'</div>'
  );
  const kpis=grid(4,[
-   kpi('H'+horizon+' / 上涨概率',up===null?'—':pct(up),marketValid?'历史研究样本结果':'未取得经校准概率','blue'),
-   kpi('H'+horizon+' / 显著下跌概率',risk===null?'—':pct(risk),'该事件与上涨概率不是简单互补','amber'),
-   kpi('H'+horizon+' / 预测总收益',predicted===null?'—':signed(predicted),'仅实际模型输出','green'),
-   kpi('市场状态',st?.market_state?e(st.market_state):'—','历史观察结果，非未来状态','purple')
+   kpi('H'+horizon+' / 上涨概率',up===null?'—':pct(up),marketValid?'历史样本':'待验证','blue'),
+   kpi('H'+horizon+' / 显著下跌概率',risk===null?'—':pct(risk),'尾部风险','amber'),
+   kpi('H'+horizon+' / 预测总收益',predicted===null?'—':signed(predicted),'模型输出','green'),
+   kpi('市场状态',st?.market_state?e(st.market_state):'—','当前观察','purple')
  ].join(''));
  const dataPanel=d?row('实际研究截止',date(d.manifest?.asof_date_et))+
    row('市场20日收益',st?.market_return_20==null?'—':signed(st.market_return_20))+
