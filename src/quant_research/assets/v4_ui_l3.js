@@ -114,7 +114,7 @@ function strategy(data){
    const selected=activeMap.get(f.experiment_id);const weight=selected?Math.round(Number(selected.weight)*100):0;
    return '<label class="l3-factor-pick"><input type="checkbox" class="l3-factor-check" data-exp="'+e(f.experiment_id)+'"'+(selected?' checked':'')+' />'+
     '<span><div class="l3-factor-name">'+e(f.factor_name||'未命名因子')+' · v'+e(f.factor_version||'—')+'</div>'+
-    '<div class="l3-factor-evidence">H'+state.screenHorizon+' Rank IC '+e(evidence(f.rank_ic_mean))+' · ICIR '+e(evidence(f.icir_unannualized))+' · 覆盖 '+pct(f.label_pair_coverage,0)+'</div></span>'+
+    '<div class="l3-factor-evidence">H'+state.screenHorizon+' Rank IC '+e(evidence(f.rank_ic_mean))+' · ICIR '+e(evidence(f.icir_unannualized))+' · 覆盖 '+pct(f.label_pair_coverage,0)+' · '+n(f.symbol_count,0)+' 证券 · '+e(f.universe_version||'未知股票池')+'</div></span>'+
     '<input type="number" class="l3-factor-weight" min="0" max="100" step="1" value="'+weight+'" aria-label="'+e(f.factor_name)+' 权重百分比" /></label>';
  }).join(''):empty('暂无已完成的因子实验','先到因子实验室创建并完成真实历史研究。');
  const activeInfo=active?'<div class="l3-active-factors">'+(active.factors||[]).map(x=>'<span class="l3-factor-chip">'+e(x.factor_name)+' '+pct(x.weight,0)+'</span>').join('')+'</div>':
