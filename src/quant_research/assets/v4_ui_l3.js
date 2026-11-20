@@ -156,7 +156,8 @@ function validation(data){
 }
 
 pages.screen=async()=>{
- const r=await settle('/api/v1/l3/overview?horizon='+encodeURIComponent(state.screenHorizon)+'&limit=20');
+ const section=state.l3Tab==='strategy'?'strategy':state.l3Tab==='validation'?'validation':'today';
+ const r=await settle('/api/v1/l3/overview?horizon='+encodeURIComponent(state.screenHorizon)+'&limit=20&section='+encodeURIComponent(section));
  if(!r.ok){
    const content=heading('个股 Alpha','自定义因子 → 组合 → 每日横截面选股 → H1/H3/H5 条件预测',
      link('/studio#lab','因子实验室'))+tabs()+(r.pending?moduleLoading('L3 Alpha'):empty('L3 数据暂不可用',String(r.error?.message||'研究证据尚未形成')));
