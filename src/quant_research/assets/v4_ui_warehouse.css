@@ -135,3 +135,42 @@
 .wh-attention-mark{background:#c88b2b}.wh-attention-mark.high{background:#d54a59}
 .wh-source-key,.wh-source-foot{color:#81909f}.wh-run{border-bottom-color:#e0e6ec}.wh-run>div:first-child b{color:#263d52}.wh-run>div:first-child small,.wh-run-tasks>span{color:#718294}
 .wh-maintenance-banner{background:#fff;border-color:#d2dce6}.wh-maintenance-banner b{color:#20364a}.wh-maintenance-banner span{color:#66798b}
+
+/* Modern Research UI: warehouse restrained outline skin. */
+.wh-registry-line{
+ background:#fff;border:1px solid #d9dee5;border-radius:8px;box-shadow:none
+}
+.wh-section-title b{color:#1d2939}.wh-section-title>span{color:#98a2b3}
+.wh-asset-filters input,.wh-asset-filters select,.wh-preview-filter input{
+ background:#fff;border-color:#d0d5dd;border-radius:7px;color:#344054
+}
+.wh-asset-row{
+ border-radius:7px;color:#344054
+}
+.wh-asset-row:hover{background:#fafbfc;border-color:#e4e7ec}
+.wh-asset-row.active{
+ background:#eef4ff;border-color:#c9d8ff;box-shadow:inset 2px 0 #2f6fed
+}
+.wh-asset-main b{color:#1d2939}.wh-asset-main small,.wh-asset-meta small,.wh-asset-state small{color:#98a2b3}
+.wh-system-tags em{
+ background:#f9fafb;border:1px solid #e4e7ec;color:#667085;border-radius:5px
+}
+.wh-detail-name{color:#101828}.wh-detail-sub{color:#98a2b3}
+.wh-tabs{border-color:#e4e7ec}
+.wh-tab{color:#667085}.wh-tab.active{color:#101828;border-bottom-color:#2f6fed}
+.wh-detail-cell{border-bottom-color:#eaecf0}.wh-detail-cell small{color:#667085}.wh-detail-cell b{color:#1d2939}
+.wh-reason{
+ background:#fafbfc;border:1px solid #e4e7ec;border-radius:7px
+}
+.wh-policy-note{
+ background:#fffaeb;border-left-color:#d6aa62;color:#7a4d0b
+}
+.wh-table th{
+ background:#f8f9fb!important;color:#667085!important;border-bottom-color:#d9dee5!important
+}
+.wh-table td{color:#1d2939!important;border-bottom-color:#eaecf0!important}
+.wh-attention-item{border-bottom-color:#eaecf0}
+.wh-attention-copy b{color:#1d2939}.wh-attention-copy span{color:#667085}.wh-attention-copy small{color:#98a2b3}
+.wh-maintenance-banner{
+ background:#fff;border:1px solid #d9dee5;border-radius:8px;box-shadow:none
+}
