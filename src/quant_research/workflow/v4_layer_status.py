@@ -148,6 +148,11 @@ def four_layer_status(root: Path, *, asof: str | None = None,
             or not l3_forecast_matches_daily
         )
     )
+    l3_forward_consistent_with_daily = bool(
+        l3_record and (
+            l3_daily_record is None or l3_forecast_matches_daily
+        )
+    )
     l3 = {
         "status": (
             l3_daily_record.get("status") if l3_primary_daily
@@ -173,7 +178,7 @@ def four_layer_status(root: Path, *, asof: str | None = None,
             else l3_record.get("source_snapshot_sha256") if l3_record else None
         ),
         "prospective_forward_research": bool(
-            l3_record and l3_forecast_matches_daily
+            l3_forward_consistent_with_daily
             and l3_record.get("status") == "VERIFIED_LOCAL_FORWARD_RESEARCH_ONLY"
         ),
         "style_input_binding_verified": bool(
