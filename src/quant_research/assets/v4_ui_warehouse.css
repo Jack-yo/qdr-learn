@@ -115,3 +115,23 @@
  .wh-attention-item>.badge{grid-column:2;justify-self:start}
  .wh-run{grid-template-columns:minmax(0,1fr) auto}
 }
+
+/* Contrast pass: warehouse hierarchy only; layout/components unchanged. */
+.wh-registry-line{background:#fff;border-color:#d2dce6}.wh-registry-line b{color:#21364a}.wh-registry-line span{color:#66798b}
+.wh-section-title b{color:#20364a}.wh-section-title>span{color:#7d8c9b}
+.wh-asset-filters input,.wh-asset-filters select,.wh-preview-filter input{background:#fff;border-color:#c8d5e0;color:#2a4054}
+.wh-asset-row{color:#2d4357}.wh-asset-row:hover{background:#f5f8fa;border-color:#d1dbe4}
+.wh-asset-row.active{background:#eaf1f7;border-color:#9fb5c8;box-shadow:inset 3px 0 #356f9c}
+.wh-asset-main b{color:#20364a}.wh-asset-main small,.wh-asset-meta small,.wh-asset-state small{color:#7f8f9f}
+.wh-asset-meta b{color:#29445d;font-weight:700}
+.wh-system-tags em{background:#eef3f7;border-color:#d5dee7;color:#5d7184}
+.wh-detail-name{color:#172b40}.wh-detail-sub{color:#7c8b9a}
+.wh-tabs{border-color:#d4dde7}.wh-tab{color:#6b7d8f}.wh-tab.active{color:#214f77;border-bottom-color:#356f9c}
+.wh-detail-cell{border-color:#e0e6ec}.wh-detail-cell small{color:#728496}.wh-detail-cell b{color:#263d52}
+.wh-reason{background:#f7f9fb;border-color:#d5dee7}.wh-reason b{color:#617487}.wh-reason span{color:#31485d}
+.wh-policy-note{background:#fff8eb;border-left-color:#d6aa62;color:#755724}
+.wh-table th{background:#eef3f7;color:#52687b;border-bottom-color:#cfd9e2;font-weight:650}.wh-table td{color:#304559;border-bottom-color:#e1e7ed}
+.wh-attention-item{border-bottom-color:#e0e6ec}.wh-attention-copy b{color:#24394d}.wh-attention-copy span{color:#65788a}.wh-attention-copy small{color:#8997a6}
+.wh-attention-mark{background:#c88b2b}.wh-attention-mark.high{background:#d54a59}
+.wh-source-key,.wh-source-foot{color:#81909f}.wh-run{border-bottom-color:#e0e6ec}.wh-run>div:first-child b{color:#263d52}.wh-run>div:first-child small,.wh-run-tasks>span{color:#718294}
+.wh-maintenance-banner{background:#fff;border-color:#d2dce6}.wh-maintenance-banner b{color:#20364a}.wh-maintenance-banner span{color:#66798b}
