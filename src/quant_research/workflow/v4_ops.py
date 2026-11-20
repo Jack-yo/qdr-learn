@@ -145,9 +145,24 @@ def run_observed_v4_daily(root: Path, session_date: str, *, symbols=None) -> dic
     parsed=yaml.safe_load(config.read_text(encoding='utf-8'))
     from quant_research.models.v4_oos import OOSProtocol
     OOSProtocol(**parsed['oos'])
-    return run_v4_daily(root,session_date,source_snapshot_sha256=snapshot,
+    result=run_v4_daily(root,session_date,source_snapshot_sha256=snapshot,
                         protocol_sha256=sha256(config.read_bytes()).hexdigest(),
                         adapters=observed_v4_adapters(root,readiness))
+    try:
+        from quant_research.workflow.l3_current_factors import build_current_factor_snapshot
+        from quant_research.workflow.l3_daily import freeze_l3_current
+        factor_snapshot=build_current_factor_snapshot(root,session_date=session_date)
+        l3_alpha=freeze_l3_current(
+            root,session_date=session_date,
+            factor_snapshot_identity=factor_snapshot['manifest']['identity'])
+    except (Exception,) as exc:
+        # L3 Alpha-only research is additive to the existing daily observation.
+        # It must never promote or hide the independently computed V4 stage result.
+        l3_alpha={'status':'L3_CURRENT_ALPHA_NOT_FROZEN',
+                  'code':getattr(exc,'code',None) or type(exc).__name__,
+                  'session_date_et':session_date,
+                  'real_orders_enabled':False}
+    return {**result,'l3_alpha':l3_alpha}
 
 
 def run_v4_pipeline_day(root: Path, session_date: str, *,
@@ -162,44 +177,24 @@ def run_v4_pipeline_day(root: Path, session_date: str, *,
     from quant_research.workflow.v4_pipeline_preflight import preflight_v4_day
     from quant_research.policy import PolicyError
     root=Path(root).resolve()
-    # L3 Alpha-only ranking has an independent prospective path. When a
-    # verified current factor-price audit exists, freeze it before the stricter
-    # historical-model preflight so lack of PIT model history does not erase
-    # today's observable Alpha ranking.
-    try:
-        from quant_research.workflow.l3_current_factors import build_current_factor_snapshot
-        from quant_research.workflow.l3_daily import freeze_l3_current
-        factor_snapshot=build_current_factor_snapshot(root,session_date=session_date)
-        l3_alpha=freeze_l3_current(
-            root,session_date=session_date,
-            factor_snapshot_identity=factor_snapshot['manifest']['identity'])
-    except (PolicyError,OSError,ValueError,KeyError,TypeError,FileNotFoundError) as exc:
-        l3_alpha={'status':'L3_CURRENT_ALPHA_NOT_FROZEN',
-                  'code':getattr(exc,'code',None) or str(exc)[:160] or type(exc).__name__,
-                  'session_date_et':session_date,
-                  'real_orders_enabled':False}
-
     # Validate the exchange window and independently observed warehouse source
     # BEFORE run_managed_forward can create an immutable model archive.
     try:
         admitted=preflight_v4_day(root,session_date,bundle_id)
     except (PolicyError,OSError,ValueError,KeyError,TypeError) as exc:
-        return {'status':'PREFLIGHT_BLOCKED_NO_MODEL_ARCHIVE',
+        return {'status':'PREFLIGHT_BLOCKED_NO_ARCHIVE_WRITE',
                 'code':getattr(exc,'code',None) or str(exc)[:160] or type(exc).__name__,
                 'session_date_et':session_date,
-                'l3_alpha':l3_alpha,
                 'real_orders_enabled':False,'paper_ledger_advanced':False}
-    if l3_alpha.get('status') not in {
-            'FROZEN_L3_DAILY_ALPHA_RESEARCH_ONLY','L3_DAILY_ALPHA_ALREADY_FROZEN'}:
-        try:
-            from quant_research.workflow.l3_daily import freeze_l3_daily
-            l3_alpha=freeze_l3_daily(
-                root,session_date=session_date,bundle_id=bundle_id,admitted=admitted)
-        except (PolicyError,OSError,ValueError,KeyError,TypeError,FileNotFoundError) as exc:
-            l3_alpha={'status':'L3_DAILY_ALPHA_NOT_FROZEN',
-                      'code':getattr(exc,'code',None) or str(exc)[:160] or type(exc).__name__,
-                      'session_date_et':session_date,
-                      'real_orders_enabled':False}
+    try:
+        from quant_research.workflow.l3_daily import freeze_l3_daily
+        l3_alpha=freeze_l3_daily(
+            root,session_date=session_date,bundle_id=bundle_id,admitted=admitted)
+    except (PolicyError,OSError,ValueError,KeyError,TypeError,FileNotFoundError) as exc:
+        l3_alpha={'status':'L3_DAILY_ALPHA_NOT_FROZEN',
+                  'code':getattr(exc,'code',None) or str(exc)[:160] or type(exc).__name__,
+                  'session_date_et':session_date,
+                  'real_orders_enabled':False}
     try:
         plan=run_v4_review_day(root,bundle_id=bundle_id,asof_session=session_date,
                                research_budget=research_budget)
