@@ -129,20 +129,51 @@ def four_layer_status(root: Path, *, asof: str | None = None,
         l3_record = _latest_not_after(l3_records, target_asof)
     except (OSError, ValueError, KeyError, TypeError):
         l3_record = None
+    try:
+        from quant_research.workflow.l3_daily import latest_l3_daily
+        l3_daily_record = _latest_not_after(latest_l3_daily(root, limit=30), target_asof)
+    except (OSError, ValueError, KeyError, TypeError):
+        l3_daily_record = None
+    l3_forecast_matches_daily = bool(
+        l3_record and l3_daily_record
+        and l3_record.get("session_date_et") == l3_daily_record.get("session_date_et")
+        and l3_record.get("source_snapshot_sha256")
+            == l3_daily_record.get("source_snapshot_sha256")
+    )
+    l3_primary_daily = bool(
+        l3_daily_record and (
+            not l3_record
+            or str(l3_daily_record.get("session_date_et"))
+                > str(l3_record.get("session_date_et"))
+            or not l3_forecast_matches_daily
+        )
+    )
     l3 = {
         "status": (
-            l3_record.get("status") if l3_record
+            l3_daily_record.get("status") if l3_primary_daily
+            else l3_record.get("status") if l3_record
             else "BLOCKED"
         ),
-        "code": None if l3_record else "NO_L3_FORWARD_RESEARCH_ARCHIVE",
-        "asof_session": l3_record.get("session_date_et") if l3_record else target_asof,
+        "code": (
+            "ALPHA_RANK_FROZEN_NO_MATCHED_FORWARD_MODEL" if l3_primary_daily
+            else None if l3_record else "NO_L3_ALPHA_OR_FORWARD_RESEARCH_ARCHIVE"
+        ),
+        "asof_session": (
+            l3_daily_record.get("session_date_et") if l3_primary_daily
+            else l3_record.get("session_date_et") if l3_record else target_asof
+        ),
+        "daily_alpha_identity": l3_daily_record.get("identity") if l3_daily_record else None,
+        "alpha_score_rows": l3_daily_record.get("complete_alpha_score_count") if l3_daily_record else 0,
+        "alpha_rank_frozen": bool(l3_daily_record),
+        "alpha_input_kind": l3_daily_record.get("input_kind") if l3_daily_record else None,
         "forecast_identity": l3_record.get("identity") if l3_record else None,
         "forecast_rows": l3_record.get("forecast_rows") if l3_record else 0,
         "source_snapshot_sha256": (
-            l3_record.get("source_snapshot_sha256") if l3_record else None
+            l3_daily_record.get("source_snapshot_sha256") if l3_primary_daily
+            else l3_record.get("source_snapshot_sha256") if l3_record else None
         ),
         "prospective_forward_research": bool(
-            l3_record
+            l3_record and l3_forecast_matches_daily
             and l3_record.get("status") == "VERIFIED_LOCAL_FORWARD_RESEARCH_ONLY"
         ),
         "style_input_binding_verified": bool(
