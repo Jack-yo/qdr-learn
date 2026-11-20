@@ -5,13 +5,12 @@
 const V=window.V4;
 if(!V)throw Error('V4 core must load before the approved workspace');
 const {pages,state,e,n,pct,signed,date,short,badge,button,link,card,table,empty,note,row,settle,svgLine,progress,show}=V;
-const saved={};for(const name of ['overview','market','style','lab','screen','risk'])saved[name]=pages[name];
-const view={tabs:{screen:1},strategy:null,symbol:null,labLeft:null,labRight:null,marketObs:null};
+const saved={};for(const name of ['overview','market','style','lab','risk'])saved[name]=pages[name];
+const view={tabs:{},labLeft:null,labRight:null,marketObs:null};
 const specs={
  market:['市场预测','状态识别','风险驱动','预测验证'],
  style:['风格总览','经典因子收益','ETF 代理观察','轮动与历史','领先性验证'],
  lab:['因子实验室','因子有效性','因子相关性','版本与实验记录'],
- screen:['因子组合配置','候选股票与解释','策略回测','样本外实验'],
  risk:['持仓总览','风险模型','实时预警','仓位与退出规则','交易复盘']
 };
 function layout(a,b,cls=''){return '<div class="v4-workspace-pair '+cls+'">'+a+b+'</div>';}
@@ -588,97 +587,6 @@ function candidateDetail(item){
     empty('没有可核查的分项贡献','服务端没有返回因子贡献字段。'))+
   note('因子贡献解释的是候选排序，不是个股 H3 概率或可交易预测；需要单独联接合格的 Alpha 冻结结果。');
 }
-async function screen(original){
- const a=unwrap(original.html);
- const index=await Promise.all([
-  settle('/api/v1/strategies'),settle('/api/v1/v4/plans'),
-  settle('/api/v1/backtests/verified'),settle('/api/v1/v4/research/runs')
- ]);
- const allStrategies=index[0].ok?(index[0].data.strategies||[]):[];
- const strategies=allStrategies.filter(x=>Array.isArray(x.config?.strategy?.factors)&&x.config.strategy.factors.length>=2);
- if(!strategies.some(x=>String(x.id)===view.strategy))view.strategy=strategies[0]?.id||null;
- const composite=view.strategy?await settle('/api/v1/strategies/'+encodeURIComponent(view.strategy)+'/composite'):null;
- const ranks=composite?.ok?(composite.data.latest_composite_ranking||[]):[];
- const candidate=ranks.find(x=>String(x.security_id)===view.symbol)||ranks[0]||null;
- view.symbol=candidate?.security_id||null;
- const selector='<label class="v4-field">选择已保存策略<select id="v4-workspace-strategy">'+
-  '<option value="">请选择策略</option>'+strategies.map(s=>'<option value="'+e(s.id)+'"'+
-   (String(s.id)===String(view.strategy)?' selected':'')+'>'+e(s.name)+' · v'+e(s.version)+'</option>').join('')+
-  '</select></label>';
- const activeStrategy=strategies.find(x=>String(x.id)===String(view.strategy))||null;
- const strategyFactors=Array.isArray(activeStrategy?.config?.strategy?.factors)?
-   activeStrategy.config.strategy.factors:[];
- const groupNames=[['A','超跌程度'],['B','卖压衰竭'],['C','重新转强']];
- const groups=groupNames.map(([key,label])=>{
-  const members=strategyFactors.filter(x=>String(x.group||'').toUpperCase()===key);
-  const weight=members.length&&members.every(x=>actual(x.weight))?members.reduce((v,x)=>v+Number(x.weight),0):null;
-  return '<div class="v4-strategy-group"><b>因子组 '+key+' · '+label+'</b><span>'+ (weight===null?'未配置':pct(weight))+'</span>'+
-    (members.length?members.map(x=>row(e(x.factor_experiment_id||x.factor_version_id||x.factor_id||'未归档'),actual(x.weight)?pct(x.weight):'—')).join(''):
-     '<div class="v4-muted-note">未配置真实因子版本</div>')+'</div>';
- }).join('');
- const strategySummary=box('筛选策略配置',selector+
-   (activeStrategy?table(['历史因子实验','研究组别','冻结权重'],strategyFactors.map(x=>[
-     e(x.factor_experiment_id||x.factor_version_id||x.factor_id||'未归档'),
-     e(x.group||'未归档'),actual(x.weight)?pct(x.weight):'未归档']))+
-     row('策略版本',e(activeStrategy.name)+' · v'+e(activeStrategy.version))+
-     row('原定持有期',e(activeStrategy.config?.strategy?.horizon||'—')+' 日')+
-     row('策略来源状态',e(composite?.ok?composite.data.status:'等待策略验证')):
-     note('缺少可审查的多因子策略；至少需要两个真实完成的因子实验。'))+
-   '<div class="v4-muted-note">历史股票池与基础过滤条件：'+(activeStrategy?'以已冻结配置为准':'尚未配置')+'</div>'+groups+
-   note('因子权重仅重现已冻结配置，不代表因子贡献或预测收益。'),
-   '策略条件 · 历史候选需单独验证');
- const selected=box('所选股票 · 个股因子解释',
-  '<div id="v4-stock-detail">'+candidateDetail(candidate)+'</div>',
-  '选择股票实时联动');
- const candidates=box('历史候选股票 · 因子排名',
-  (ranks.length?table(['排名','股票','行业','综合分位','超跌 A','衰竭 B','转强 C','H3 预测','状态'],candidateRows(ranks)):
-   emptyTable(['排名','股票','行业','综合分位','超跌 A','衰竭 B','转强 C','H3 预测','状态'],'尚无已验证的历史多因子排名',composite?.ok?
-    '策略没有可审查的真实横截面复合排名。':
-    strategies.length?'请核对各因子实验的共同交易日及数据来源。':'需要至少一个由两个以上已完成因子实验组成的策略。'))+
-  row('实际研究观察日',date(composite?.ok?composite.data.asof_date_et:null))+
-  note('此排名来自历史验证期的实际样本，非当日可交易股票；不自动当作 Alpha 未来收益预测。'),
-  '选择候选展示右侧因子拆解');
- const planIdx=index[1].ok?(index[1].data.records||[]):[];
- const planRow=planIdx.find(x=>x.status!=='CORRUPT_RESEARCH_PLAN')||null;
- const plan=planRow?await settle('/api/v1/v4/plans/'+encodeURIComponent(planRow.session_date_et)+'/'+encodeURIComponent(planRow.identity)):null;
- const planData=plan?.ok?plan.data:null;
- const planCard=box('H3 冻结 Alpha 预测与交易条件',
-  planData?.plans?.length?table(['证券','预期净优势','权益建议权重','冻结日'],
-    planData.plans.slice(0,25).map(x=>[
-      e(x.symbol||x.security_id),signed(x.estimated_net_edge),pct(x.indicative_weight),
-      date(planRow.session_date_et)])):
-   empty('尚无可比对的前向交易计划',
-    '必须经过独立冻结的模型预测、真实身份元数据和风控条件；不把因子分数冒充预测收益。'),
-  '独立研究计划 · 不等于模拟成交');
- const backtests=index[2].ok?(index[2].data.results||index[2].data.runs||[]):[];
- const backtestCard=box('策略模拟回测 · 样本外成本后表现',
-  backtests.length?table(['运行版本','验证状态'],backtests.slice(0,20).map(x=>[
-   short(x.run_id||x.id,22),e(x.status||'—')])):
-   emptyStats(['净收益','最大回撤','Rank IC'])+emptyChart('尚无严格回测收益曲线',
-    '缺历史 PIT 证券身份、公司行为、原始成交价格或交易成本。'),
-  '可用性与证据分开');
- const panels=[
-   stack(a.take('因子组合配置'),a.take('已保存策略与候选解释')),
-   stack(aside(strategySummary,stack(a.hero,candidates,
-     layout(selected,backtestCard,'v4-stock-master-detail'))),planCard),
-   stack(layout(backtestCard,a.take('严格回测与前向冻结记录'))),
-   stack(a.take('样本外预测'),a.take('冻结预测的后续结果复盘'))
- ];
- return {html:panelHtml('screen',a.heading,panels),
- mount(){
-  document.getElementById('v4-workspace-strategy')?.addEventListener('change',ev=>{
-   view.strategy=ev.target.value||null;view.symbol=null;view.tabs.screen=1;show('screen');
-  });
-  for(const pick of document.querySelectorAll('[data-v4-stock]'))pick.addEventListener('click',()=>{
-   const chosen=ranks[Number(pick.dataset.v4Stock)];
-   if(!chosen)return;
-   view.symbol=String(chosen.security_id);
-   document.querySelectorAll('[data-v4-stock]').forEach(x=>x.classList.toggle('v4-stock-selected',x===pick));
-   const target=document.getElementById('v4-stock-detail');
-   if(target)target.innerHTML=candidateDetail(chosen);
-  });
- }};
-}
 async function risk(original){
  const a=unwrap(original.html);
  const [plans,outcomes,accountResult,riskResult,timelineResult]=await Promise.all([
@@ -751,7 +659,7 @@ async function risk(original){
  ];
  return {html:panelHtml('risk',a.heading,panels)};
 }
-const generators={overview,market,style,lab,screen,risk};
+const generators={overview,market,style,lab,risk};
 for(const name of Object.keys(generators)){
  pages[name]=async()=>{
   const initial=await saved[name]();
