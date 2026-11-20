@@ -644,3 +644,47 @@ label{color:#576d83}
 .lv3-monitor-health{border-color:#dce5ef;color:#425971}
 .lv3-monitor-health-list>div{background:#fff;border-color:#dce5ef}
 .lv3-monitor-health-list small{color:#7589a1}
+
+/* QDR contrast pass: hierarchy only; geometry/components unchanged. */
+:root{
+ --bg:#f3f6fa;--side:#ffffff;--panel:#ffffff;--panel2:#f7f9fc;--panel3:#eef3f8;
+ --line:#d4dde7;--txt:#1b2b3d;--muted:#607386;--faint:#8997a6;
+ --blue:#2f67a1;--teal:#0a846c;--amber:#a66d18;--red:#d54a59;--green:#0a8b68;
+ --rise:#0a8b68;--fall:#d54a59;--flat:#5b7595
+}
+html[data-change-palette="red-up"]{--rise:#d54a59;--fall:#0a8b68}
+html,body,.app{background:#f3f6fa}
+.content{background:#f3f6fa}
+aside{background:#fff;border-color:#d7e0e9;box-shadow:2px 0 12px #10223508}
+.topbar{background:#fff;border-color:#d7e0e9}
+.brand{border-color:#dfe6ed}.brandname{color:#172b40}.brandsub,.nav small{color:#7a8b9c}
+.side-section{color:#8998a7}.nav{color:#41566b}.nav-symbol{color:#74879a}
+.nav:hover,.sub-nav:hover{background:#f1f5f9;color:#1d344b}
+.nav.active{background:#e9f1f9;color:#1f4f78;border-color:#c8d7e5;box-shadow:inset 3px 0 #356f9c}
+.sub-nav{color:#53697d}.sub-nav.active{background:#edf3f8;color:#244e73}
+.sidefoot{background:#f7f9fc;border-color:#d9e2eb}
+.top-label{color:#263c52}.top-status{color:#4e6478}.top-status span{border-color:#dce4ec}
+.status-pill{background:#f2f5f8;border-color:#d3dde7;color:#556b7f}
+.title{color:#17283b;font-weight:760}.subtitle{color:#697c8f}
+.btn{background:#fff;border-color:#c9d5e0;color:#334a5f}.btn:hover{background:#f4f7fa;border-color:#aebfce}
+.btn.primary{background:#2f67a1;border-color:#2f67a1;color:#fff}.btn.teal{background:#0a846c;border-color:#0a846c;color:#fff}
+.card{background:#fff;border-color:#d4dde7;box-shadow:0 2px 8px #172b4010}
+.ctitle{color:#24384b}.ctitle span{color:#7d8c9b}
+.kpi{background:#fff;border-color:#d4dde7}.klabel{color:#617487}.kval{color:#172b40}.knote{color:#8997a6}
+.table th{background:#eef3f7;color:#52687b;border-bottom-color:#cfd9e2;font-weight:650}
+.table td{color:#304559;border-bottom-color:#e1e7ed}
+.table tr:hover td{background:#f7f9fb}.table tr.selected td{background:#eaf1f7;color:#20384f}
+.table .sym{color:#182f45;font-weight:760}
+input,select,textarea,.input{background:#fff;border-color:#cbd7e2;color:#2a4054}
+input:focus,select:focus,textarea:focus{border-color:#7fa1bd;box-shadow:0 0 0 2px #7fa1bd1f}
+label,.boxlabel{color:#52677a}
+.badge.green{background:#e8f5ef;color:#08775a}.badge.red{background:#fdecef;color:#c83d4e}
+.badge.amber{background:#fff4e5;color:#94631d}.badge.blue,.badge.purple{background:#edf3f8;color:#2f628f}
+.v4-subtabs,.tabs{border-color:#d8e1e9}.v4-subtab,.tab{color:#6c7e90}
+.v4-subtab.active,.v4-subtab[aria-selected="true"],.tab.sel{color:#234f77;border-color:#356f9c}
+.v4-link{background:#fff;border-color:#cbd7e2;color:#345f84}
+.v4-empty{background:#f8fafc;border-color:#cfd9e2;color:#758596}.v4-empty b{color:#31485d}
+.v4-muted-note,.fine,.hint{color:#718294}
+.v4-message,.notice{border-color:#e7d3ac;background:#fff8eb;color:#875e20}
+.progress{background:#e7edf3}.progress>div{background:linear-gradient(90deg,#4f7fa8,#2f9a7e)}
+.green{color:var(--rise)}.red{color:var(--fall)}.amber{color:#a66d18}.blue{color:#2f67a1}
