@@ -1,8 +1,11 @@
-"""Immutable daily L3 Alpha ranking snapshot.
+"""Immutable daily L3 Alpha ranking snapshots.
 
-The snapshot binds one explicitly active frozen multi-factor strategy to one
-source-hashed V4 bundle and one completed XNYS session. It records cross-sectional
-Alpha ranks only; it does not contain future outcomes, orders, or execution status.
+Two admitted inputs are supported:
+1) a strict V4 source-hashed model bundle; or
+2) an audited current-session L3 factor snapshot.
+
+Both produce the same write-once Alpha ranking contract. Neither path creates
+future-return labels, orders, paper fills, or execution eligibility.
 """
 from __future__ import annotations
 
@@ -52,7 +55,62 @@ def _location(root, day, identity):
     return base, folder
 
 
-def _identity(day, strategy, manifest):
+def _active(root):
+    activation = active_strategy(root)
+    strategy = activation.get("strategy")
+    if strategy is None:
+        raise PolicyError(
+            "NO_ACTIVE_ALPHA_STRATEGY",
+            "Activate a frozen multi-factor strategy before the daily L3 run",
+        )
+    if not strategy["config"].get("factor_mix"):
+        raise PolicyError(
+            "L3_MULTI_FACTOR_STRATEGY_REQUIRED",
+            "Daily L3 requires a frozen 2–8 factor strategy",
+        )
+    return strategy
+
+
+def _factor_names(strategy):
+    allocations = strategy["config"]["factor_mix"].get("allocations") or []
+    names = [(row.get("dependency") or {}).get("factor_name") for row in allocations]
+    if not names or any(not name for name in names) or len(set(names)) != len(names):
+        raise PolicyError("L3_ACTIVE_FACTOR_NAMES_INVALID",
+                          "Active strategy factor names are incomplete or duplicated")
+    return names, allocations
+
+
+def _score_frames(strategy, frames, session_date):
+    scores, factor_names = _daily_scores(strategy, frames, session_date)
+    if scores.empty:
+        raise PolicyError(
+            "NO_COMPLETE_CURRENT_ALPHA_SCORES",
+            "No security has the complete active factor set for the current session",
+        )
+    metadata = frames.get("candidate_meta")
+    if metadata is not None and not metadata.empty:
+        meta = metadata.copy()
+        if "date" in meta:
+            meta["date"] = pd.to_datetime(meta["date"], errors="raise")
+            meta = meta.loc[meta.date.eq(pd.Timestamp(session_date))]
+        if meta.duplicated("security_id").any():
+            raise PolicyError(
+                "L3_CANDIDATE_METADATA_DUPLICATED",
+                "Current candidate metadata contains duplicate security identities",
+            )
+        keep = [
+            name for name in (
+                "security_id", "symbol", "sector", "reference_close",
+                "atr20", "adv20", "available_at"
+            ) if name in meta
+        ]
+        scores = scores.merge(
+            meta[keep], on="security_id", how="left", validate="one_to_one"
+        )
+    return scores, factor_names
+
+
+def _identity(day, strategy, manifest, input_kind, input_id):
     value = {
         "schema": _SCHEMA,
         "session_date_et": day,
@@ -60,70 +118,42 @@ def _identity(day, strategy, manifest):
         "strategy_config_sha256": strategy["config_sha256"],
         "source_snapshot_sha256": manifest["source_snapshot_sha256"],
         "input_artifacts_sha256": manifest["artifacts_sha256"],
+        "input_kind": input_kind,
+        "input_id": input_id,
     }
     return sha256(_canonical(value).encode()).hexdigest()[:16]
 
 
-def freeze_l3_daily(root, *, session_date, bundle_id, admitted=None):
-    root = Path(root).resolve()
-    evidence = admitted or preflight_v4_day(root, session_date, bundle_id)
-    if evidence.get("status") != "PREFLIGHT_SOURCE_AND_TIME_MATCH_RESEARCH_ONLY":
-        raise PolicyError("L3_DAILY_PREFLIGHT_REQUIRED",
-                          "L3 daily Alpha may only freeze after current source/time/cohort preflight")
-    activation = active_strategy(root)
-    strategy = activation.get("strategy")
-    if strategy is None:
-        raise PolicyError("NO_ACTIVE_ALPHA_STRATEGY",
-                          "Activate a frozen multi-factor strategy before the daily L3 run")
-    if not strategy["config"].get("factor_mix"):
-        raise PolicyError("L3_MULTI_FACTOR_STRATEGY_REQUIRED",
-                          "Daily L3 requires a frozen 2–8 factor strategy")
-
-    frames, manifest = _checked_inputs(root, bundle_id)
-    if (manifest.get("source_snapshot_sha256") != evidence.get("source_snapshot_sha256")
-            or manifest.get("artifacts_sha256") is None):
+def _freeze(root, *, session_date, strategy, frames, input_manifest,
+            input_kind, input_id):
+    factor_names_expected, allocations = _factor_names(strategy)
+    input_names = input_manifest.get("factor_names") or []
+    if set(factor_names_expected) != set(input_names):
+        raise PolicyError(
+            "ACTIVE_STRATEGY_FORECAST_FACTOR_SET_MISMATCH",
+            "The active factor strategy does not exactly match the current factor input",
+        )
+    artifacts = input_manifest.get("artifacts_sha256")
+    source_sha = input_manifest.get("source_snapshot_sha256")
+    if not isinstance(artifacts, dict) or not artifacts or not isinstance(source_sha, str):
         raise PolicyError("L3_DAILY_SOURCE_MISMATCH",
-                          "The Alpha bundle differs from the admitted source snapshot")
+                          "Current Alpha input lacks source-hashed artifacts")
 
-    allocations = strategy["config"]["factor_mix"].get("allocations") or []
-    strategy_names = [(row.get("dependency") or {}).get("factor_name")
-                      for row in allocations]
-    bundle_names = manifest.get("factor_names") or []
-    if (not strategy_names or any(not name for name in strategy_names)
-            or len(set(strategy_names)) != len(strategy_names)
-            or set(strategy_names) != set(bundle_names)):
-        raise PolicyError("ACTIVE_STRATEGY_FORECAST_FACTOR_SET_MISMATCH",
-                          "The active factor strategy does not exactly match the current V4 factor bundle")
-
-    scores, factor_names = _daily_scores(strategy, frames, session_date)
-    if scores.empty:
-        raise PolicyError("NO_COMPLETE_CURRENT_ALPHA_SCORES",
-                          "No security has the complete active factor set for the current session")
-    metadata = frames.get("candidate_meta")
-    if metadata is not None and not metadata.empty:
-        meta = metadata.copy()
-        meta["date"] = pd.to_datetime(meta["date"], errors="raise")
-        meta = meta.loc[meta.date.eq(pd.Timestamp(session_date))]
-        if meta.duplicated("security_id").any():
-            raise PolicyError("L3_CANDIDATE_METADATA_DUPLICATED",
-                              "Current candidate metadata contains duplicate security identities")
-        keep = [name for name in ("security_id","symbol","sector",
-                                  "reference_close","atr20","adv20","available_at")
-                if name in meta]
-        scores = scores.merge(meta[keep], on="security_id", how="left",
-                              validate="one_to_one")
-
-    identity = _identity(session_date, strategy, manifest)
-    base, folder = _location(root, session_date, identity)
+    scores, factor_names = _score_frames(strategy, frames, session_date)
+    identity = _identity(
+        session_date, strategy, input_manifest, input_kind, input_id
+    )
+    _, folder = _location(root, session_date, identity)
     if folder.is_dir():
         return {
             **read_l3_daily(root, session_date, identity, include_scores=False),
             "status": "L3_DAILY_ALPHA_ALREADY_FROZEN",
         }
 
-    base_dir = folder.parent
-    base_dir.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix=".writing-", dir=base_dir) as temporary:
+    folder.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix=".writing-", dir=folder.parent
+    ) as temporary:
         work = Path(temporary)
         scores_path = work / "scores.parquet"
         scores.to_parquet(scores_path, index=False)
@@ -136,9 +166,14 @@ def freeze_l3_daily(root, *, session_date, bundle_id, admitted=None):
             "strategy_name": strategy["name"],
             "strategy_version": strategy["version"],
             "strategy_config_sha256": strategy["config_sha256"],
-            "bundle_id": bundle_id,
-            "source_snapshot_sha256": manifest["source_snapshot_sha256"],
-            "input_artifacts_sha256": manifest["artifacts_sha256"],
+            "input_kind": input_kind,
+            "input_id": input_id,
+            "bundle_id": input_id if input_kind == "V4_STRICT_BUNDLE" else None,
+            "factor_snapshot_identity": (
+                input_id if input_kind == "CURRENT_FACTOR_SNAPSHOT" else None
+            ),
+            "source_snapshot_sha256": source_sha,
+            "input_artifacts_sha256": artifacts,
             "factor_names": factor_names,
             "factor_weights": {
                 (row.get("dependency") or {}).get("factor_name"): float(row["weight"])
@@ -158,16 +193,74 @@ def freeze_l3_daily(root, *, session_date, bundle_id, admitted=None):
             "execution_eligible": False,
             "real_orders_enabled": False,
         }
-        manifest_out["content_sha256"] = sha256(_canonical(manifest_out).encode()).hexdigest()
+        manifest_out["content_sha256"] = sha256(
+            _canonical(manifest_out).encode()
+        ).hexdigest()
         (work / "manifest.json").write_text(
-            json.dumps(manifest_out, ensure_ascii=False, sort_keys=True,
-                       indent=2, allow_nan=False),
+            json.dumps(
+                manifest_out, ensure_ascii=False, sort_keys=True,
+                indent=2, allow_nan=False
+            ),
             encoding="utf-8",
         )
         if folder.exists():
             raise FileExistsError("Concurrent L3 daily archive exists")
         work.rename(folder)
     return read_l3_daily(root, session_date, identity, include_scores=False)
+
+
+def freeze_l3_daily(root, *, session_date, bundle_id, admitted=None):
+    """Freeze from the strict V4 model bundle after its independent preflight."""
+    root = Path(root).resolve()
+    evidence = admitted or preflight_v4_day(root, session_date, bundle_id)
+    if evidence.get("status") != "PREFLIGHT_SOURCE_AND_TIME_MATCH_RESEARCH_ONLY":
+        raise PolicyError(
+            "L3_DAILY_PREFLIGHT_REQUIRED",
+            "L3 daily Alpha may only freeze after current source/time/cohort preflight",
+        )
+    strategy = _active(root)
+    frames, manifest = _checked_inputs(root, bundle_id)
+    if manifest.get("source_snapshot_sha256") != evidence.get(
+        "source_snapshot_sha256"
+    ):
+        raise PolicyError(
+            "L3_DAILY_SOURCE_MISMATCH",
+            "The Alpha bundle differs from the admitted source snapshot",
+        )
+    return _freeze(
+        root, session_date=session_date, strategy=strategy, frames=frames,
+        input_manifest=manifest, input_kind="V4_STRICT_BUNDLE",
+        input_id=bundle_id,
+    )
+
+
+def freeze_l3_current(root, *, session_date, factor_snapshot_identity):
+    """Freeze Alpha-only ranking from the audited prospective current factor path."""
+    from quant_research.workflow.l3_current_factors import (
+        read_current_factor_snapshot,
+    )
+
+    root = Path(root).resolve()
+    strategy = _active(root)
+    snapshot = read_current_factor_snapshot(
+        root, session_date, factor_snapshot_identity, include_frames=True
+    )
+    manifest = snapshot["manifest"]
+    if (manifest.get("strategy_version_id") != strategy["id"]
+            or manifest.get("strategy_config_sha256") != strategy["config_sha256"]):
+        raise PolicyError(
+            "L3_FACTOR_SNAPSHOT_STRATEGY_MISMATCH",
+            "Current factor snapshot belongs to a different Alpha strategy version",
+        )
+    frames = {
+        "factors": snapshot["factors"],
+        "candidate_meta": snapshot["candidate_meta"],
+    }
+    return _freeze(
+        root, session_date=session_date, strategy=strategy, frames=frames,
+        input_manifest=manifest, input_kind="CURRENT_FACTOR_SNAPSHOT",
+        input_id=factor_snapshot_identity,
+    )
 
 
 def read_l3_daily(root, session_date, identity, *, include_scores=False):
@@ -197,7 +290,7 @@ def read_l3_daily(root, session_date, identity, *, include_scores=False):
     }
     if include_scores:
         scores = pd.read_parquet(scores_path)
-        required = {"security_id","alpha_score","alpha_rank_pct"}
+        required = {"security_id", "alpha_score", "alpha_rank_pct"}
         if required - set(scores) or scores.security_id.duplicated().any():
             raise ValueError("L3 daily Alpha score artifact is invalid")
         output["scores"] = scores
@@ -218,7 +311,9 @@ def latest_l3_daily(root, *, limit=20):
             if not folder.is_dir() or not _ID.fullmatch(folder.name):
                 continue
             try:
-                item = read_l3_daily(root, day.name, folder.name, include_scores=False)
+                item = read_l3_daily(
+                    root, day.name, folder.name, include_scores=False
+                )
                 manifest = item["manifest"]
                 records.append({
                     "session_date_et": day.name,
@@ -227,12 +322,20 @@ def latest_l3_daily(root, *, limit=20):
                     "strategy_version_id": manifest["strategy_version_id"],
                     "strategy_config_sha256": manifest["strategy_config_sha256"],
                     "source_snapshot_sha256": manifest["source_snapshot_sha256"],
-                    "bundle_id": manifest["bundle_id"],
-                    "complete_alpha_score_count": manifest["complete_alpha_score_count"],
+                    "input_kind": manifest.get("input_kind"),
+                    "input_id": manifest.get("input_id"),
+                    "bundle_id": manifest.get("bundle_id"),
+                    "factor_snapshot_identity": manifest.get(
+                        "factor_snapshot_identity"
+                    ),
+                    "complete_alpha_score_count": manifest[
+                        "complete_alpha_score_count"
+                    ],
                 })
             except (OSError, ValueError, KeyError, TypeError, FileNotFoundError):
                 records.append({
-                    "session_date_et": day.name, "identity": folder.name,
+                    "session_date_et": day.name,
+                    "identity": folder.name,
                     "status": "CORRUPT_L3_DAILY_ALPHA_ARCHIVE",
                 })
             if len(records) >= limit:
