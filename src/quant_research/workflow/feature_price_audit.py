@@ -19,8 +19,14 @@ def execute(args):
     if args.offline and getattr(args, 'refresh_source_responses', False):
         raise ValueError('Offline audit cannot refresh source responses')
     cutoff = datetime.fromisoformat(args.cutoff) if args.cutoff else None
+    symbols=None
+    if getattr(args,'symbols',None):
+        symbols=[item.strip().upper() for item in args.symbols.split(',') if item.strip()]
+        if len(symbols)!=len(set(symbols)) or 'SPY' not in symbols:
+            raise ValueError('Explicit L3 feature universe must contain unique symbols including SPY')
     raw_root = args.data_dir/'raw'
-    bundle = load_real_bundle(args.db, asof=args.asof, cutoff=cutoff, start=args.start, raw_root=raw_root)
+    bundle = load_real_bundle(args.db, asof=args.asof, cutoff=cutoff, start=args.start,
+                              symbols=symbols, raw_root=raw_root)
     bundle.require('observation')
     meta = bundle.metadata
     http = HttpCache(raw_root, offline=args.offline,
@@ -35,7 +41,8 @@ def execute(args):
                 http.get(url, headers=issuer_headers(url,http.offline))
             except (DataUnavailable,FileNotFoundError) as exc:
                 issuer_fetch_errors.append({'url':url,'code':getattr(exc,'code','OFFLINE_CACHE_MISSING')})
-    bundle = load_real_bundle(args.db, asof=meta['asof_date_et'], cutoff=cutoff, start=args.start, raw_root=raw_root)
+    bundle = load_real_bundle(args.db, asof=meta['asof_date_et'], cutoff=cutoff, start=args.start,
+                              symbols=symbols, raw_root=raw_root)
     if any(pd.Timestamp(p['retrieved_at_utc']) > pd.Timestamp(bundle.metadata['knowledge_cutoff_utc']) for p in pages):
         from quant_research.policy import PolicyError
         raise PolicyError('REFERENCE_AFTER_CUTOFF', 'Split reference was observed after the knowledge cutoff')
