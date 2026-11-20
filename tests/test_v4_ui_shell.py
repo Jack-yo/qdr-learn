@@ -63,7 +63,7 @@ def test_research_readiness_workspace_is_separate_from_data_warehouse():
     shell=SHELL.read_text(encoding='utf-8')
     source=(APP/'assets'/'v4_ui_pages_c.js').read_text(encoding='utf-8')
     assert '>研究准入<' in shell
-    assert 'PIT · 回测 · 前向研究' in shell
+    assert '数据 · 回测 · 验证' in shell
     start=source.index('pages.data=async()=>{')
     page=source[start:]
     assert "settle('/api/v1/research/readiness')" in page
@@ -73,6 +73,21 @@ def test_research_readiness_workspace_is_separate_from_data_warehouse():
     for heading in ('研究准入与资格','历史数据与 PIT 准入',
                     '严格回测准入','前向研究准入','当前阻断与下一步'):
         assert heading in page
+
+
+def test_loading_states_use_shared_rolling_icon():
+    core=(APP/'assets'/CORE).read_text(encoding='utf-8')
+    light=(APP/'assets'/'v4_ui_light.css').read_text(encoding='utf-8')
+    l2=(APP/'assets'/'v4_ui_l2.js').read_text(encoding='utf-8')
+    alpha=(APP/'assets'/'v4_ui_pages_b.js').read_text(encoding='utf-8')
+    assert 'v4-loading-icon' in core
+    assert 'v4-page-loading' in core
+    assert 'v4-skeleton-block' not in core
+    assert '正在加载' not in core
+    assert '@keyframes v4-loading-spin' in light
+    assert "moduleLoading(title)" in l2
+    assert "moduleLoading('因子预览')" in alpha
+    assert '正在读取真实价格计算' not in alpha
 
 
 def test_server_default_entry_and_legacy_tools():
