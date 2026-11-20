@@ -57,6 +57,52 @@ def test_four_layer_status_is_fail_closed_and_never_execution_eligible(
     assert result["real_orders_enabled"] is False
 
 
+def test_alpha_only_daily_rank_is_visible_but_does_not_fake_forward_admission(
+    tmp_path, monkeypatch
+):
+    from quant_research.workflow import l3_daily
+    monkeypatch.setattr(
+        v4_layer_status,
+        "market_overview_for_api",
+        lambda root, horizon, asof=None: {
+            "status":"MODEL_OOS_ADMITTED","asof_session":"2026-01-30",
+            "model_version":"l1","model_admitted":True,
+            "forecast":{"expected_return":0.001},
+        },
+    )
+    monkeypatch.setattr(
+        v4_layer_status,
+        "build_downstream_context",
+        lambda root, asof=None: {
+            "status":"RESEARCH_ONLY","asof_session":"2026-01-30",
+            "admitted_units":0,"l3_style_context_available":False,
+        },
+    )
+    monkeypatch.setattr(v4_layer_status,"latest_forward_research",
+                        lambda root,limit=20:[])
+    monkeypatch.setattr(
+        l3_daily,"latest_l3_daily",
+        lambda root,limit=30:[{
+            "session_date_et":"2026-01-30","identity":"alpha-only",
+            "status":"FROZEN_L3_DAILY_ALPHA_RESEARCH_ONLY",
+            "source_snapshot_sha256":"a"*64,
+            "input_kind":"CURRENT_FACTOR_SNAPSHOT",
+            "complete_alpha_score_count":37,
+        }],
+    )
+    monkeypatch.setattr(v4_layer_status,"latest_indicative_reviews",
+                        lambda root,limit=30:{"records":[]})
+    result=v4_layer_status.four_layer_status(
+        tmp_path,asof="2026-01-30",horizon=3)
+    l3=result["layers"]["l3_alpha"]
+    assert l3["status"]=="FROZEN_L3_DAILY_ALPHA_RESEARCH_ONLY"
+    assert l3["alpha_rank_frozen"] is True
+    assert l3["alpha_score_rows"]==37
+    assert l3["forecast_identity"] is None
+    assert "L3_FORWARD_RESEARCH_MISSING" in result["blockers"]
+    assert result["complete_four_layer_context"] is False
+
+
 def test_four_layer_status_never_uses_future_l3_or_l4_artifacts(
     tmp_path, monkeypatch
 ):
