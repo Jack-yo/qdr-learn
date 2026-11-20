@@ -14,6 +14,7 @@ from pathlib import Path
 import yaml
 
 from quant_research.workflow.v4_daily import run_v4_daily
+from quant_research.policy import PolicyError
 from quant_research.workflow.research_readiness import research_readiness
 
 
@@ -167,7 +168,7 @@ def run_observed_v4_daily(root: Path, session_date: str, *, symbols=None) -> dic
         l3_alpha=freeze_l3_current(
             root,session_date=session_date,
             factor_snapshot_identity=factor_snapshot['manifest']['identity'])
-    except (OSError,ValueError,KeyError,TypeError,FileNotFoundError) as exc:
+    except (PolicyError,OSError,ValueError,KeyError,TypeError,FileNotFoundError) as exc:
         # L3 Alpha-only research is additive to the existing daily observation.
         # It must never promote or hide the independently computed V4 stage result.
         l3_alpha={'status':'L3_CURRENT_ALPHA_NOT_FROZEN',
