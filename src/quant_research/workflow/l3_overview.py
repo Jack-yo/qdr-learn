@@ -11,6 +11,7 @@ import json
 import math
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from quant_research.policy import PolicyError
@@ -155,8 +156,8 @@ def _research_model_evidence(root, factor_names, source_snapshot_sha256, horizon
             if len(matched):
                 increment_row = matched.iloc[0].to_dict()
                 if (increment_row.get("status") == "PAIRED_OOS_ESTIMATED"
-                        and increment_row.get("probability_gain_ci_excludes_zero") is True
-                        and increment_row.get("gross_mse_gain_ci_excludes_zero") is True
+                        and bool(increment_row.get("probability_gain_ci_excludes_zero"))
+                        and bool(increment_row.get("gross_mse_gain_ci_excludes_zero"))
                         and "D" in variants):
                     selected = "D"
                     selection_reason = "FULL_MODEL_PAIRED_OOS_INCREMENT_CONFIRMED"
@@ -236,7 +237,7 @@ def _daily_scores(strategy_record, frames, session_date):
         raise PolicyError("L3_CURRENT_FACTOR_KEYS_DUPLICATED",
                           "Current Alpha factors contain duplicate security/feature rows")
     current["value"] = pd.to_numeric(current["value"], errors="coerce").replace(
-        [float("inf"), float("-inf")], pd.NA
+        [np.inf, -np.inf], np.nan
     )
     wide = current.pivot(index="security_id", columns="feature_name", values="value")
     missing = set(names) - set(wide.columns)
