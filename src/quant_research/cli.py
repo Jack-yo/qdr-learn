@@ -115,6 +115,9 @@ def main(argv=None):
     l3_overview=commands.add_parser('l3-overview',help='Read the product-facing L3 Alpha overview without recomputing rankings')
     l3_overview.add_argument('--horizon',type=int,choices=[1,3,5],default=3)
     l3_overview.add_argument('--limit',type=int,default=20)
+    l3_current=commands.add_parser('l3-current',help='Freeze current audited factors and Alpha ranking without inventing a forecast')
+    l3_current.add_argument('--date',required=True)
+    l3_current.add_argument('--feature-price-run')
     maintain=commands.add_parser('maintain-data',help='Maintain classified free real datasets; never trains or trades')
     maintain.add_argument('--config',type=Path,default=Path('configs/data_maintenance.yaml'))
     maintain.add_argument('--cadence',choices=['daily','weekly'],default='daily')
@@ -249,6 +252,13 @@ def main(argv=None):
         if args.command=='l3-overview':
             from .workflow.l3_overview import l3_overview
             record=l3_overview(Path.cwd(),horizon=args.horizon,limit=args.limit)
+            print(json.dumps(record,ensure_ascii=False,allow_nan=False,default=str))
+            return 0
+        if args.command=='l3-current':
+            from .workflow.l3_current_factors import run_current_l3_day
+            record=run_current_l3_day(
+                Path.cwd(),session_date=args.date,
+                feature_run_id=args.feature_price_run)
             print(json.dumps(record,ensure_ascii=False,allow_nan=False,default=str))
             return 0
         if args.command=='style-report':
