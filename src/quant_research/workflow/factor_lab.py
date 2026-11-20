@@ -28,9 +28,9 @@ def inputs(root,source,cutoff=None,symbols=None):
     return bundle
 
 
-def preview(root,version_id,source,data_root=None):
+def preview(root,version_id,source,data_root=None,symbols=None):
     registry=Registry(root);version=registry.factor(version_id);spec=FactorSpec.model_validate(version['config'])
-    bundle=inputs(Path(data_root or root),source);clock=TradingClock()
+    bundle=inputs(Path(data_root or root),source,symbols=symbols);clock=TradingClock()
     context=make_context(bundle.prices,clock,'SPY','2017-01-01','2024-12-31')
     factor=template_factor(spec,version['config_sha256'])
     features=compute_features(context,clock,[factor],'retrospective',['SPY','HYG','LQD'])
@@ -46,7 +46,12 @@ def preview(root,version_id,source,data_root=None):
             'adjustment_basis':bundle.prices.adjustment_basis.iloc[0],'formula':factor.definition,
             'rows':json.loads(sample.to_json(orient='records',date_format='iso')),
             'research_grade':False,'execution_ready':False,'historical_decision_eligible':False,
-            'data_quality_flags':['CURRENT_VINTAGE_NOT_HISTORICAL_PIT','EXPLICIT_CURRENT_ETF_LIST','NOT_EXECUTION_LABELS']}
+            'data_quality_flags':[
+                'CURRENT_VINTAGE_NOT_HISTORICAL_PIT',
+                ('EXPLICIT_CURRENT_ETF_LIST' if set(bundle.metadata['symbols'])==set(SYMBOLS)
+                 else 'EXPLICIT_CUSTOM_SECURITY_LIST'),
+                'NOT_EXECUTION_LABELS'
+            ]}
 
 
 def run(root,experiment_id,data_root=None):
@@ -81,14 +86,20 @@ def run(root,experiment_id,data_root=None):
             frame.to_parquet(output/(name+'.parquet'),index=False)
             if name not in ('daily_ic','daily_groups'):frame.to_csv(output/(name+'.csv'),index=False)
         package=Path(__file__).resolve().parents[1]
+        symbols=list(bundle.metadata['symbols'])
+        default_proxy=set(symbols)==set(SYMBOLS)
+        universe_version=('EXPLICIT_CURRENT_ETF_LIST_NOT_PIT' if default_proxy
+                          else 'EXPLICIT_CUSTOM_SECURITY_LIST_NOT_HISTORICAL_PIT')
+        scope_flag=('ETF_PROXY_NOT_EQUITY_ALPHA' if default_proxy
+                    else 'CUSTOM_SECURITY_LIST_NOT_HISTORICAL_PIT')
         manifest.update(status='RETROSPECTIVE_EXPLORATORY_ONLY',source_provenance=bundle.metadata['source_provenance'],
             data_sha256=bundle.metadata['snapshot_sha256'],input_rows=bundle.metadata['rows'],
             factor_version=version,formula=factor.definition,experiment=protocol.model_dump(mode='json'),
             feature_rows=len(features),feature_nonnull=int(features.value.notna().sum()),
             decision_eligible_features=int(features.decision_eligible.sum()),label_rows=len(labels),
             formal_raw_label_count=int(labels.forward_return.notna().sum()),proxy_label_count=int(labels.proxy_forward_return.notna().sum()),
-            adjustment_basis=basis,flags=['EXPLORATORY','ETF_PROXY_NOT_EQUITY_ALPHA','CURRENT_VINTAGE_NOT_HISTORICAL_PIT','NOT_RAW_EXECUTION_PRICE'],
-            universe_version='EXPLICIT_CURRENT_ETF_LIST_NOT_PIT',symbols=bundle.metadata['symbols'],
+            adjustment_basis=basis,flags=['EXPLORATORY',scope_flag,'CURRENT_VINTAGE_NOT_HISTORICAL_PIT','NOT_RAW_EXECUTION_PRICE'],
+            universe_version=universe_version,symbols=symbols,
             code_sha256=hashlib.sha256(b''.join(p.relative_to(package).as_posix().encode()+p.read_bytes() for p in sorted(package.rglob('*.py')))).hexdigest())
         manifest['data_quality_flags']=manifest['flags'].copy()
         results['summary']['exposure_status']='PIT_SECTOR_SIZE_UNAVAILABLE_STYLE_LINK_NOT_EVALUATED'
