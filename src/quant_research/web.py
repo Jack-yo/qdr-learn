@@ -834,6 +834,32 @@ def handler(console):
                     return self.send(409, exc.payload())
                 except (ValueError, KeyError, OSError):
                     return self.send(409, {'status': 'BLOCKED', 'code': 'MARKET_STUDY_ARTIFACT_INVALID'})
+            if path == '/api/v1/l3/overview':
+                from .workflow.l3_overview import l3_overview
+                query=parse_qs(urlsplit(self.path).query,keep_blank_values=True)
+                try:
+                    if set(query)-{'horizon','limit'} or any(len(v)!=1 for v in query.values()):
+                        raise ValueError('Invalid L3 overview query')
+                    horizon=int(query.get('horizon',['3'])[0])
+                    limit=int(query.get('limit',['20'])[0])
+                    return self.send(200,l3_overview(console.root,horizon=horizon,limit=limit))
+                except PolicyError as exc:
+                    return self.send(409,exc.payload())
+                except (ValueError,TypeError):
+                    return self.send(400,{'status':'BLOCKED','code':'INVALID_L3_OVERVIEW_QUERY'})
+                except (OSError,KeyError,sqlite3.Error) as exc:
+                    return self.send(409,{'status':'BLOCKED','code':'L3_OVERVIEW_EVIDENCE_UNAVAILABLE',
+                                          'error_type':type(exc).__name__})
+            if path == '/api/v1/l3/active-strategy':
+                from .workflow.l3_strategy_activation import active_strategy
+                if urlsplit(self.path).query:
+                    return self.send(400,{'status':'BLOCKED','code':'INVALID_L3_ACTIVE_STRATEGY_QUERY'})
+                try:
+                    return self.send(200,active_strategy(console.root))
+                except PolicyError as exc:
+                    return self.send(409,exc.payload())
+                except (OSError,ValueError,KeyError,sqlite3.Error):
+                    return self.send(409,{'status':'BLOCKED','code':'L3_ACTIVE_STRATEGY_UNAVAILABLE'})
             if path == '/api/v1/strategies':
                 from .research.factor_lab import Registry
                 from .research.strategy import StrategyRegistry
@@ -1121,6 +1147,23 @@ def handler(console):
             if not self.allowed() or self.headers.get("X-Console-Token") != console.token:
                 return self.send(403, {"error":"Invalid token or host"})
             path=urlsplit(self.path).path
+            if path == '/api/v1/l3/active-strategy':
+                from .workflow.l3_strategy_activation import activate_strategy
+                try:
+                    length=int(self.headers.get('Content-Length','0'))
+                    if not 0<length<=8192:
+                        raise ValueError('Invalid activation request size')
+                    payload=json.loads(self.rfile.read(length))
+                    if not isinstance(payload,dict) or set(payload)!={'strategy_version_id'}:
+                        raise ValueError('Expected only strategy_version_id')
+                    return self.send(200,activate_strategy(
+                        console.root,payload['strategy_version_id']))
+                except PolicyError as exc:
+                    return self.send(409,exc.payload())
+                except (ValueError,TypeError,json.JSONDecodeError):
+                    return self.send(400,{'status':'BLOCKED','code':'INVALID_L3_STRATEGY_ACTIVATION'})
+                except (OSError,KeyError,sqlite3.Error):
+                    return self.send(409,{'status':'BLOCKED','code':'L3_STRATEGY_ACTIVATION_UNAVAILABLE'})
             if path == '/api/v1/strategies' or path.startswith('/api/v1/strategies/'):
                 from .research.strategy import StrategyRegistry
                 from .workflow.strategy_preflight import preflight
