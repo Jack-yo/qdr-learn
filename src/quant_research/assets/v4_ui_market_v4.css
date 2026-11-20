@@ -155,3 +155,63 @@
 .l1-research-warning{background:#fff7ea;border-left-color:#d6aa62;color:#82591f}
 .l1-chart-placeholder{background:linear-gradient(180deg,#f5f8fb,#fff)}
 .l1-chart-grid:after{border-color:#cfd9e2}.l1-chart-grid i{border-color:#e0e6ec}
+
+/* Modern Research UI: L1 restrained outline skin. */
+.l1-cockpit{
+ --l1-bg:#f7f8fa;--l1-card:#fff;--l1-edge:#d9dee5;--l1-faint:#667085;
+ --l1-text:#151b26;--l1-teal:#0f766e;--l1-purple:#2f6fed;--l1-yellow:#a86f1d
+}
+.l1-head{padding-bottom:18px}
+.l1-breadcrumb{color:#667085;letter-spacing:1px;font-size:9px}
+.l1-head h1{font-size:22px;color:#101828;font-weight:700;letter-spacing:-.2px}
+.l1-head h1 .l1-beta{background:#f9fafb;border-color:#e4e7ec;color:#667085;border-radius:5px}
+.l1-head p{color:#667085}
+.l1-access,.l1-refresh{border-radius:7px;box-shadow:none}
+.l1-access{background:#fffaeb;border-color:#f2dfb3;color:#7a4d0b}
+.l1-access.good{background:#ecfdf3;border-color:#cdebd8;color:#067647}
+.l1-refresh{background:#fff;border-color:#d0d5dd;color:#344054}
+.l1-topstats{
+ gap:8px;background:transparent;border:0;border-radius:0;overflow:visible
+}
+.l1-topstats .l1-mini{
+ border:1px solid #d9dee5;border-radius:9px;background:#fff;padding:14px 15px
+}
+.l1-mini span{color:#667085}.l1-mini strong{color:#101828;font-size:20px}.l1-mini small{color:#98a2b3}
+.l1-top-grid{gap:12px}
+.l1-panel{
+ background:#fff!important;border:1px solid #d9dee5!important;border-radius:9px!important;
+ box-shadow:none!important;padding:17px 18px
+}
+.l1-primary{background:#fff!important}
+.l1-eyebrow{color:#667085;letter-spacing:1px;font-size:9px}
+.l1-section-heading h2{color:#1d2939;font-size:15px;font-weight:650}
+.l1-kicker{color:#98a2b3}
+.l1-valid,.l1-caution{border-radius:6px;padding:4px 7px;font-size:10px}
+.l1-valid{background:#ecfdf3;border-color:#cdebd8;color:#067647}
+.l1-caution{background:#fffaeb;border-color:#f2dfb3;color:#7a4d0b}
+.l1-period{
+ background:#fff;border:1px solid #d9dee5;border-radius:8px;padding:3px
+}
+.l1-period button{border-radius:6px;color:#667085}
+.l1-period button.active{background:#eef4ff;color:#234fba;box-shadow:none}
+.l1-prediction-metrics{
+ gap:0;background:#fff;border:1px solid #d9dee5;border-radius:8px
+}
+.l1-prediction-metrics .l1-mini{
+ background:#fff;border:0;border-right:1px solid #eaecf0;border-radius:0
+}
+.l1-prediction-metrics .l1-mini:last-child{border-right:0}
+.l1-chart-placeholder{background:#fafbfc;border-radius:7px}
+.l1-driver-row,.l1-domain,.l1-valid-grid .l1-mini{
+ background:#fff;border:1px solid #d9dee5;border-radius:8px;box-shadow:none
+}
+.l1-driver-row:hover,.l1-domain:hover{background:#fafbfc;border-color:#cfd5dd}
+.l1-domain-icon{background:#f2f4f7;border-color:#e4e7ec;color:#475467;border-radius:5px}
+.l1-filters button{
+ background:#fff;border-color:#d0d5dd;color:#667085;border-radius:16px
+}
+.l1-filters button.active{background:#eef4ff;border-color:#c9d8ff;color:#234fba}
+.l1-replay{background:#fafbfc;border-color:#e4e7ec;border-radius:7px}
+.l1-research-warning{background:#fffaeb;border-left-color:#d6aa62;border-radius:6px}
+.l1-method{border-color:#eaecf0}.l1-method summary{color:#475467}
+.l1-bottom-note{color:#98a2b3}
