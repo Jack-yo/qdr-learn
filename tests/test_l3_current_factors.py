@@ -64,6 +64,7 @@ def _write_feature_run(root, vendor=False):
         "reference_comparison":{
             "status":("NOT_APPLICABLE_DIRECT_VENDOR_SOURCE" if vendor else "PASS")
         },
+        "vendor_source_provenance":({"verified_pages":1} if vendor else None),
         "research_only":True,"execution_ready":False,"real_orders_enabled":False,
         "artifacts_sha256":{"feature_prices.parquet":digest},
     }
