@@ -30,7 +30,7 @@ MAX_BYTES = 20 * 1024 * 1024
 # stock tickers.  Keep the validation ASCII/path-safe without discarding those
 # legitimate provider records; downstream research-symbol selection remains
 # separately strict and explicit.
-SYMBOL = re.compile(r"[A-Za-z0-9_.\-]{1,32}")
+SYMBOL = re.compile(r"(?=.{1,32}\Z)(?=.*[A-Za-z0-9])[A-Za-z0-9_.\-]+\Z")
 SHA = re.compile(r"[0-9a-f]{64}")
 
 
