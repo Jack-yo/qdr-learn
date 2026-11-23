@@ -112,10 +112,7 @@ def run(root,experiment_id,data_root=None):
         (output/'manifest.json').write_text(json.dumps(manifest,indent=2,ensure_ascii=False,allow_nan=False),encoding='utf-8')
         registry.finish(experiment_id,'COMPLETED',output.relative_to(root).as_posix())
     except Exception as exc:
-        error=exc.payload() if isinstance(exc,PolicyError) else {
-            'status':'FAILED','code':type(exc).__name__,
-            'message':f'Experiment failed; no substitute results generated: {exc}'
-        }
+        error=exc.payload() if isinstance(exc,PolicyError) else {'status':'FAILED','code':type(exc).__name__,'message':'Experiment failed; no substitute results generated'}
         manifest.update(status='BLOCKED' if isinstance(exc,PolicyError) else 'FAILED',error=error)
         if output.is_dir() and not (output/'manifest.json').exists():
             (output/'manifest.json').write_text(json.dumps(manifest,indent=2,ensure_ascii=False),encoding='utf-8')
