@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from quant_research.clock import TradingClock
 from quant_research.policy import PolicyError
 from quant_research.research.composite import compute_composite
 from quant_research.research.factor_lab import Registry
@@ -258,6 +259,9 @@ def _daily_scores(strategy_record, frames, session_date):
     output["alpha_score"] = score
     output["alpha_rank_pct"] = score.rank(method="average", pct=True)
     output = output.reset_index()
+    output["alpha_rank"] = output["alpha_score"].rank(
+        method="min", ascending=False
+    ).astype(int)
     for name in names:
         output["contribution__" + name] = output[name] * weights[name]
     return output, names
@@ -275,6 +279,156 @@ def _candidate_metadata(frames, session_date):
         raise PolicyError("L3_CANDIDATE_METADATA_DUPLICATED",
                           "Candidate metadata contains duplicate security identities")
     return current
+
+
+
+def _ranked_scores(scores):
+    """Add a deterministic ordinal rank when reading pre-rank legacy archives."""
+    if scores.empty:
+        return scores.copy()
+    output = scores.copy()
+    if "alpha_rank" not in output:
+        output["alpha_rank"] = output["alpha_score"].rank(
+            method="min", ascending=False
+        ).astype(int)
+    return output
+
+
+def _previous_session_dates(session_date, count=5):
+    """Return the immediately preceding XNYS sessions, newest first."""
+    if type(count) is not int or not 1 <= count <= 20:
+        raise ValueError("L3 signal-history session count must be 1–20")
+    clock = TradingClock()
+    calendar = clock.calendar
+    session = clock.session(session_date)
+    position = calendar.sessions.get_loc(session)
+    start = max(0, position - count)
+    return [
+        pd.Timestamp(value).date().isoformat()
+        for value in calendar.sessions[start:position][::-1]
+    ]
+
+
+def _prior_l3_scores(root, records, daily_manifest, session_date, *, count=5):
+    """Read only consecutive prior XNYS archives for the exact active strategy."""
+    from quant_research.workflow.l3_daily import read_l3_daily
+
+    expected = _previous_session_dates(session_date, count)
+    by_day = {}
+    for record in records:
+        if (record.get("status") == "FROZEN_L3_DAILY_ALPHA_RESEARCH_ONLY"
+                and record.get("strategy_version_id")
+                    == daily_manifest.get("strategy_version_id")
+                and record.get("strategy_config_sha256")
+                    == daily_manifest.get("strategy_config_sha256")
+                and record.get("session_date_et") in expected):
+            by_day.setdefault(record["session_date_et"], record)
+
+    snapshots = []
+    for day in expected:
+        record = by_day.get(day)
+        if record is None:
+            break
+        try:
+            archived = read_l3_daily(
+                root, day, record["identity"], include_scores=True
+            )
+            if (archived["manifest"].get("strategy_version_id")
+                    != daily_manifest.get("strategy_version_id")
+                    or archived["manifest"].get("strategy_config_sha256")
+                    != daily_manifest.get("strategy_config_sha256")):
+                break
+            snapshots.append((day, _ranked_scores(archived["scores"])))
+        except (OSError, ValueError, KeyError, TypeError, FileNotFoundError):
+            break
+    return snapshots
+
+
+def _attach_signal_history(candidates, current_scores, prior_snapshots, *,
+                           threshold=0.80):
+    """Derive cross-day changes from immutable daily Alpha archives.
+
+    Rank delta is positive when a security moved up. Persistence counts only
+    consecutive archived XNYS sessions in which the candidate remained above
+    the frozen cross-sectional percentile threshold.
+    """
+    if not candidates:
+        return []
+    current = _ranked_scores(current_scores)
+    current_by_id = {
+        str(row["security_id"]): row
+        for row in current.to_dict("records")
+    }
+    prior_by_session = [
+        (day, {str(row["security_id"]): row
+               for row in frame.to_dict("records")})
+        for day, frame in prior_snapshots
+    ]
+    output = []
+    for candidate in candidates:
+        row = current_by_id.get(str(candidate["security_id"]))
+        if row is None:
+            output.append({
+                **candidate, "alpha_delta": None, "rank_delta": None,
+                "previous_alpha_score": None, "previous_alpha_rank": None,
+                "signal_age_sessions": None, "signal_state": "HISTORY_UNAVAILABLE",
+                "signal_history_sessions": len(prior_by_session),
+                "previous_session_date": None,
+            })
+            continue
+
+        previous_day, previous_rows = (
+            prior_by_session[0] if prior_by_session else (None, {})
+        )
+        previous = previous_rows.get(str(candidate["security_id"]))
+        current_rank = int(row["alpha_rank"])
+        current_score = float(row["alpha_score"])
+        alpha_delta = None
+        rank_delta = None
+        previous_score = None
+        previous_rank = None
+
+        if not prior_by_session:
+            signal_state = "HISTORY_UNAVAILABLE"
+            signal_age = None
+        elif previous is None:
+            signal_state = "NEW_TO_COHORT"
+            signal_age = None
+        else:
+            previous_pct = float(previous["alpha_rank_pct"])
+            previous_score = float(previous["alpha_score"])
+            previous_rank = int(previous["alpha_rank"])
+            alpha_delta = current_score - previous_score
+            rank_delta = previous_rank - current_rank
+            if previous_pct < threshold:
+                signal_state = "NEW"
+            elif rank_delta > 0 or (rank_delta == 0 and alpha_delta > 0):
+                signal_state = "STRENGTHENING"
+            elif rank_delta < 0 or (rank_delta == 0 and alpha_delta < 0):
+                signal_state = "WEAKENING"
+            else:
+                signal_state = "PERSISTING"
+
+            signal_age = 1
+            for _, prior_rows in prior_by_session:
+                historical = prior_rows.get(str(candidate["security_id"]))
+                if historical is None or float(historical["alpha_rank_pct"]) < threshold:
+                    break
+                signal_age += 1
+
+        output.append({
+            **candidate,
+            "alpha_rank": current_rank,
+            "alpha_delta": alpha_delta,
+            "rank_delta": rank_delta,
+            "previous_alpha_score": previous_score,
+            "previous_alpha_rank": previous_rank,
+            "signal_age_sessions": signal_age,
+            "signal_state": signal_state,
+            "signal_history_sessions": len(prior_by_session),
+            "previous_session_date": previous_day,
+        })
+    return output
 
 
 def _build_candidates(scores, factor_names, meta, forecasts, variant, horizon, limit):
@@ -319,6 +473,7 @@ def _build_candidates(scores, factor_names, meta, forecasts, variant, horizon, l
             "symbol": row.get("symbol") or str(row["security_id"]),
             "sector": row.get("sector"),
             "alpha_score": _finite(row.get("alpha_score")),
+            "alpha_rank": int(row["alpha_rank"]) if _finite(row.get("alpha_rank")) is not None else None,
             "alpha_rank_pct": _finite(row.get("alpha_rank_pct")),
             "factor_percentiles": {
                 name: _finite(row.get(name)) for name in factor_names
@@ -343,17 +498,17 @@ def _build_candidates(scores, factor_names, meta, forecasts, variant, horizon, l
 
 def l3_overview(root, *, horizon=3, limit=20, section="today"):
     if (horizon not in (1, 3, 5) or type(limit) is not int or not 1 <= limit <= 50
-            or section not in {"today", "strategy", "validation"}):
+            or section not in {"today", "portfolio", "model", "strategy", "validation"}):
         raise ValueError("Invalid L3 overview horizon, limit or section")
     root = Path(root).resolve()
     blockers = []
-    factor_library = _factor_library(root, horizon) if section == "strategy" else []
+    factor_library = _factor_library(root, horizon) if section in {"strategy", "model"} else []
     activation = active_strategy(root)
     active = activation.get("strategy")
     strategy = _strategy_summary(active) if active else None
 
     strategies = []
-    if section == "strategy":
+    if section in {"strategy", "model"}:
         try:
             from quant_research.research.strategy import StrategyRegistry
             strategies = [
@@ -368,12 +523,14 @@ def l3_overview(root, *, horizon=3, limit=20, section="today"):
     ] if strategy else []
     daily_manifest = None
     daily_identity = None
+    daily_records = []
 
     if active is None:
         blockers.append("NO_ACTIVE_ALPHA_STRATEGY")
     else:
         from quant_research.workflow.l3_daily import latest_l3_daily, read_l3_daily
-        records = latest_l3_daily(root, limit=30)
+        records = latest_l3_daily(root, limit=50)
+        daily_records = records
         match = next((
             row for row in records
             if row.get("status") != "CORRUPT_L3_DAILY_ALPHA_ARCHIVE"
@@ -442,9 +599,18 @@ def l3_overview(root, *, horizon=3, limit=20, section="today"):
         scores, factor_names, pd.DataFrame(columns=["security_id"]),
         forecasts, variant, horizon, limit,
     )
+    prior_snapshots = (
+        _prior_l3_scores(root, daily_records, daily_manifest,
+                         daily_manifest["session_date_et"], count=5)
+        if daily_manifest is not None else []
+    )
+    candidates = _attach_signal_history(
+        candidates, scores, prior_snapshots,
+        threshold=float((daily_manifest or {}).get("candidate_threshold_rank_pct", .80)),
+    )
 
     validation = None
-    if (section == "validation" and active is not None
+    if (section in {"model", "validation"} and active is not None
             and active["config"].get("factor_mix")):
         try:
             composite = compute_composite(root, active["id"])
@@ -492,6 +658,11 @@ def l3_overview(root, *, horizon=3, limit=20, section="today"):
             ),
             "complete_alpha_score_count": int(len(scores)),
             "candidate_count": len(candidates),
+            "signal_history_sessions_available": len(prior_snapshots),
+            "signal_state_counts": {
+                key: sum(1 for item in candidates if item.get("signal_state") == key)
+                for key in sorted({item.get("signal_state") for item in candidates})
+            },
             "active_factor_names": factor_names,
             "forecast_factor_names": forecast_names,
             "forecast_identity": forward_identity if forecast_matched else None,
@@ -520,7 +691,7 @@ def l3_overview(root, *, horizon=3, limit=20, section="today"):
         "validation": validation,
         "outcomes": (
             latest_research_outcomes(root, limit=10).get("records", [])
-            if section == "validation" else []
+            if section in {"model", "validation"} else []
         ),
         "blockers": list(dict.fromkeys(blockers)),
         "research_only": True,
