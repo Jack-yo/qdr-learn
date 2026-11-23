@@ -128,6 +128,8 @@ def main(argv=None):
     maintain.add_argument('--env-file',type=Path)
     feature_prices=commands.add_parser('feature-price-audit',help='Audit split-only features against real SIP reference; never enables execution')
     feature_prices.add_argument('--env-file',type=Path)
+    feature_prices.add_argument('--purpose',choices=['normalization-audit','l3-forward'],default='normalization-audit',
+                                help='Strict local normalization audit or direct vendor-normalized L3 forward features')
     feature_prices.add_argument('--offline',action='store_true')
     feature_prices.add_argument('--refresh-source-responses',action='store_true',
                                 help='Fetch new action/reference vintages and retain old receipts')
@@ -139,7 +141,7 @@ def main(argv=None):
     feature_prices.add_argument('--asof')
     feature_prices.add_argument('--cutoff')
     feature_prices.add_argument('--action-start',default='2016-01-01')
-    feature_prices.add_argument('--action-end',required=True,help='Explicit action process-date coverage end')
+    feature_prices.add_argument('--action-end',help='Required for normalization-audit; explicit action process-date coverage end')
     feature_prices.add_argument('--output',type=Path,default=Path('outputs/feature_prices'))
     bundle=commands.add_parser('bundle-audit',help='Verify a real snapshot and report capability-specific blockers')
     bundle.add_argument('--source',choices=['alpaca','yahoo'],default='alpaca')

@@ -174,7 +174,15 @@ def split_reference(http, clock, symbols, start, end):
                 values = [float(bar[k]) for k in ('o','h','l','c','v')]
                 if not all(math.isfinite(v) and v > 0 for v in values):
                     raise DataUnavailable('Invalid split-reference OHLCV')
-                rows.append(dict(zip(('symbol','date','open','high','low','close','volume'), (symbol, day, *values))))
+                rows.append({
+                    'symbol':symbol,'date':day,'open':values[0],'high':values[1],
+                    'low':values[2],'close':values[3],'volume':values[4],
+                    'event_time':clock.close(day),
+                    'available_at':response.fetched_at,
+                    'ingested_at':response.fetched_at,
+                    'availability_basis':'first_observed',
+                    'raw_sha256':response.sha256,
+                })
         token = payload.get('next_page_token')
         if not token:
             break
@@ -183,6 +191,97 @@ def split_reference(http, clock, symbols, start, end):
         tokens.add(token)
         params = {**params, 'page_token': token}
     return pd.DataFrame(rows), pages
+
+
+def vendor_split_features(bundle, reference):
+    """Use the provider's own split-adjusted SIP bars as current forward features.
+
+    This path is intentionally narrower than the raw-to-adjusted normalization
+    audit.  It does not prove our corporate-action reconstruction, historical
+    PIT membership, total-return labels, or execution prices.  It only admits
+    the exact vendor-normalized bars whose immutable response receipts are
+    already present in the raw cache.
+    """
+    if not isinstance(reference, pd.DataFrame) or reference.empty:
+        raise PolicyError('VENDOR_SPLIT_REFERENCE_MISSING',
+                          'Vendor split-adjusted feature reference is empty')
+    required = {
+        'symbol','date','open','high','low','close','volume','event_time',
+        'available_at','ingested_at','availability_basis','raw_sha256',
+    }
+    if required - set(reference):
+        raise PolicyError('VENDOR_SPLIT_REFERENCE_SCHEMA_INVALID',
+                          'Vendor split-adjusted feature rows lack provenance fields')
+    ref = reference.copy()
+    ref['date'] = pd.to_datetime(ref['date'])
+    if ref.duplicated(['symbol','date']).any():
+        raise PolicyError('VENDOR_SPLIT_REFERENCE_DUPLICATED',
+                          'Vendor split-adjusted rows contain duplicate symbol/date keys')
+    if ref['raw_sha256'].astype(str).str.fullmatch(r'[0-9a-f]{64}').eq(False).any():
+        raise PolicyError('VENDOR_SPLIT_REFERENCE_PROVENANCE_INVALID',
+                          'Vendor split-adjusted rows lack valid response hashes')
+    raw = bundle.prices
+    mapping = raw[['symbol','security_id']].drop_duplicates()
+    if mapping.symbol.duplicated().any() or mapping.security_id.duplicated().any():
+        raise PolicyError('VENDOR_SPLIT_IDENTITY_AMBIGUOUS',
+                          'Current raw bundle does not provide a one-to-one symbol identity map')
+    identity = mapping.set_index('symbol').security_id.to_dict()
+    requested = set(bundle.metadata['symbols'])
+    if set(ref.symbol) - requested:
+        raise PolicyError('VENDOR_SPLIT_REFERENCE_SYMBOL_MISMATCH',
+                          'Vendor split-adjusted response contains an unrequested symbol')
+    anchor = pd.Timestamp(bundle.metadata['asof_date_et'])
+    current = ref.loc[ref.date.eq(anchor)]
+    if set(current.symbol) != requested or len(current) != len(requested):
+        raise PolicyError('VENDOR_SPLIT_REFERENCE_CURRENT_COVERAGE',
+                          'Vendor split-adjusted bars do not cover the full requested current session')
+    if not set(ref.symbol).issubset(identity):
+        raise PolicyError('VENDOR_SPLIT_IDENTITY_MISSING',
+                          'Vendor split-adjusted symbol has no matching observed raw identity')
+    cutoff = pd.Timestamp(bundle.metadata['knowledge_cutoff_utc'])
+    if cutoff.tzinfo is None:
+        raise PolicyError('VENDOR_SPLIT_CUTOFF_INVALID',
+                          'Current feature cutoff must be timezone-aware')
+    cutoff = cutoff.tz_convert('UTC')
+    available = pd.to_datetime(ref.available_at, utc=True)
+    ingested = pd.to_datetime(ref.ingested_at, utc=True)
+    events = pd.to_datetime(ref.event_time, utc=True)
+    if (available.gt(cutoff).any() or ingested.lt(available).any()
+            or available.lt(events).any()):
+        raise PolicyError('VENDOR_SPLIT_AVAILABILITY_INVALID',
+                          'Vendor split-adjusted bars violate source/cutoff time ordering')
+    ref['security_id'] = ref.symbol.map(identity)
+    ref['source'] = 'ALPACA'
+    ref['feed'] = 'sip'
+    ref['adjustment_basis'] = 'vendor_split_adjusted_price_proxy'
+    ref['quality_flag'] = (
+        'REAL|ALPACA_VENDOR_SPLIT_ADJUSTED|CURRENT_FORWARD_RESEARCH_ONLY|'
+        'NOT_TOTAL_RETURN|NOT_EXECUTION_PRICE|HISTORICAL_PIT_UNVERIFIED'
+    )
+    prices = ref[[
+        'date','security_id','symbol','open','high','low','close','volume',
+        'event_time','available_at','ingested_at','availability_basis',
+        'raw_sha256','source','feed','adjustment_basis','quality_flag',
+    ]].sort_values(['security_id','date']).reset_index(drop=True)
+    metadata = {
+        'source':'ALPACA','feed':'sip',
+        'adjustment_basis':'vendor_split_adjusted_price_proxy',
+        'anchor_date_et':str(anchor.date()),
+        'rows':len(prices),'symbols':sorted(requested),
+        'raw_snapshot_sha256':bundle.metadata['snapshot_sha256'],
+        'feature_snapshot_sha256':frame_hash(prices),
+        'source_version_kind':'current_vendor_normalized_snapshot',
+        'historical_decision_eligible':False,
+        'research_grade':False,'execution_ready':False,'real_orders_enabled':False,
+        'limitations':[
+            'VENDOR_NATIVE_SPLIT_ADJUSTMENT_NOT_LOCAL_NORMALIZATION_PROOF',
+            'PRICE_RETURN_PROXY_NOT_TOTAL_RETURN',
+            'HISTORICAL_PIT_UNIVERSE_UNVERIFIED',
+            'PERMANENT_IDENTITIES_UNVERIFIED',
+            'NOT_EXECUTION_PRICE',
+        ],
+    }
+    return FeaturePrices(prices, metadata)
 
 
 def compare_reference(features, reference):

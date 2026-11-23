@@ -9,10 +9,71 @@ import pandas as pd
 import pytest
 
 from quant_research.data.bundle import load_real_bundle, frame_hash, verify_lineage
-from quant_research.data.feature_prices import build_split_prices, compare_reference, split_reference, TOLERANCES
+from quant_research.data.feature_prices import (
+    TOLERANCES, build_split_prices, compare_reference, split_reference,
+    vendor_split_features,
+)
 from quant_research.data.http import HttpCache, DataUnavailable
 from quant_research.clock import TradingClock
 from quant_research.policy import PolicyError
+
+
+
+def test_vendor_split_features_are_forward_research_only():
+    rows = []
+    for day in pd.to_datetime(['2026-11-19','2026-11-20']):
+        for symbol in ('SPY','AAA'):
+            rows.append({
+                'symbol':symbol,'date':day,'open':100.,'high':101.,'low':99.,
+                'close':100.5,'volume':1000000.,
+                'event_time':pd.Timestamp(day).tz_localize('America/New_York').tz_convert('UTC') + pd.Timedelta(hours=16),
+                'available_at':pd.Timestamp('2026-11-20T22:00:00Z'),
+                'ingested_at':pd.Timestamp('2026-11-20T22:00:00Z'),
+                'availability_basis':'first_observed','raw_sha256':'a'*64,
+            })
+    raw = pd.DataFrame([
+        {'symbol':'SPY','security_id':'SID-SPY'},
+        {'symbol':'AAA','security_id':'SID-AAA'},
+    ])
+    bundle = SimpleNamespace(
+        prices=raw,
+        metadata={
+            'symbols':['SPY','AAA'],'asof_date_et':'2026-11-20',
+            'knowledge_cutoff_utc':'2026-11-20T22:00:00+00:00',
+            'snapshot_sha256':'b'*64,
+        },
+    )
+    features = vendor_split_features(bundle, pd.DataFrame(rows))
+    frame = features.prices
+    assert set(frame.adjustment_basis) == {'vendor_split_adjusted_price_proxy'}
+    assert set(frame.source) == {'ALPACA'} and set(frame.feed) == {'sip'}
+    assert features.metadata['historical_decision_eligible'] is False
+    assert features.metadata['execution_ready'] is False
+    assert features.metadata['real_orders_enabled'] is False
+
+
+def test_vendor_split_features_require_complete_current_session():
+    reference = pd.DataFrame([{
+        'symbol':'SPY','date':pd.Timestamp('2026-11-20'),
+        'open':100.,'high':101.,'low':99.,'close':100.5,'volume':1000000.,
+        'event_time':pd.Timestamp('2026-11-20T21:00:00Z'),
+        'available_at':pd.Timestamp('2026-11-20T22:00:00Z'),
+        'ingested_at':pd.Timestamp('2026-11-20T22:00:00Z'),
+        'availability_basis':'first_observed','raw_sha256':'a'*64,
+    }])
+    bundle = SimpleNamespace(
+        prices=pd.DataFrame([
+            {'symbol':'SPY','security_id':'SID-SPY'},
+            {'symbol':'AAA','security_id':'SID-AAA'},
+        ]),
+        metadata={
+            'symbols':['SPY','AAA'],'asof_date_et':'2026-11-20',
+            'knowledge_cutoff_utc':'2026-11-20T22:00:00+00:00',
+            'snapshot_sha256':'b'*64,
+        },
+    )
+    with pytest.raises(PolicyError, match='full requested current session'):
+        vendor_split_features(bundle, reference)
 
 
 def test_reference_refresh_cannot_claim_offline_source():

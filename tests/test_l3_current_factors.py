@@ -7,6 +7,7 @@ import pytest
 
 from quant_research.clock import TradingClock
 from quant_research.features.factors import FunctionalFactor
+from quant_research.policy import PolicyError
 from quant_research.workflow import l3_current_factors
 from quant_research.workflow import l3_daily
 
@@ -29,7 +30,7 @@ def _strategy():
     }
 
 
-def _write_feature_run(root):
+def _write_feature_run(root, vendor=False):
     clock=TradingClock()
     sessions=clock.calendar.sessions_in_range("2026-09-15",DAY)[-30:]
     rows=[]
@@ -42,7 +43,7 @@ def _write_feature_run(root):
                 "open":close-.2,"high":close+.8,"low":close-.7,"close":close,
                 "volume":1_000_000+j*50_000,"available_at":pd.Timestamp(CUTOFF),
                 "source":"ALPACA","feed":"sip",
-                "adjustment_basis":"split_adjusted_price_proxy",
+                "adjustment_basis":("vendor_split_adjusted_price_proxy" if vendor else "split_adjusted_price_proxy"),
                 "raw_sha256":"a"*64,"quality_flag":"REAL",
             })
     folder=root/"outputs/feature_prices/run-1"
@@ -52,12 +53,18 @@ def _write_feature_run(root):
     prices.to_parquet(path,index=False)
     digest=hashlib.sha256(path.read_bytes()).hexdigest()
     manifest={
-        "status":"NORMALIZATION_VERIFIED_CURRENT_VINTAGE",
+        "status":("FORWARD_VENDOR_SPLIT_FEATURES_VERIFIED_CURRENT_VINTAGE" if vendor
+                  else "NORMALIZATION_VERIFIED_CURRENT_VINTAGE"),
+        "purpose":("l3-forward" if vendor else "normalization-audit"),
         "source":"ALPACA","feed":"sip",
-        "adjustment_basis":"split_adjusted_price_proxy",
+        "adjustment_basis":("vendor_split_adjusted_price_proxy" if vendor
+                            else "split_adjusted_price_proxy"),
         "anchor_date_et":DAY,"knowledge_cutoff_utc":CUTOFF,
         "raw_snapshot_sha256":"c"*64,"feature_snapshot_sha256":"d"*64,
-        "reference_comparison":{"status":"PASS"},
+        "reference_comparison":{
+            "status":("NOT_APPLICABLE_DIRECT_VENDOR_SOURCE" if vendor else "PASS")
+        },
+        "research_only":True,"execution_ready":False,"real_orders_enabled":False,
         "artifacts_sha256":{"feature_prices.parquet":digest},
     }
     (folder/"manifest.json").write_text(json.dumps(manifest),encoding="utf-8")
@@ -102,3 +109,27 @@ def test_current_factor_snapshot_and_daily_rank_are_immutable(tmp_path,monkeypat
     with pytest.raises(ValueError,match="SHA256"):
         l3_current_factors.read_current_factor_snapshot(
             tmp_path,DAY,snap["manifest"]["identity"],include_frames=True)
+
+
+
+def test_vendor_native_forward_feature_run_is_admitted(tmp_path):
+    _write_feature_run(tmp_path, vendor=True)
+    run_id, manifest, path = l3_current_factors._feature_run(
+        tmp_path, DAY, "run-1"
+    )
+    assert run_id == "run-1"
+    assert path.is_file()
+    assert manifest["status"] == "FORWARD_VENDOR_SPLIT_FEATURES_VERIFIED_CURRENT_VINTAGE"
+    assert manifest["reference_comparison"]["status"] == "NOT_APPLICABLE_DIRECT_VENDOR_SOURCE"
+
+
+
+def test_blocked_local_normalization_is_not_admitted_to_l3(tmp_path):
+    folder = _write_feature_run(tmp_path)
+    manifest_path = folder / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["status"] = "BLOCKED"
+    manifest["reference_comparison"] = {"status":"BLOCKED"}
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(PolicyError, match="No verified split-adjusted feature-price run"):
+        l3_current_factors._feature_run(tmp_path, DAY, "run-1")

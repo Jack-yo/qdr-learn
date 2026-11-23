@@ -60,12 +60,30 @@ def _feature_run(root, session_date, run_id=None):
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             artifacts = manifest.get("artifacts_sha256") or {}
-            if (manifest.get("status") != "NORMALIZATION_VERIFIED_CURRENT_VINTAGE"
+            strict_normalization = (
+                manifest.get("status") == "NORMALIZATION_VERIFIED_CURRENT_VINTAGE"
+                and manifest.get("adjustment_basis") == "split_adjusted_price_proxy"
+                and (manifest.get("reference_comparison") or {}).get("status") == "PASS"
+            )
+            vendor_forward = (
+                manifest.get("status")
+                == "FORWARD_VENDOR_SPLIT_FEATURES_VERIFIED_CURRENT_VINTAGE"
+                and manifest.get("purpose") == "l3-forward"
+                and manifest.get("adjustment_basis")
+                    == "vendor_split_adjusted_price_proxy"
+                and (manifest.get("reference_comparison") or {}).get("status")
+                    == "NOT_APPLICABLE_DIRECT_VENDOR_SOURCE"
+                and manifest.get("research_only") is True
+                and manifest.get("execution_ready") is False
+                and manifest.get("real_orders_enabled") is False
+                and isinstance(manifest.get("vendor_source_provenance"), dict)
+                and int((manifest.get("vendor_source_provenance") or {}).get(
+                    "verified_pages", 0)) > 0
+            )
+            if ((not strict_normalization and not vendor_forward)
                     or manifest.get("source") != "ALPACA"
                     or manifest.get("feed") != "sip"
-                    or manifest.get("adjustment_basis") != "split_adjusted_price_proxy"
                     or manifest.get("anchor_date_et") != session_date
-                    or (manifest.get("reference_comparison") or {}).get("status") != "PASS"
                     or artifacts.get("feature_prices.parquet") != _file_hash(prices_path)):
                 continue
             return folder.name, manifest, prices_path
@@ -150,12 +168,26 @@ def _current_liquidity(context, session):
     return close.loc[day], adv.loc[day], atr.loc[day]
 
 
+
+def _feature_source_snapshot(manifest):
+    digest = manifest.get("feature_source_snapshot_sha256") or manifest.get(
+        "raw_snapshot_sha256"
+    )
+    if not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest):
+        raise PolicyError(
+            "L3_FEATURE_SOURCE_SNAPSHOT_INVALID",
+            "Feature-price evidence has no valid source snapshot digest",
+        )
+    return digest
+
+
 def _snapshot_identity(session_date, strategy, feature_manifest):
     payload = {
         "schema": _SCHEMA,
         "session_date_et": session_date,
         "strategy_version_id": strategy["id"],
         "strategy_config_sha256": strategy["config_sha256"],
+        "source_snapshot_sha256": _feature_source_snapshot(feature_manifest),
         "raw_snapshot_sha256": feature_manifest["raw_snapshot_sha256"],
         "feature_snapshot_sha256": feature_manifest["feature_snapshot_sha256"],
         "knowledge_cutoff_utc": feature_manifest["knowledge_cutoff_utc"],
@@ -295,7 +327,7 @@ def build_current_factor_snapshot(root, *, session_date, feature_run_id=None):
                 if pd.notna(current_adv.get(sid)) else None
             ),
             "available_at": pd.Timestamp(availability.loc[sid]),
-            "source_snapshot_sha256": feature_manifest["raw_snapshot_sha256"],
+            "source_snapshot_sha256": _feature_source_snapshot(feature_manifest),
         })
     candidate_meta = pd.DataFrame(metadata)
 
@@ -325,9 +357,11 @@ def build_current_factor_snapshot(root, *, session_date, feature_run_id=None):
             "strategy_version_id": strategy["id"],
             "strategy_config_sha256": strategy["config_sha256"],
             "feature_price_run_id": run_id,
+            "feature_price_status": feature_manifest["status"],
+            "feature_adjustment_basis": feature_manifest["adjustment_basis"],
             "raw_snapshot_sha256": feature_manifest["raw_snapshot_sha256"],
             "feature_snapshot_sha256": feature_manifest["feature_snapshot_sha256"],
-            "source_snapshot_sha256": feature_manifest["raw_snapshot_sha256"],
+            "source_snapshot_sha256": _feature_source_snapshot(feature_manifest),
             "factor_names": factor_names,
             "source_symbols": sorted(set(selected_prices.symbol)),
             "liquidity_eligible_count": len(eligible_ids),
@@ -342,6 +376,7 @@ def build_current_factor_snapshot(root, *, session_date, feature_run_id=None):
             "limitations": [
                 "CURRENT_FORWARD_COHORT_NOT_HISTORICAL_PIT_UNIVERSE",
                 "SECURITY_TYPE_NOT_INDEPENDENTLY_VERIFIED_IN_FEATURE_PRICE_AUDIT",
+                "VENDOR_SPLIT_ADJUSTED_FEATURES_ARE_NOT_EXECUTION_PRICES",
                 "NO_H1_H3_H5_RETURN_FORECAST_IN_THIS_SNAPSHOT",
             ],
         }
