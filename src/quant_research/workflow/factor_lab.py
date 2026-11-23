@@ -10,7 +10,7 @@ from quant_research.clock import TradingClock
 from quant_research.data.bundle import load_real_bundle
 from quant_research.features.context import make_context
 from quant_research.features.engine import compute_features
-from quant_research.policy import PolicyError
+from quant_research.policy import PolicyError, SYMBOLS
 from quant_research.reports.factors import render_report
 from quant_research.research.evaluate import evaluate
 from quant_research.research.experiment import Experiment,load_experiment
