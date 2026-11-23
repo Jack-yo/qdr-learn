@@ -343,11 +343,22 @@ pages.screen=async()=>{
  }};
 };
 function mountTabs(){
- document.querySelectorAll('[data-l3-tab]').forEach(btn=>btn.addEventListener('click',()=>{
+ const tabs=[...document.querySelectorAll('[data-l3-tab]')];
+ const activate=btn=>{
   const key=btn.dataset.l3Tab;
   if(key==='research'){state.l3Tab='research';go('lab');return;}
   state.l3Tab=key;show('screen');
- }));
+ };
+ tabs.forEach((btn,index)=>{
+  btn.addEventListener('click',()=>activate(btn));
+  btn.addEventListener('keydown',event=>{
+   if(!['ArrowRight','ArrowLeft','Home','End'].includes(event.key))return;
+   event.preventDefault();
+   const next=event.key==='Home'?0:event.key==='End'?tabs.length-1:
+    (index+(event.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;
+   tabs[next].focus();activate(tabs[next]);
+  });
+ });
 }
 function mountCommon(){
  document.querySelectorAll('[data-l3-h]').forEach(btn=>btn.addEventListener('click',()=>{
