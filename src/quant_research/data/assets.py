@@ -24,7 +24,13 @@ ENDPOINTS = {
 }
 SCHEMA = "ALPACA_ASSETS_OBSERVED_V1"
 MAX_BYTES = 20 * 1024 * 1024
-SYMBOL = re.compile(r"[A-Z][A-Z0-9.\-]{0,19}")
+# Alpaca's ``us_equity`` catalogue includes provider identifiers such as
+# CUSIP-like ``98400U111`` and retained symbols such as ``VEAC_DELISTED``.
+# They are archived as current vendor identifiers, not classified as common
+# stock tickers.  Keep the validation ASCII/path-safe without discarding those
+# legitimate provider records; downstream research-symbol selection remains
+# separately strict and explicit.
+SYMBOL = re.compile(r"[A-Za-z0-9_.\-]{1,32}")
 SHA = re.compile(r"[0-9a-f]{64}")
 
 

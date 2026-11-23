@@ -10,6 +10,24 @@ from quant_research.data.assets import (
 from quant_research.policy import PolicyError
 
 
+def test_observed_us_equity_catalog_accepts_provider_numeric_leading_symbol():
+    payload = [{
+        'id': '5375e9fa-3ada-4ed2-a5fb-eb774fea22f4',
+        'symbol': '98400U111', 'class': 'us_equity', 'status': 'active',
+        'tradable': True, 'exchange': 'NYSE',
+    }]
+    assert _validate_payload(json.dumps(payload).encode()) == payload
+
+
+def test_observed_us_equity_catalog_accepts_retained_provider_symbol():
+    payload = [{
+        'id': '5375e9fa-3ada-4ed2-a5fb-eb774fea22f4',
+        'symbol': 'VEAC_DELISTED', 'class': 'us_equity', 'status': 'inactive',
+        'tradable': False, 'exchange': 'NYSE',
+    }]
+    assert _validate_payload(json.dumps(payload).encode()) == payload
+
+
 def test_unconfigured_api_never_fetches_or_fabricates(tmp_path, monkeypatch):
     monkeypatch.delenv('ALPACA_API_KEY', raising=False)
     monkeypatch.delenv('ALPACA_SECRET_KEY', raising=False)
