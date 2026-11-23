@@ -47,8 +47,14 @@ def test_daily_alpha_score_is_weighted_cross_sectional_rank():
     assert names==["reversal","relative_strength"]
     aaa=scores.loc[scores.security_id.eq("AAA")].iloc[0]
     bbb=scores.loc[scores.security_id.eq("BBB")].iloc[0]
-    assert aaa.alpha_score > bbb.alpha_score
-    assert aaa.alpha_rank_pct==1.0
+    # AAA leads the 60%-weighted reversal factor, but BBB's 100th-percentile
+    # relative-strength rank outweighs that 20-point reversal-rank gap under
+    # the declared 60% / 40% allocation.  Assert the actual weighted ranks
+    # rather than an ordering that contradicts the fixture's own weights.
+    assert aaa.alpha_score == pytest.approx(.84)
+    assert bbb.alpha_score == pytest.approx(.88)
+    assert bbb.alpha_score > aaa.alpha_score
+    assert bbb.alpha_rank_pct==1.0
     assert scores.alpha_score.between(0,1).all()
 
 

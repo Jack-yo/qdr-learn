@@ -10,7 +10,7 @@ from quant_research.clock import TradingClock
 from quant_research.data.bundle import load_real_bundle
 from quant_research.features.context import make_context
 from quant_research.features.engine import compute_features
-from quant_research.policy import PolicyError
+from quant_research.policy import PolicyError, SYMBOLS
 from quant_research.reports.factors import render_report
 from quant_research.research.evaluate import evaluate
 from quant_research.research.experiment import Experiment,load_experiment
@@ -112,7 +112,10 @@ def run(root,experiment_id,data_root=None):
         (output/'manifest.json').write_text(json.dumps(manifest,indent=2,ensure_ascii=False,allow_nan=False),encoding='utf-8')
         registry.finish(experiment_id,'COMPLETED',output.relative_to(root).as_posix())
     except Exception as exc:
-        error=exc.payload() if isinstance(exc,PolicyError) else {'status':'FAILED','code':type(exc).__name__,'message':'Experiment failed; no substitute results generated'}
+        error=exc.payload() if isinstance(exc,PolicyError) else {
+            'status':'FAILED','code':type(exc).__name__,
+            'message':f'Experiment failed; no substitute results generated: {exc}'
+        }
         manifest.update(status='BLOCKED' if isinstance(exc,PolicyError) else 'FAILED',error=error)
         if output.is_dir() and not (output/'manifest.json').exists():
             (output/'manifest.json').write_text(json.dumps(manifest,indent=2,ensure_ascii=False),encoding='utf-8')
