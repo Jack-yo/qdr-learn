@@ -223,7 +223,7 @@ def action_commands(action,source='yahoo',database=None):
     raise ValueError("Unknown action")
 
 
-class Console:
+class _LegacyConsole:
     def __init__(self, root,source='alpaca',database=None):
         self.root = root.resolve()
         self.source,self.database=source,database or self.root/('data/real_v21.duckdb' if source=='alpaca' else 'data/research.duckdb')
@@ -289,6 +289,21 @@ class Console:
             self.lock.release()
 
 
+# The public console uses the extracted services.  The legacy implementation
+# remains temporarily below only to keep this mechanical extraction easy to
+# review; it is not instantiated by ``main`` or exported as ``Console``.
+from .app.services.data_queries import (
+    PRIVATE_OUTPUTS,
+    action_commands,
+    allowed_artifact,
+    feature_evidence,
+    market_research,
+    snapshot,
+)
+from .app.services.task_runner import TaskRunner as Console
+from .app.routes import data_api
+
+
 def handler(console):
     class Handler(BaseHTTPRequestHandler):
         def send(self, code, body, mime="application/json; charset=utf-8"):
@@ -306,7 +321,12 @@ def handler(console):
 
         def do_GET(self):
             if not self.allowed(): return self.send(403, {"error":"Invalid host"})
-            path = unquote(urlsplit(self.path).path)
+            split = urlsplit(self.path)
+            path = unquote(split.path)
+            routed = data_api.handle(path, split.query, console)
+            if routed is not None:
+                code, body, *mime = routed
+                return self.send(code, body, mime[0] if mime else "application/json; charset=utf-8")
             if path in {"/","/studio"}:
                 html = Path(__file__).with_name("v4_shell.html").read_text(encoding="utf-8").replace("__TOKEN__", console.token)
                 return self.send(200, html.encode("utf-8"), "text/html; charset=utf-8")

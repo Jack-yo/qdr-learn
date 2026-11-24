@@ -1,6 +1,7 @@
 """Single authoritative signal/entry/exit clock."""
+
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import exchange_calendars as xcals
 import pandas as pd
@@ -9,7 +10,7 @@ import pandas as pd
 def utc(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("Timezone-aware timestamp required")
-    return value.astimezone(timezone.utc)
+    return value.astimezone(UTC)
 
 
 @dataclass(frozen=True)
@@ -40,7 +41,7 @@ class TradingClock:
 
     def signal(self, day, now=None):
         signal = self.close(day) + self.delay
-        if signal > utc(now or datetime.now(timezone.utc)):
+        if signal > utc(now or datetime.now(UTC)):
             raise ValueError("Session has not closed or signal delay has not elapsed")
         return signal
 

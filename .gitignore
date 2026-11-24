@@ -2,9 +2,27 @@
 .uv-cache/
 .playwright-browsers/
 __pycache__/
-.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.pyc
+*.pyo
 *.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
 .env
 /data/
 /outputs/
+*.tar.gz
 !.env.example
+
+# Codex / AI assistant logs
+codex-*.log
+codex-*.stderr.log
+codex-*.stdout.log
+.codex_*/
+
+# IDE
+.vscode/
+.idea/
+*.swp

@@ -1,7 +1,9 @@
 """Validated P0 contracts; event time is distinct from knowledge time."""
+
+from collections.abc import Sequence
 from datetime import date, datetime
 from math import isfinite
-from typing import Literal, Sequence
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
