@@ -1,0 +1,57 @@
+:root {
+  --el-color-primary: #409eff;
+  --qdr-bg-page: #f5f7fa;
+  --qdr-up-us: #16a34a;
+  --qdr-down-us: #dc2626;
+  --qdr-up-cn: #dc2626;
+  --qdr-down-cn: #16a34a;
+  --qdr-warn: #d97706;
+  --qdr-danger: #dc2626;
+  --qdr-ok: #16a34a;
+  --qdr-primary: #2563eb;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--qdr-bg-page);
+  color: #1f2937;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.tabular-nums { font-variant-numeric: tabular-nums; }
+.page-header {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 14px;
+}
+.page-title { margin: 0; font-size: 18px; font-weight: 600; color: #111827; }
+
+.num-strong { font-weight: 600; font-variant-numeric: tabular-nums; }
+.num-up-us { color: var(--qdr-up-us); font-weight: 600; }
+.num-down-us { color: var(--qdr-down-us); font-weight: 600; }
+.num-up-cn { color: var(--qdr-up-cn); font-weight: 600; }
+.num-down-cn { color: var(--qdr-down-cn); font-weight: 600; }
+.num-neutral { color: #6b7280; font-weight: 500; }
+.num-primary { color: var(--qdr-primary); font-weight: 600; }
+.num-warn { color: var(--qdr-warn); font-weight: 600; }
+.num-danger { color: var(--qdr-danger); font-weight: 600; }
+.num-ok { color: var(--qdr-ok); font-weight: 600; }
+
+.kpi-card { position: relative; overflow: hidden; }
+.kpi-label { font-size: 12px; color: #6b7280; margin-bottom: 6px; }
+.kpi-value { font-size: 24px; line-height: 1.2; font-weight: 700; font-variant-numeric: tabular-nums; color: #111827; }
+.kpi-sub { margin-top: 6px; font-size: 12px; color: #6b7280; }
+.kpi-accent-bar { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
+
+.chart-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.chart-card-title { font-size: 14px; font-weight: 600; color: #111827; }
+
+.prob-cell { display: flex; align-items: center; gap: 8px; }
+.prob-bar-bg { flex: 1; height: 6px; border-radius: 999px; background: #e5e7eb; overflow: hidden; min-width: 48px; }
+.prob-bar-fill { height: 100%; border-radius: 999px; }
+
+.corr-cell {
+  display: inline-block; min-width: 52px; text-align: center;
+  padding: 2px 6px; border-radius: 4px; font-family: ui-monospace, monospace; font-size: 12px; font-weight: 600;
+}

@@ -26,3 +26,9 @@ codex-*.stdout.log
 .vscode/
 .idea/
 *.swp
+
+# Local Vue frontend dependencies and build preparation
+frontend/node_modules/
+.frontend-archive-overlay-*/
+logs/web-8766.*.log
+
